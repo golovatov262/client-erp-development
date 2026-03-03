@@ -3536,6 +3536,7 @@ def handle_cabinet(method, params, body, headers, cur):
         saving['total_daily_accrued'] = float(row[0])
         saving['last_accrual_date'] = str(row[1]) if row[1] else None
         saving['interest_payouts'] = query_rows(cur, "SELECT id, transaction_date, amount, description FROM savings_transactions WHERE saving_id=%s AND transaction_type='interest_payout' ORDER BY transaction_date DESC" % saving_id)
+        saving['transactions'] = query_rows(cur, "SELECT id, transaction_date, amount, transaction_type, description FROM savings_transactions WHERE saving_id=%s AND transaction_type IN ('deposit','withdrawal') ORDER BY transaction_date DESC" % saving_id)
         return saving
 
     return {'error': 'Неизвестное действие'}

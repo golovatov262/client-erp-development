@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem, InterestPayout } from "@/lib/api";
+import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem, InterestPayout, SavingTransaction } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
 
@@ -556,8 +556,9 @@ const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
 
     <Tabs defaultValue="payouts">
       <TabsList className="w-full flex">
-        <TabsTrigger value="payouts" className="flex-1 text-xs sm:text-sm">Выплаты % ({saving.interest_payouts?.length || 0})</TabsTrigger>
-        <TabsTrigger value="schedule" className="flex-1 text-xs sm:text-sm">Плановый график</TabsTrigger>
+        <TabsTrigger value="payouts" className="flex-1 text-xs sm:text-sm">Выплаты %</TabsTrigger>
+        <TabsTrigger value="operations" className="flex-1 text-xs sm:text-sm">Операции</TabsTrigger>
+        <TabsTrigger value="schedule" className="flex-1 text-xs sm:text-sm">График</TabsTrigger>
       </TabsList>
 
       <TabsContent value="payouts" className="mt-3">
@@ -602,6 +603,44 @@ const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
                 <span className="text-xs text-muted-foreground">Итого выплачено</span>
                 <span className="text-sm text-green-600">{fmt(saving.interest_payouts.reduce((s: number, p: InterestPayout) => s + p.amount, 0))}</span>
               </div>
+            </div>
+          </>
+        )}
+      </TabsContent>
+
+      <TabsContent value="operations" className="mt-3">
+        {!saving.transactions?.length ? (
+          <Card className="p-6 text-center text-muted-foreground text-sm">Пополнений и изъятий не было</Card>
+        ) : (
+          <>
+            <div className="hidden sm:block overflow-x-auto max-h-80 overflow-y-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 sticky top-0"><tr className="text-xs text-muted-foreground">
+                  <th className="text-left py-2 px-3">Дата</th>
+                  <th className="text-left py-2 px-3">Тип</th>
+                  <th className="text-right py-2 px-3">Сумма</th>
+                  <th className="text-left py-2 px-3">Примечание</th>
+                </tr></thead>
+                <tbody>{saving.transactions.map((t: SavingTransaction) => (
+                  <tr key={t.id} className="border-t hover:bg-muted/30">
+                    <td className="py-2 px-3">{fmtDate(t.transaction_date)}</td>
+                    <td className="py-2 px-3">{t.transaction_type === "deposit" ? "Пополнение" : "Изъятие"}</td>
+                    <td className={`py-2 px-3 text-right font-medium ${t.transaction_type === "deposit" ? "text-green-600" : "text-red-600"}`}>{t.transaction_type === "deposit" ? "+" : "−"}{fmt(Math.abs(t.amount))}</td>
+                    <td className="py-2 px-3 text-muted-foreground">{t.description || "—"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <div className="sm:hidden space-y-2 max-h-[60vh] overflow-y-auto">
+              {saving.transactions.map((t: SavingTransaction) => (
+                <div key={t.id} className="py-2 border-b border-muted/40 last:border-0">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">{fmtDate(t.transaction_date)} · {t.transaction_type === "deposit" ? "Пополнение" : "Изъятие"}</span>
+                    <span className={`text-sm font-medium ${t.transaction_type === "deposit" ? "text-green-600" : "text-red-600"}`}>{t.transaction_type === "deposit" ? "+" : "−"}{fmt(Math.abs(t.amount))}</span>
+                  </div>
+                  {t.description && <div className="text-xs text-muted-foreground mt-0.5">{t.description}</div>}
+                </div>
+              ))}
             </div>
           </>
         )}
