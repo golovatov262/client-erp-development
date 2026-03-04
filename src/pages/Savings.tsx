@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +73,7 @@ const Savings = () => {
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" });
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: "", min_balance_pct: "", org_id: "" });
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
     setLoading(true);
@@ -79,6 +81,14 @@ const Savings = () => {
     api.organizations.list().then(setOrgs).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (openId && !showDetail) {
+      setSearchParams({}, { replace: true });
+      api.savings.get(Number(openId)).then(d => { setDetail(d); setShowDetail(true); }).catch(() => {});
+    }
+  }, [searchParams]);
 
   const filtered = items.filter(s => {
     const matchSearch = s.contract_no?.toLowerCase().includes(search.toLowerCase()) || s.member_name?.toLowerCase().includes(search.toLowerCase());

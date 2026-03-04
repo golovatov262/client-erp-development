@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,7 @@ const Loans = () => {
   const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
   const [showReconciliation, setShowReconciliation] = useState(false);
   const [showEditLoan, setShowEditLoan] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
     setLoading(true);
@@ -83,6 +85,14 @@ const Loans = () => {
     api.organizations.list().then(setOrgs).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (openId && !showDetail) {
+      setSearchParams({}, { replace: true });
+      api.loans.get(Number(openId)).then(d => { setDetail(d); setShowDetail(true); }).catch(() => {});
+    }
+  }, [searchParams]);
 
   const filtered = loans.filter(l => {
     const matchSearch = l.contract_no?.toLowerCase().includes(search.toLowerCase()) || l.member_name?.toLowerCase().includes(search.toLowerCase());

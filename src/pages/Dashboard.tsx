@@ -166,7 +166,7 @@ const Dashboard = () => {
               <Card
                 key={item.loan_id}
                 className="p-4 border-red-200 bg-red-50/50 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => navigate("/loans")}
+                onClick={() => navigate(`/loans?open=${item.loan_id}`)}
               >
                 <div className="flex items-start justify-between mb-2">
                   <div>
@@ -234,7 +234,7 @@ const Dashboard = () => {
                 <Card
                   key={item.saving_id}
                   className="p-4 border-amber-200 bg-amber-50/50 hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => navigate("/savings")}
+                  onClick={() => navigate(`/savings?open=${item.saving_id}`)}
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div>
