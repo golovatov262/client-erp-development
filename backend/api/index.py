@@ -2177,9 +2177,9 @@ def build_pdf_signature_block(font_r, font_b, org):
     col_widths = []
 
     if stamp_path:
-        stamp_img = Image(stamp_path, width=25*mm, height=25*mm)
+        stamp_img = Image(stamp_path, width=40*mm, height=40*mm)
         row_data.append(stamp_img)
-        col_widths.append(30*mm)
+        col_widths.append(45*mm)
     else:
         row_data.append('')
         col_widths.append(5*mm)
