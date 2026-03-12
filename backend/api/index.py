@@ -3135,6 +3135,31 @@ def handle_export(params, cur):
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'transactions_%s.xlsx' % saving.get('contract_no', item_id)
 
+    elif export_type == 'loan_certificate':
+        date_from = params.get('date_from', '')
+        date_to = params.get('date_to', '')
+        if not date_from or not date_to:
+            return {'error': 'Не указан период'}
+        loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
+        if not loan:
+            return None
+        org_id = loan.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else default_org
+        else:
+            org = default_org
+        member = query_one(cur, "SELECT * FROM members WHERE id=%s" % loan['member_id'])
+        if not member:
+            return None
+        payments = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s AND payment_date >= '%s' AND payment_date <= '%s' ORDER BY payment_date" % (item_id, esc(date_from), esc(date_to)))
+        total_principal = sum(float(p.get('principal_part', 0)) for p in payments)
+        total_interest = sum(float(p.get('interest_part', 0)) for p in payments)
+        total_penalty = sum(float(p.get('penalty_part', 0)) for p in payments)
+        data = generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty)
+        ct = 'application/pdf'
+        fn = 'certificate_%s_%s_%s.pdf' % (loan.get('contract_no', item_id), date_from, date_to)
+
     elif export_type == 'share':
         account = query_one(cur, "SELECT * FROM share_accounts WHERE id = %s" % item_id)
         if not account:
