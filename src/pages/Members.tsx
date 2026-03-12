@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Icon from "@/components/ui/icon";
+import CompanyInnSuggest from "@/components/ui/company-inn-suggest";
 import { useToast } from "@/hooks/use-toast";
 import api, { Member, MemberDetail } from "@/lib/api";
 
@@ -258,7 +259,23 @@ const Members = () => {
             </TabsContent>
 
             <TabsContent value="ul" className="space-y-4 mt-4">
-              <div className="space-y-1.5"><Label className="text-xs">ИНН организации *</Label><Input value={form.inn || ""} onChange={e => setField("inn", e.target.value)} maxLength={10} /></div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">ИНН организации *</Label>
+                <CompanyInnSuggest
+                  value={form.inn || ""}
+                  onChange={v => setField("inn", v)}
+                  onCompanySelect={data => {
+                    setForm(prev => ({
+                      ...prev,
+                      inn: data.inn,
+                      company_name: data.company_name,
+                      director_fio: data.director_fio || prev.director_fio || "",
+                      registration_address: data.address || prev.registration_address || "",
+                      email: data.email || prev.email || "",
+                    }));
+                  }}
+                />
+              </div>
               <div className="space-y-1.5"><Label className="text-xs">Наименование компании *</Label><Input value={form.company_name || ""} onChange={e => setField("company_name", e.target.value)} /></div>
 
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Руководитель</div>

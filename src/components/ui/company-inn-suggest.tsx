@@ -3,16 +3,22 @@ import DadataSuggest from "@/components/ui/dadata-suggest";
 import dadata, { DadataPartySuggestion } from "@/lib/dadata";
 import Icon from "@/components/ui/icon";
 
+export interface CompanySelectData {
+  inn: string;
+  company_name: string;
+  director_fio: string;
+  director_phone: string;
+  ogrn?: string;
+  kpp?: string;
+  address?: string;
+  email?: string;
+  director_post?: string;
+}
+
 interface CompanyInnSuggestProps {
   value: string;
   onChange: (value: string) => void;
-  onCompanySelect?: (data: {
-    inn: string;
-    company_name: string;
-    director_fio: string;
-    director_phone: string;
-    ogrn?: string;
-  }) => void;
+  onCompanySelect?: (data: CompanySelectData) => void;
   placeholder?: string;
   className?: string;
 }
@@ -28,6 +34,10 @@ const CompanyInnSuggest = ({ value, onChange, onCompanySelect, placeholder = "В
         director_fio: d?.management?.name || "",
         director_phone: "",
         ogrn: d?.ogrn || "",
+        kpp: d?.kpp || "",
+        address: d?.address?.unrestricted_value || d?.address?.value || "",
+        email: d?.emails?.[0]?.value || "",
+        director_post: d?.management?.post || "",
       });
     },
     [onChange, onCompanySelect]

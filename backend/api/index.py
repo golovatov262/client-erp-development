@@ -4180,6 +4180,37 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
 
     return {'error': 'Неизвестный метод'}
 
+DADATA_URLS = {
+    'party': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party',
+    'address': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+    'fms_unit': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/fms_unit',
+    'bank': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/bank',
+}
+
+def handle_dadata(body):
+    """Проксирование запросов к DaData API"""
+    action = body.get('action', '')
+    query = body.get('query', '')
+    if not query:
+        return {'suggestions': []}
+    url = DADATA_URLS.get(action)
+    if not url:
+        return {'error': 'Неизвестный тип подсказки: %s' % action}
+    token = os.environ.get('DADATA_API_KEY', '')
+    if not token:
+        return {'error': 'DADATA_API_KEY не настроен'}
+    payload = json.dumps({'query': query, 'count': 7}).encode('utf-8')
+    req = urllib.request.Request(url, data=payload, headers={
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Token %s' % token,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        return {'suggestions': [], '_error': str(e)}
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
 def handler(event, context):
@@ -4244,6 +4275,8 @@ def handler(event, context):
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
             result = handle_cabinet(method, params, body, ev_headers, cur)
+        elif entity == 'dadata':
+            result = handle_dadata(body)
         elif entity == 'cron':
             cron_action = body.get('action') or params.get('action', '')
             if cron_action == 'daily_accrue':
