@@ -204,7 +204,7 @@ const Savings = () => {
     if (!detail || !modifyTermForm.new_term) return;
     setSaving(true);
     try {
-      await api.savings.modifyTerm({ saving_id: detail.id, new_term_months: toNum(modifyTermForm.new_term), effective_date: modifyTermForm.effective_date });
+      await api.savings.modifyTerm({ saving_id: detail.id, new_term: toNum(modifyTermForm.new_term), effective_date: modifyTermForm.effective_date });
       toast({ title: "Срок изменён" });
       setShowModifyTerm(false);
       await refreshDetail();
