@@ -4451,6 +4451,8 @@ def handler(event, context):
             staff = get_staff_session(params, ev_headers, cur)
             if not staff:
                 return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Требуется авторизация'})}
+        elif entity == 'push':
+            staff = get_staff_session(params, ev_headers, cur)
 
             if staff['role'] == 'manager':
                 if method == 'DELETE':
