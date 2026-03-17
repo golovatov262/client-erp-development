@@ -4278,9 +4278,9 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         return {'error': 'Требуется авторизация', '_status': 401}
 
     if action == 'stats':
-        cur.execute("SELECT COUNT(*) FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+        cur.execute("SELECT COUNT(*) FROM push_subscriptions WHERE user_agent NOT IN ('unsubscribed','expired','reset')")
         total_subs = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(DISTINCT user_id) FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+        cur.execute("SELECT COUNT(DISTINCT user_id) FROM push_subscriptions WHERE user_agent NOT IN ('unsubscribed','expired','reset')")
         unique_users = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM push_messages")
         total_messages = cur.fetchone()[0]
@@ -4290,7 +4290,7 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         cur.execute("""SELECT ps.user_id, u.name, u.phone, u.email, COUNT(ps.id) as devices, MAX(ps.created_at) as last_sub
             FROM push_subscriptions ps
             JOIN users u ON u.id=ps.user_id
-            WHERE ps.user_agent!='unsubscribed'
+            WHERE ps.user_agent NOT IN ('unsubscribed','expired','reset')
             GROUP BY ps.user_id, u.name, u.phone, u.email
             ORDER BY last_sub DESC""")
         cols = [d[0] for d in cur.description]
@@ -4338,10 +4338,10 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         conn.commit()
 
         if target == 'all':
-            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_agent NOT IN ('unsubscribed','expired','reset')")
         elif target == 'selected' and target_user_ids:
             ids_str = ','.join(str(int(i)) for i in target_user_ids)
-            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (%s) AND user_agent!='unsubscribed'" % ids_str)
+            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (%s) AND user_agent NOT IN ('unsubscribed','expired','reset')" % ids_str)
         else:
             return {'error': 'Неверный тип рассылки'}
 
