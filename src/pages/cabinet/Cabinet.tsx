@@ -29,6 +29,11 @@ const Cabinet = () => {
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
   const [tgUsername, setTgUsername] = useState("");
   const [tgLinking, setTgLinking] = useState(false);
+  const [maxLinked, setMaxLinked] = useState<boolean | null>(null);
+  const [maxUsername, setMaxUsername] = useState("");
+  const [maxLinking, setMaxLinking] = useState(false);
+  const [notifSettings, setNotifSettings] = useState<Record<string, Record<string, string>>>({});
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -58,6 +63,13 @@ const Cabinet = () => {
       setTgLinked(res.linked);
       if (res.username) setTgUsername(res.username);
     }).catch(() => {});
+    api.cabinet.maxStatus(token).then(res => {
+      setMaxLinked(res.linked);
+      if (res.username) setMaxUsername(res.username);
+    }).catch(() => setMaxLinked(null));
+    api.cabinet.notificationSettings(token).then(res => {
+      setNotifSettings(res.settings || {});
+    }).catch(() => {});
   }, [token]);
 
   const handleTelegramLink = async () => {
@@ -85,6 +97,50 @@ const Cabinet = () => {
       setTgLinked(false);
       setTgUsername("");
       toast({ title: "Telegram отвязан" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleMaxLink = async () => {
+    setMaxLinking(true);
+    try {
+      const res = await api.cabinet.maxLink(token);
+      window.open(res.link_url, "_blank");
+      toast({ title: "Откройте MAX", description: "Нажмите «Начать» в боте для завершения привязки" });
+      setTimeout(() => {
+        api.cabinet.maxStatus(token).then(r => {
+          setMaxLinked(r.linked);
+          if (r.username) setMaxUsername(r.username);
+        }).catch(() => {});
+      }, 5000);
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setMaxLinking(false);
+    }
+  };
+
+  const handleMaxUnlink = async () => {
+    try {
+      await api.cabinet.maxUnlink(token);
+      setMaxLinked(false);
+      setMaxUsername("");
+      toast({ title: "MAX отвязан" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleNotifSettingToggle = async (channel: string, key: string) => {
+    const current = notifSettings[channel]?.[key] ?? "true";
+    const newVal = current === "true" ? "false" : "true";
+    try {
+      await api.cabinet.saveNotificationSetting(token, channel, key, newVal);
+      setNotifSettings(prev => ({
+        ...prev,
+        [channel]: { ...(prev[channel] || {}), [key]: newVal }
+      }));
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
     }
@@ -193,7 +249,13 @@ const Cabinet = () => {
         tgLinking={tgLinking}
         onTelegramLink={handleTelegramLink}
         onTelegramUnlink={handleTelegramUnlink}
+        maxLinked={maxLinked}
+        maxUsername={maxUsername}
+        maxLinking={maxLinking}
+        onMaxLink={handleMaxLink}
+        onMaxUnlink={handleMaxUnlink}
         onOpenPassword={() => { setShowMenu(false); setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}
+        onOpenNotifSettings={() => { setShowMenu(false); setShowNotifSettings(true); }}
         onLogout={() => { setShowMenu(false); handleLogout(); }}
         showPassword={showPassword}
         onClosePassword={setShowPassword}
@@ -205,6 +267,12 @@ const Cabinet = () => {
         onCloseMessages={setShowMessages}
         messagesLoading={messagesLoading}
         messages={messages}
+        showNotifSettings={showNotifSettings}
+        onCloseNotifSettings={setShowNotifSettings}
+        notifSettings={notifSettings}
+        onNotifSettingToggle={handleNotifSettingToggle}
+        hasLoans={(data.loans || []).length > 0}
+        hasSavings={(data.savings || []).length > 0}
       />
 
       <CabinetDashboard

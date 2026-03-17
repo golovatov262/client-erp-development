@@ -18,5 +18,8 @@
   {"name": "Push subscribe no token", "method": "POST", "path": "/", "body": {"entity": "push", "action": "subscribe"}, "expectedStatus": 400},
   {"name": "Notification stats", "method": "GET", "path": "/?entity=notifications&action=stats", "expectedStatus": 401, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"},
   {"name": "Telegram bot webhook empty", "method": "POST", "path": "/", "body": {"entity": "telegram_bot"}, "expectedStatus": 201, "expectedBody": {"ok": true}, "bodyMatcher": "partial"},
-  {"name": "Cabinet telegram status unauthorized", "method": "GET", "path": "/?entity=cabinet&action=telegram_status&token=invalid", "expectedStatus": 401}
+  {"name": "Cabinet telegram status unauthorized", "method": "GET", "path": "/?entity=cabinet&action=telegram_status&token=invalid", "expectedStatus": 401},
+  {"name": "MAX bot webhook empty", "method": "POST", "path": "/", "body": {"entity": "max_bot"}, "expectedStatus": 201, "expectedBody": {"ok": true}, "bodyMatcher": "partial"},
+  {"name": "Cabinet MAX status unauthorized", "method": "GET", "path": "/?entity=cabinet&action=max_status&token=invalid", "expectedStatus": 401},
+  {"name": "Cabinet notification settings unauthorized", "method": "GET", "path": "/?entity=cabinet&action=notification_settings&token=invalid", "expectedStatus": 401}
 ]}

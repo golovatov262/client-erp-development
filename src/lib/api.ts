@@ -202,6 +202,11 @@ export const api = {
     telegramLink: (token: string) => request<{ bot_username: string; link_code: string; link_url: string }>("POST", undefined, { entity: "cabinet", action: "telegram_link", token }),
     telegramStatus: (token: string) => request<{ linked: boolean; chat_id?: number; username?: string; first_name?: string; subscribed_at?: string }>("GET", { entity: "cabinet", action: "telegram_status", token }),
     telegramUnlink: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "cabinet", action: "telegram_unlink", token }),
+    maxLink: (token: string) => request<{ bot_username: string; link_code: string; link_url: string }>("POST", undefined, { entity: "cabinet", action: "max_link", token }),
+    maxStatus: (token: string) => request<{ linked: boolean; chat_id?: number; username?: string; first_name?: string; subscribed_at?: string }>("GET", { entity: "cabinet", action: "max_status", token }),
+    maxUnlink: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "cabinet", action: "max_unlink", token }),
+    notificationSettings: (token: string) => request<{ settings: Record<string, Record<string, string>> }>("GET", { entity: "cabinet", action: "notification_settings", token }),
+    saveNotificationSetting: (token: string, channel: string, settingKey: string, settingValue: string) => request<{ success: boolean }>("POST", undefined, { entity: "cabinet", action: "save_notification_settings", token, channel, setting_key: settingKey, setting_value: settingValue }),
   },
 
   staffAuth: {

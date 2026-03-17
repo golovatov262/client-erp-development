@@ -4052,6 +4052,62 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
         conn.commit()
         return {'success': True}
 
+    elif action == 'max_link':
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'error': 'MAX-бот не настроен. Обратитесь в КПК.'}
+        try:
+            url = 'https://botapi.max.ru/me?access_token=%s' % urllib.parse.quote(bot_token)
+            req = urllib.request.Request(url)
+            resp = urllib.request.urlopen(req, timeout=10)
+            me = json.loads(resp.read().decode('utf-8'))
+            bot_username = me.get('username', '')
+        except:
+            return {'error': 'Не удалось получить данные бота MAX'}
+        code = secrets.token_hex(16)
+        expires = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("DELETE FROM max_link_codes WHERE user_id=%s" % user_id)
+        cur.execute("INSERT INTO max_link_codes (user_id, code, expires_at) VALUES (%s, '%s', '%s')" % (user_id, code, expires))
+        conn.commit()
+        return {'bot_username': bot_username, 'link_code': code, 'link_url': 'https://max.ru/%s?start=%s' % (bot_username, code)}
+
+    elif action == 'max_status':
+        cur.execute("SELECT ms.id, ms.chat_id, ms.username, ms.first_name, ms.subscribed_at FROM max_subscribers ms WHERE ms.user_id=%s AND ms.active=true" % user_id)
+        row = cur.fetchone()
+        if row:
+            return {'linked': True, 'chat_id': row[1], 'username': row[2] or '', 'first_name': row[3] or '', 'subscribed_at': serialize(row[4])}
+        return {'linked': False}
+
+    elif action == 'max_unlink':
+        cur.execute("UPDATE max_subscribers SET active=false WHERE user_id=%s AND active=true" % user_id)
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'notification_settings':
+        cur.execute("SELECT channel, setting_key, setting_value FROM notification_settings WHERE user_id=%s" % user_id)
+        rows = cur.fetchall()
+        settings = {}
+        for r in rows:
+            ch = r[0]
+            if ch not in settings:
+                settings[ch] = {}
+            settings[ch][r[1]] = r[2]
+        return {'settings': settings}
+
+    elif action == 'save_notification_settings':
+        channel = body.get('channel', '')
+        setting_key = body.get('setting_key', '')
+        setting_value = body.get('setting_value', 'true')
+        if not channel or not setting_key:
+            return {'error': 'Не указан канал или ключ настройки'}
+        cur.execute("""
+            INSERT INTO notification_settings (user_id, channel, setting_key, setting_value, updated_at)
+            VALUES (%s, '%s', '%s', '%s', NOW())
+            ON CONFLICT (user_id, channel, setting_key) DO UPDATE SET setting_value='%s', updated_at=NOW()
+        """ % (user_id, esc(channel), esc(setting_key), esc(setting_value), esc(setting_value)))
+        conn.commit()
+        return {'success': True}
+
     return {'error': 'Неизвестное действие'}
 
 def handle_audit(params, staff, cur):
@@ -4927,6 +4983,104 @@ def handle_telegram_bot(method, body, cur, conn):
     send_tg('Я бот для уведомлений КПК.\n\nКоманды:\n/status — проверить подписку\n/stop — отписаться от уведомлений')
     return {'ok': True}
 
+def handle_max_bot(method, body, cur, conn):
+    """Webhook для MAX-бота: приём подписок от пайщиков"""
+    bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+    if not bot_token:
+        return {'ok': True}
+
+    update_type = body.get('update_type', '')
+
+    if update_type == 'bot_started':
+        chat_id = body.get('chat_id')
+        user_data = body.get('user', {})
+        max_user_id = user_data.get('user_id')
+        username = user_data.get('username', '')
+        first_name = user_data.get('first_name', '')
+        payload = body.get('payload', '')
+
+        if not chat_id:
+            return {'ok': True}
+
+        def send_max(txt):
+            url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(bot_token), chat_id)
+            data = json.dumps({'text': txt, 'format': 'html'}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            try:
+                urllib.request.urlopen(req, timeout=10)
+            except:
+                pass
+
+        if payload:
+            link_code = payload.strip()
+            cur.execute("SELECT user_id FROM max_link_codes WHERE code='%s' AND expires_at > NOW()" % esc(link_code))
+            row = cur.fetchone()
+            if not row:
+                send_max('Ссылка для привязки недействительна или истекла.\n\nПерейдите в личный кабинет и нажмите «Привязать MAX» заново.')
+                return {'ok': True}
+            user_id = row[0]
+            cur.execute("DELETE FROM max_link_codes WHERE code='%s'" % esc(link_code))
+            cur.execute("SELECT id, active FROM max_subscribers WHERE user_id=%s AND chat_id=%s" % (user_id, chat_id))
+            existing = cur.fetchone()
+            if existing:
+                cur.execute("UPDATE max_subscribers SET active=true, user_id_max=%s, username='%s', first_name='%s', subscribed_at=NOW() WHERE id=%s" % (max_user_id or 'NULL', esc(username), esc(first_name), existing[0]))
+            else:
+                cur.execute("INSERT INTO max_subscribers (user_id, chat_id, user_id_max, username, first_name) VALUES (%s, %s, %s, '%s', '%s')" % (user_id, chat_id, max_user_id or 'NULL', esc(username), esc(first_name)))
+            conn.commit()
+            cur.execute("SELECT u.name FROM users u WHERE u.id=%s" % user_id)
+            urow = cur.fetchone()
+            name = urow[0] if urow else ''
+            welcome = 'Здравствуйте'
+            if name:
+                welcome = 'Здравствуйте, %s' % name
+            send_max('%s! MAX успешно привязан.\n\nТеперь вы будете получать уведомления о платежах и новости кооператива.' % welcome)
+        else:
+            send_max('Для привязки MAX перейдите в личный кабинет на сайте и нажмите кнопку «Привязать MAX».\n\nЕсли у вас нет доступа к личному кабинету — обратитесь в КПК.')
+        return {'ok': True}
+
+    if update_type == 'message_created':
+        msg = body.get('message', {})
+        msg_body = msg.get('body', {})
+        text = (msg_body.get('text') or '').strip()
+        sender = msg.get('sender', {})
+        recipient = msg.get('recipient', {})
+        chat_id = recipient.get('chat_id')
+        max_user_id = sender.get('user_id')
+        username = sender.get('username', '')
+        first_name = sender.get('first_name', '')
+
+        if not chat_id:
+            return {'ok': True}
+
+        def send_max(txt):
+            url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(bot_token), chat_id)
+            data = json.dumps({'text': txt, 'format': 'html'}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            try:
+                urllib.request.urlopen(req, timeout=10)
+            except:
+                pass
+
+        if text in ('/stop', '/unsubscribe'):
+            cur.execute("UPDATE max_subscribers SET active=false WHERE chat_id=%s AND active=true" % chat_id)
+            conn.commit()
+            send_max('Вы отписались от уведомлений. Чтобы подписаться снова, перейдите в личный кабинет.')
+            return {'ok': True}
+
+        if text == '/status':
+            cur.execute("SELECT ms.id, u.name FROM max_subscribers ms JOIN users u ON u.id=ms.user_id WHERE ms.chat_id=%s AND ms.active=true" % chat_id)
+            row = cur.fetchone()
+            if row:
+                send_max('Вы подписаны на уведомления.\nАккаунт: %s\n\nДля отписки отправьте /stop' % (row[1] or ''))
+            else:
+                send_max('Вы не подписаны на уведомления.\n\nДля подписки перейдите в личный кабинет.')
+            return {'ok': True}
+
+        send_max('Я бот для уведомлений КПК.\n\nКоманды:\n/status — проверить подписку\n/stop — отписаться от уведомлений')
+        return {'ok': True}
+
+    return {'ok': True}
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
 def handler(event, context):
@@ -4990,6 +5144,8 @@ def handler(event, context):
             result = handle_notifications(method, params, body, staff, cur, conn)
         elif entity == 'telegram_bot':
             result = handle_telegram_bot(method, body, cur, conn)
+        elif entity == 'max_bot':
+            result = handle_max_bot(method, body, cur, conn)
         elif entity == 'dadata':
             result = handle_dadata(body)
         elif entity == 'cron':
