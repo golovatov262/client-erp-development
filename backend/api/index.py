@@ -4333,7 +4333,7 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
             title.replace("'", "''"), msg_body.replace("'", "''"), url.replace("'", "''"),
             target.replace("'", "''"),
             "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_user_ids) if target_user_ids else 'NULL',
-            staff['id']))
+            staff['user_id']))
         message_id = cur.fetchone()[0]
         conn.commit()
 
@@ -4453,15 +4453,6 @@ def handler(event, context):
                 return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Требуется авторизация'})}
         elif entity == 'push':
             staff = get_staff_session(params, ev_headers, cur)
-
-            if staff['role'] == 'manager':
-                if method == 'DELETE':
-                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
-                if entity in ('users', 'audit', 'org_settings'):
-                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Недостаточно прав'})}
-                action = params.get('action') or body.get('action', '')
-                if action and 'delete' in action:
-                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
 
         if entity == 'dashboard':
             result = handle_dashboard(cur, params)
