@@ -22,6 +22,7 @@ export function usePush(token: string) {
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorHint, setErrorHint] = useState("");
 
   useEffect(() => {
     const ok = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -37,10 +38,15 @@ export function usePush(token: string) {
   const subscribe = useCallback(async () => {
     if (!supported || !token) return false;
     setLoading(true);
+    setErrorHint("");
     try {
       const perm = await Notification.requestPermission();
       setPermission(perm);
-      if (perm !== "granted") { setLoading(false); return false; }
+      if (perm !== "granted") {
+        setErrorHint("Вы не дали разрешение на уведомления. Проверьте настройки браузера.");
+        setLoading(false);
+        return false;
+      }
 
       const reg = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
@@ -71,7 +77,14 @@ export function usePush(token: string) {
       setSubscribed(true);
       setLoading(false);
       return true;
-    } catch {
+    } catch (err) {
+      const isYandex = /YaBrowser/i.test(navigator.userAgent);
+      if (isYandex) {
+        setErrorHint("Яндекс Браузер может блокировать push-уведомления. Попробуйте: Настройки → Сайты → Уведомления → разрешите для этого сайта. Или используйте Google Chrome.");
+      } else {
+        setErrorHint("Не удалось подключить уведомления. Проверьте настройки браузера.");
+      }
+      console.error("Push subscribe error:", err);
       setLoading(false);
       return false;
     }
@@ -94,7 +107,7 @@ export function usePush(token: string) {
     setLoading(false);
   }, [token]);
 
-  return { supported, permission, subscribed, loading, subscribe, unsubscribe };
+  return { supported, permission, subscribed, loading, errorHint, subscribe, unsubscribe };
 }
 
 export default usePush;

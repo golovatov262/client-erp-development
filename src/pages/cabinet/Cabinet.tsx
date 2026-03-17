@@ -493,7 +493,7 @@ const Cabinet = () => {
                   toast({ title: "Уведомления отключены" });
                 } else {
                   const ok = await push.subscribe();
-                  toast({ title: ok ? "Уведомления включены" : "Не удалось подключить", variant: ok ? "default" : "destructive" });
+                  toast({ title: ok ? "Уведомления включены" : "Не удалось подключить", description: ok ? undefined : push.errorHint, variant: ok ? "default" : "destructive" });
                 }
               }} disabled={push.loading}>
                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${push.subscribed ? "bg-green-50" : "bg-orange-50"}`}>
