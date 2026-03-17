@@ -4969,6 +4969,26 @@ def handle_notifications(method, params, body, staff, cur, conn):
         conn.commit()
         return {'success': True}
 
+    if action == 'get_max_settings':
+        cur.execute("SELECT key, value FROM max_settings")
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    if action == 'save_max_settings':
+        settings = body.get('settings', {})
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days'}
+        for k, v in settings.items():
+            if k not in allowed:
+                continue
+            val = str(v).replace("'", "''")
+            cur.execute("SELECT id FROM max_settings WHERE key='%s'" % k)
+            if cur.fetchone():
+                cur.execute("UPDATE max_settings SET value='%s', updated_at=NOW() WHERE key='%s'" % (val, k))
+            else:
+                cur.execute("INSERT INTO max_settings (key, value) VALUES ('%s', '%s')" % (k, val))
+        conn.commit()
+        return {'success': True}
+
     if action == 'set_webhook':
         bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
         if not bot_token:

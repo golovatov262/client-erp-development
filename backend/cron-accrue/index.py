@@ -468,11 +468,20 @@ def get_max_bot_token():
     return os.environ.get('MAX_BOT_TOKEN', '')
 
 
+def get_max_settings(cur):
+    try:
+        cur.execute("SELECT key, value FROM max_settings")
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows}
+    except:
+        return {}
+
+
 def send_max_payment_reminders(cur, conn, check_date):
-    settings = get_telegram_settings(cur)
+    settings = get_max_settings(cur)
 
     if settings.get('enabled', 'false') != 'true':
-        return {'skipped': True, 'reason': 'MAX reminders disabled (uses same enabled flag)'}
+        return {'skipped': True, 'reason': 'MAX reminders disabled'}
 
     bot_token = get_max_bot_token()
     if not bot_token:
@@ -577,7 +586,7 @@ def send_max_payment_reminders(cur, conn, check_date):
 
 
 def send_max_savings_reminders(cur, conn, check_date):
-    settings = get_telegram_settings(cur)
+    settings = get_max_settings(cur)
 
     if settings.get('savings_enabled', 'false') != 'true':
         return {'skipped': True, 'reason': 'MAX savings reminders disabled'}

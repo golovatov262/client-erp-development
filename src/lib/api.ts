@@ -285,6 +285,8 @@ export const api = {
     setMaxWebhook: (webhookUrl?: string) => request<{ success: boolean; webhook_url: string }>("POST", undefined, { entity: "notifications", action: "set_max_webhook", webhook_url: webhookUrl }),
     deleteMaxWebhook: () => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "delete_max_webhook" }),
     maxWebhookInfo: () => request<{ url: string; update_types?: string[]; error?: string }>("POST", undefined, { entity: "notifications", action: "max_webhook_info" }),
+    getMaxSettings: () => request<Record<string, string>>("GET", { entity: "notifications", action: "get_max_settings" }),
+    saveMaxSettings: (settings: Record<string, string>) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_max_settings", settings }),
   },
 
   organizations: {
