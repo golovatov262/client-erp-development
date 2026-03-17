@@ -54,6 +54,7 @@ def handler(event, context):
         overdue_result = check_overdue_loans(cur, accrual_date)
         penalty_result = accrue_penalties(cur, accrual_date)
         push_result = send_payment_reminders(cur, conn, accrual_date)
+        savings_push_result = send_savings_reminders(cur, conn, accrual_date)
 
         conn.commit()
 
@@ -65,7 +66,8 @@ def handler(event, context):
             'total_accrued': float(total),
             'overdue': overdue_result,
             'penalties': penalty_result,
-            'push_reminders': push_result
+            'push_reminders': push_result,
+            'savings_push_reminders': savings_push_result
         }
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
@@ -301,5 +303,114 @@ def send_payment_reminders(cur, conn, check_date):
                         VALUES (%d, %d, %d, '%s')
                         ON CONFLICT DO NOTHING
                     """ % (loan_id, ls_id, user_id, rtype))
+
+    return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}
+
+
+def send_savings_reminders(cur, conn, check_date):
+    settings = get_push_settings(cur)
+
+    if settings.get('savings_enabled', 'true') != 'true':
+        return {'skipped': True, 'reason': 'Savings push reminders disabled'}
+
+    vapid_private = os.environ.get('VAPID_PRIVATE_KEY', '')
+    vapid_public = os.environ.get('VAPID_PUBLIC_KEY', '')
+    vapid_email = os.environ.get('VAPID_EMAIL', 'mailto:admin@example.com')
+    if not vapid_private or not vapid_public:
+        return {'skipped': True, 'reason': 'VAPID keys not configured'}
+
+    try:
+        from pywebpush import webpush
+    except ImportError:
+        return {'skipped': True, 'reason': 'pywebpush not installed'}
+
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
+
+    reminder_days_str = settings.get('savings_reminder_days', '30,15,7')
+    reminder_days = []
+    for d in reminder_days_str.split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    sent_total = 0
+    failed_total = 0
+    errors = []
+
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            rtype = 'savings_end_today'
+            title = 'Договор сбережений истекает сегодня'
+            body_tpl = 'Сегодня истекает срок договора сбережений %s. Сумма: %s руб.'
+        elif days == 1:
+            rtype = 'savings_end_1d'
+            title = 'Договор сбережений истекает завтра'
+            body_tpl = 'Завтра истекает срок договора сбережений %s. Сумма: %s руб.'
+        else:
+            rtype = 'savings_end_%dd' % days
+            title = 'Окончание договора сбережений через %d дн.' % days
+            body_tpl = 'Через %d дн. истекает срок договора сбережений %%s. Сумма: %%s руб.' % days
+
+        cur.execute("""
+            SELECT s.id, s.contract_no, s.current_balance, s.member_id
+            FROM savings s
+            WHERE s.status = 'active'
+              AND s.end_date = '%s'
+        """ % target_date)
+        savings_rows = cur.fetchall()
+
+        for s_id, contract_no, balance, member_id in savings_rows:
+            cur.execute("""
+                SELECT u.id FROM users u
+                WHERE u.member_id = %d AND u.role = 'client' AND u.status = 'active'
+            """ % member_id)
+            user_rows = cur.fetchall()
+
+            for (user_id,) in user_rows:
+                cur.execute("""
+                    SELECT id FROM push_auto_log
+                    WHERE loan_id=%d AND schedule_id=0 AND user_id=%d AND reminder_type='%s'
+                """ % (s_id, user_id, rtype))
+                if cur.fetchone():
+                    continue
+
+                cur.execute("""
+                    SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+                    WHERE user_id=%d AND user_agent != 'unsubscribed' AND user_agent != 'expired'
+                """ % user_id)
+                subs = cur.fetchall()
+                if not subs:
+                    continue
+
+                amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
+                body_text = body_tpl % (contract_no, amount_str)
+                payload = json.dumps({'title': title, 'body': body_text, 'url': '/'})
+
+                sub_sent = False
+                for sub_id, endpoint, p256dh, auth_key in subs:
+                    try:
+                        webpush(
+                            subscription_info={'endpoint': endpoint, 'keys': {'p256dh': p256dh, 'auth': auth_key}},
+                            data=payload,
+                            vapid_private_key=vapid_private,
+                            vapid_claims={'sub': vapid_email}
+                        )
+                        sent_total += 1
+                        sub_sent = True
+                    except Exception as e:
+                        failed_total += 1
+                        err = str(e)[:200]
+                        errors.append(err)
+                        if '410' in err or '404' in err:
+                            cur.execute("UPDATE push_subscriptions SET user_agent='expired' WHERE id=%d" % sub_id)
+
+                if sub_sent:
+                    cur.execute("""
+                        INSERT INTO push_auto_log (loan_id, schedule_id, user_id, reminder_type)
+                        VALUES (%d, 0, %d, '%s')
+                        ON CONFLICT DO NOTHING
+                    """ % (s_id, user_id, rtype))
 
     return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}

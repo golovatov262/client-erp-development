@@ -4410,7 +4410,7 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
 
     if action == 'save_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time'}
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_enabled', 'savings_reminder_days', 'savings_remind_time'}
         for k, v in settings.items():
             if k not in allowed:
                 continue

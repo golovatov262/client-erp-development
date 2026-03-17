@@ -42,7 +42,7 @@ const AdminPushMessages = () => {
   const [logEntries, setLogEntries] = useState<PushMessageLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("send");
-  const [settings, setSettings] = useState<PushSettings>({ enabled: "true", reminder_days: "3,1,0", overdue_notify: "true", remind_time: "09:00" });
+  const [settings, setSettings] = useState<PushSettings>({ enabled: "true", reminder_days: "3,1,0", overdue_notify: "true", remind_time: "09:00", savings_enabled: "true", savings_reminder_days: "30,15,7", savings_remind_time: "09:00" });
   const [savingSettings, setSavingSettings] = useState(false);
   const { toast } = useToast();
 
@@ -131,6 +131,15 @@ const AdminPushMessages = () => {
     else current.add(day);
     const sorted = Array.from(current).map(Number).sort((a, b) => b - a).map(String);
     setSettings({ ...settings, reminder_days: sorted.join(",") });
+  };
+
+  const savingsReminderDays = (settings.savings_reminder_days || "30,15,7").split(",").map(d => d.trim()).filter(Boolean);
+  const toggleSavingsDay = (day: string) => {
+    const current = new Set(savingsReminderDays);
+    if (current.has(day)) current.delete(day);
+    else current.add(day);
+    const sorted = Array.from(current).map(Number).sort((a, b) => b - a).map(String);
+    setSettings({ ...settings, savings_reminder_days: sorted.join(",") });
   };
 
   if (loading) return (
@@ -364,6 +373,51 @@ const AdminPushMessages = () => {
                     <Label>Время отправки</Label>
                     <Input type="time" value={settings.remind_time} onChange={e => setSettings({ ...settings, remind_time: e.target.value })} className="w-32" />
                     <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться автоматические напоминания</p>
+                  </div>
+                </>
+              )}
+
+              <Button onClick={handleSaveSettings} disabled={savingSettings}>
+                {savingSettings ? <Icon name="Loader2" size={16} className="animate-spin mr-2" /> : <Icon name="Save" size={16} className="mr-2" />}
+                Сохранить настройки
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Icon name="PiggyBank" size={18} />
+                Напоминания об окончании договоров сбережений
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-sm">Автоматические push-напоминания</div>
+                  <div className="text-xs text-muted-foreground">Клиенты получают уведомления о приближающемся окончании договора сбережений</div>
+                </div>
+                <Switch checked={settings.savings_enabled === "true"} onCheckedChange={v => setSettings({ ...settings, savings_enabled: v ? "true" : "false" })} />
+              </div>
+
+              {settings.savings_enabled === "true" && (
+                <>
+                  <div className="space-y-2">
+                    <Label>За сколько дней напоминать</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {["30", "25", "15", "7", "3", "1", "0"].map(day => (
+                        <Button key={day} variant={savingsReminderDays.includes(day) ? "default" : "outline"} size="sm" onClick={() => toggleSavingsDay(day)} className="min-w-[80px]">
+                          {day === "0" ? "В день окончания" : `За ${day} дн.`}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Выбрано: {savingsReminderDays.length === 0 ? "ничего" : savingsReminderDays.map(d => d === "0" ? "в день окончания" : `за ${d} дн.`).join(", ")}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Время отправки</Label>
+                    <Input type="time" value={settings.savings_remind_time || "09:00"} onChange={e => setSettings({ ...settings, savings_remind_time: e.target.value })} className="w-32" />
+                    <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться напоминания о сбережениях</p>
                   </div>
                 </>
               )}

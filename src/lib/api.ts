@@ -841,6 +841,9 @@ export interface PushSettings {
   reminder_days: string;
   overdue_notify: string;
   remind_time: string;
+  savings_enabled: string;
+  savings_reminder_days: string;
+  savings_remind_time: string;
 }
 
 export default api;
