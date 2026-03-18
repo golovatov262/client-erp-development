@@ -222,8 +222,6 @@ def recalc_loan_schedule_statuses(cur, lid):
                     if is_future:
                         covered_one_future = True
                     continue
-                if is_future and dist_remaining < need_total_for_row:
-                    break
                 take_total = min(dist_remaining, need_total_for_row)
                 dist_remaining -= take_total
                 total_item = sp + si + spn
@@ -258,8 +256,6 @@ def recalc_loan_schedule_statuses(cur, lid):
                 if is_future and covered_one_future:
                     break
                 need_total_for_row = sp + si + spn - spa
-                if is_future and remaining < need_total_for_row:
-                    break
 
                 already_i = min(spa, si)
                 already_pn = min(spa - si, spn) if spa > si else Decimal('0')
