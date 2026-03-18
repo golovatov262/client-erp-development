@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
@@ -213,16 +213,7 @@ const Cabinet = () => {
     }
   };
 
-  const orgGroups = useMemo(() => {
-    if (!data) return [];
-    const orgMap = new Map<number, string>();
-    [...data.loans, ...data.savings, ...data.shares].forEach(item => {
-      const oid = item.org_id;
-      const oname = item.org_short_name || item.org_name;
-      if (oid && oname) orgMap.set(oid, oname);
-    });
-    return Array.from(orgMap.entries()).map(([id, name]) => ({ id, name }));
-  }, [data]);
+
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100">
@@ -278,7 +269,6 @@ const Cabinet = () => {
       <CabinetDashboard
         data={data}
         userName={userName}
-        orgGroups={orgGroups}
         onOpenLoan={openLoan}
         onOpenSaving={openSaving}
       />

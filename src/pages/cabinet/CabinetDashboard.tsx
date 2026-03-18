@@ -68,12 +68,11 @@ const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
 interface CabinetDashboardProps {
   data: CabinetOverview;
   userName: string;
-  orgGroups: { id: number; name: string }[];
   onOpenLoan: (loan: Loan) => void;
   onOpenSaving: (saving: Saving) => void;
 }
 
-const CabinetDashboard = ({ data, userName, orgGroups, onOpenLoan, onOpenSaving }: CabinetDashboardProps) => {
+const CabinetDashboard = ({ data, userName, onOpenLoan, onOpenSaving }: CabinetDashboardProps) => {
   const totalLoanBalance = data.loans.filter(l => l.status === "active").reduce((s, l) => s + l.balance, 0);
   const totalSavings = data.savings.filter(s => s.status === "active").reduce((s, i) => s + (i.current_balance || i.amount), 0);
   const totalShares = data.shares.reduce((s, a) => s + a.balance, 0);
@@ -247,29 +246,7 @@ const CabinetDashboard = ({ data, userName, orgGroups, onOpenLoan, onOpenSaving 
         </Card>
       </div>
 
-      {orgGroups.length <= 1 ? (
-        renderProductTabs(data.loans, data.savings, data.shares)
-      ) : (
-        <Tabs defaultValue={String(orgGroups[0]?.id)} className="space-y-4">
-          <TabsList className="w-full flex flex-wrap">
-            {orgGroups.map(og => (
-              <TabsTrigger key={og.id} value={String(og.id)} className="flex-1 gap-1 text-xs sm:text-sm sm:gap-1.5">
-                <Icon name="Building2" size={14} className="hidden sm:block" />{og.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {orgGroups.map(og => {
-            const orgLoans = data.loans.filter(l => l.org_id === og.id);
-            const orgSavings = data.savings.filter(s => s.org_id === og.id);
-            const orgShares = data.shares.filter(a => a.org_id === og.id);
-            return (
-              <TabsContent key={og.id} value={String(og.id)} className="space-y-4">
-                {renderProductTabs(orgLoans, orgSavings, orgShares)}
-              </TabsContent>
-            );
-          })}
-        </Tabs>
-      )}
+      {renderProductTabs(data.loans, data.savings, data.shares)}
     </main>
   );
 };
