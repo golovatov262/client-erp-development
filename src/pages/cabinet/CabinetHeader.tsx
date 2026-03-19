@@ -28,7 +28,6 @@ interface CabinetHeaderProps {
   onMaxLink: () => void;
   onMaxUnlink: () => void;
   onOpenPassword: () => void;
-  onOpenNotifSettings: () => void;
   onLogout: () => void;
   showPassword: boolean;
   onClosePassword: (open: boolean) => void;
@@ -40,12 +39,7 @@ interface CabinetHeaderProps {
   onCloseMessages: (open: boolean) => void;
   messagesLoading: boolean;
   messages: PushClientMessage[];
-  showNotifSettings: boolean;
-  onCloseNotifSettings: (open: boolean) => void;
-  notifSettings: Record<string, Record<string, string>>;
-  onNotifSettingToggle: (channel: string, key: string) => void;
-  hasLoans: boolean;
-  hasSavings: boolean;
+
 }
 
 const CabinetHeader = ({
@@ -69,7 +63,6 @@ const CabinetHeader = ({
   onMaxLink,
   onMaxUnlink,
   onOpenPassword,
-  onOpenNotifSettings,
   onLogout,
   showPassword,
   onClosePassword,
@@ -81,14 +74,7 @@ const CabinetHeader = ({
   onCloseMessages,
   messagesLoading,
   messages,
-  showNotifSettings,
-  onCloseNotifSettings,
-  notifSettings,
-  onNotifSettingToggle,
-  hasLoans,
-  hasSavings,
 }: CabinetHeaderProps) => {
-  const getSetting = (channel: string, key: string) => (notifSettings[channel]?.[key] ?? "true") === "true";
 
   return (
     <>
@@ -206,15 +192,6 @@ const CabinetHeader = ({
                 </div>
               </button>
             )}
-            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={onOpenNotifSettings}>
-              <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
-                <Icon name="SlidersHorizontal" size={18} className="text-amber-500" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-medium">Автоинформирование</div>
-                <div className="text-xs text-muted-foreground">Настроить уведомления по займам и сбережениям</div>
-              </div>
-            </button>
             <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={onOpenPassword}>
               <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
                 <Icon name="Lock" size={18} className="text-blue-500" />
@@ -260,111 +237,7 @@ const CabinetHeader = ({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showNotifSettings} onOpenChange={onCloseNotifSettings}>
-        <DialogContent className="max-w-md w-[calc(100vw-1rem)] sm:w-auto p-0">
-          <DialogHeader className="p-4 pb-2 border-b">
-            <DialogTitle className="text-base flex items-center gap-2">
-              <Icon name="SlidersHorizontal" size={18} />
-              Автоинформирование
-            </DialogTitle>
-          </DialogHeader>
-          <div className="p-4 space-y-5">
-            <p className="text-xs text-muted-foreground">
-              Настройте, какие автоматические уведомления вы хотите получать по каждому каналу связи.
-            </p>
 
-            {(tgLinked || maxLinked) ? (
-              <>
-                {tgLinked && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Icon name="Send" size={16} className="text-sky-500" />
-                      Telegram
-                    </div>
-                    {hasLoans && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Напоминания о платежах</div>
-                          <div className="text-xs text-muted-foreground">За 3, 1 день и в день платежа</div>
-                        </div>
-                        <Switch checked={getSetting("telegram", "loan_reminders")} onCheckedChange={() => onNotifSettingToggle("telegram", "loan_reminders")} />
-                      </div>
-                    )}
-                    {hasSavings && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Окончание сбережений</div>
-                          <div className="text-xs text-muted-foreground">За 30, 15, 7 дней до окончания</div>
-                        </div>
-                        <Switch checked={getSetting("telegram", "savings_reminders")} onCheckedChange={() => onNotifSettingToggle("telegram", "savings_reminders")} />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {maxLinked && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Icon name="MessageCircle" size={16} className="text-violet-500" />
-                      MAX
-                    </div>
-                    {hasLoans && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Напоминания о платежах</div>
-                          <div className="text-xs text-muted-foreground">За 3, 1 день и в день платежа</div>
-                        </div>
-                        <Switch checked={getSetting("max", "loan_reminders")} onCheckedChange={() => onNotifSettingToggle("max", "loan_reminders")} />
-                      </div>
-                    )}
-                    {hasSavings && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Окончание сбережений</div>
-                          <div className="text-xs text-muted-foreground">За 30, 15, 7 дней до окончания</div>
-                        </div>
-                        <Switch checked={getSetting("max", "savings_reminders")} onCheckedChange={() => onNotifSettingToggle("max", "savings_reminders")} />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {push.supported && push.subscribed && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Icon name="Bell" size={16} className="text-green-500" />
-                      Push-уведомления
-                    </div>
-                    {hasLoans && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Напоминания о платежах</div>
-                          <div className="text-xs text-muted-foreground">За 3, 1 день и в день платежа</div>
-                        </div>
-                        <Switch checked={getSetting("push", "loan_reminders")} onCheckedChange={() => onNotifSettingToggle("push", "loan_reminders")} />
-                      </div>
-                    )}
-                    {hasSavings && (
-                      <div className="flex items-center justify-between pl-6">
-                        <div>
-                          <div className="text-sm">Окончание сбережений</div>
-                          <div className="text-xs text-muted-foreground">За 30, 15, 7 дней до окончания</div>
-                        </div>
-                        <Switch checked={getSetting("push", "savings_reminders")} onCheckedChange={() => onNotifSettingToggle("push", "savings_reminders")} />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                <Icon name="LinkSlash" size={32} className="mx-auto mb-2 text-muted-foreground/40" fallback="Link" />
-                Привяжите Telegram или MAX в настройках,<br />чтобы управлять уведомлениями
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };

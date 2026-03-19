@@ -32,8 +32,7 @@ const Cabinet = () => {
   const [maxLinked, setMaxLinked] = useState<boolean | null>(null);
   const [maxUsername, setMaxUsername] = useState("");
   const [maxLinking, setMaxLinking] = useState(false);
-  const [notifSettings, setNotifSettings] = useState<Record<string, Record<string, string>>>({});
-  const [showNotifSettings, setShowNotifSettings] = useState(false);
+
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -67,9 +66,6 @@ const Cabinet = () => {
       setMaxLinked(res.linked);
       if (res.username) setMaxUsername(res.username);
     }).catch(() => setMaxLinked(null));
-    api.cabinet.notificationSettings(token).then(res => {
-      setNotifSettings(res.settings || {});
-    }).catch(() => {});
   }, [token]);
 
   const handleTelegramLink = async () => {
@@ -127,20 +123,6 @@ const Cabinet = () => {
       setMaxLinked(false);
       setMaxUsername("");
       toast({ title: "MAX отвязан" });
-    } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
-    }
-  };
-
-  const handleNotifSettingToggle = async (channel: string, key: string) => {
-    const current = notifSettings[channel]?.[key] ?? "true";
-    const newVal = current === "true" ? "false" : "true";
-    try {
-      await api.cabinet.saveNotificationSetting(token, channel, key, newVal);
-      setNotifSettings(prev => ({
-        ...prev,
-        [channel]: { ...(prev[channel] || {}), [key]: newVal }
-      }));
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
     }
@@ -246,7 +228,6 @@ const Cabinet = () => {
         onMaxLink={handleMaxLink}
         onMaxUnlink={handleMaxUnlink}
         onOpenPassword={() => { setShowMenu(false); setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}
-        onOpenNotifSettings={() => { setShowMenu(false); setShowNotifSettings(true); }}
         onLogout={() => { setShowMenu(false); handleLogout(); }}
         showPassword={showPassword}
         onClosePassword={setShowPassword}
@@ -258,12 +239,6 @@ const Cabinet = () => {
         onCloseMessages={setShowMessages}
         messagesLoading={messagesLoading}
         messages={messages}
-        showNotifSettings={showNotifSettings}
-        onCloseNotifSettings={setShowNotifSettings}
-        notifSettings={notifSettings}
-        onNotifSettingToggle={handleNotifSettingToggle}
-        hasLoans={(data.loans || []).length > 0}
-        hasSavings={(data.savings || []).length > 0}
       />
 
       <CabinetDashboard
