@@ -3349,6 +3349,158 @@ def generate_members_xlsx(members):
     wb.save(buf)
     return buf.getvalue()
 
+def generate_loans_list_xlsx(loans):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Займы'
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    cols = [
+        ('№ договора', 'contract_no', 16),
+        ('Пайщик', 'member_name', 30),
+        ('Организация', 'org_short_name', 20),
+        ('Сумма займа', 'amount', 16),
+        ('Ставка, %', 'rate', 10),
+        ('Срок, мес.', 'term_months', 10),
+        ('Тип графика', 'schedule_type_label', 16),
+        ('Дата выдачи', 'start_date', 14),
+        ('Дата окончания', 'end_date', 14),
+        ('Ежемес. платёж', 'monthly_payment', 16),
+        ('Остаток долга', 'balance', 16),
+        ('Статус', 'status_label', 14),
+    ]
+    for ci, (title, _, width) in enumerate(cols, 1):
+        cell = ws.cell(row=1, column=ci, value=title)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(ci)].width = width
+    status_map = {'active': 'Активен', 'overdue': 'Просрочен', 'closed': 'Закрыт', 'pending': 'Ожидает'}
+    schedule_map = {'annuity': 'Аннуитет', 'end_of_term': 'В конце срока'}
+    num_fmt = '#,##0.00'
+    for ri, row in enumerate(loans, 2):
+        row['status_label'] = status_map.get(row.get('status', ''), row.get('status', ''))
+        row['schedule_type_label'] = schedule_map.get(row.get('schedule_type', ''), row.get('schedule_type', ''))
+        if not row.get('org_short_name'):
+            row['org_short_name'] = row.get('org_name', '')
+        for df in ('start_date', 'end_date'):
+            if row.get(df):
+                raw = str(row[df])
+                parts = raw.split('-')
+                if len(parts) == 3:
+                    row[df] = '%s.%s.%s' % (parts[2], parts[1], parts[0])
+        for ci, (_, key, _) in enumerate(cols, 1):
+            val = row.get(key, '')
+            if val is None:
+                val = ''
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center')
+            if key in ('amount', 'monthly_payment', 'balance') and val != '':
+                try:
+                    cell.value = float(val)
+                    cell.number_format = num_fmt
+                except (ValueError, TypeError):
+                    pass
+            if key == 'rate' and val != '':
+                try:
+                    cell.value = float(val)
+                except (ValueError, TypeError):
+                    pass
+    last_col = get_column_letter(len(cols))
+    ws.auto_filter.ref = 'A1:%s%s' % (last_col, len(loans) + 1)
+    ws.freeze_panes = 'A2'
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def generate_savings_list_xlsx(savings):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Сбережения'
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    cols = [
+        ('№ договора', 'contract_no', 16),
+        ('Пайщик', 'member_name', 30),
+        ('Организация', 'org_short_name', 20),
+        ('Сумма вклада', 'amount', 16),
+        ('Ставка, %', 'rate', 10),
+        ('Срок, мес.', 'term_months', 10),
+        ('Тип выплаты', 'payout_type_label', 16),
+        ('Несниж. остаток, %', 'min_balance_pct', 14),
+        ('Дата начала', 'start_date', 14),
+        ('Дата окончания', 'end_date', 14),
+        ('Начислено %', 'accrued_interest', 16),
+        ('Выплачено %', 'paid_interest', 16),
+        ('Текущий баланс', 'current_balance', 16),
+        ('Статус', 'status_label', 14),
+    ]
+    for ci, (title, _, width) in enumerate(cols, 1):
+        cell = ws.cell(row=1, column=ci, value=title)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(ci)].width = width
+    status_map = {'active': 'Активен', 'closed': 'Закрыт', 'early_closed': 'Досрочно закрыт'}
+    payout_map = {'monthly': 'Ежемесячно', 'end_of_term': 'В конце срока'}
+    num_fmt = '#,##0.00'
+    for ri, row in enumerate(savings, 2):
+        row['status_label'] = status_map.get(row.get('status', ''), row.get('status', ''))
+        row['payout_type_label'] = payout_map.get(row.get('payout_type', ''), row.get('payout_type', ''))
+        if not row.get('org_short_name'):
+            row['org_short_name'] = row.get('org_name', '')
+        for df in ('start_date', 'end_date'):
+            if row.get(df):
+                raw = str(row[df])
+                parts = raw.split('-')
+                if len(parts) == 3:
+                    row[df] = '%s.%s.%s' % (parts[2], parts[1], parts[0])
+        for ci, (_, key, _) in enumerate(cols, 1):
+            val = row.get(key, '')
+            if val is None:
+                val = ''
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center')
+            if key in ('amount', 'accrued_interest', 'paid_interest', 'current_balance') and val != '':
+                try:
+                    cell.value = float(val)
+                    cell.number_format = num_fmt
+                except (ValueError, TypeError):
+                    pass
+            if key in ('rate', 'min_balance_pct') and val != '':
+                try:
+                    cell.value = float(val)
+                except (ValueError, TypeError):
+                    pass
+    last_col = get_column_letter(len(cols))
+    ws.auto_filter.ref = 'A1:%s%s' % (last_col, len(savings) + 1)
+    ws.freeze_panes = 'A2'
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 def handle_export(params, cur):
     export_type = params.get('type', 'loan')
     format_ = params.get('format', 'xlsx')
@@ -3364,6 +3516,39 @@ def handle_export(params, cur):
         data = generate_members_xlsx(rows)
         ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         fn = 'members_%s.xlsx' % datetime.now().strftime('%Y%m%d')
+        return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
+    if export_type == 'loans_list':
+        rows = query_rows(cur, """
+            SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type,
+                   l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
+                   CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                        ELSE m.company_name END as member_name,
+                   o.name as org_name, o.short_name as org_short_name
+            FROM loans l JOIN members m ON m.id=l.member_id
+            LEFT JOIN organizations o ON o.id=l.org_id
+            ORDER BY l.created_at DESC
+        """)
+        data = generate_loans_list_xlsx(rows)
+        ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        fn = 'loans_%s.xlsx' % datetime.now().strftime('%Y%m%d')
+        return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
+    if export_type == 'savings_list':
+        rows = query_rows(cur, """
+            SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type,
+                   s.start_date, s.end_date, s.accrued_interest, s.paid_interest, s.current_balance,
+                   s.status, s.min_balance_pct,
+                   CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                        ELSE m.company_name END as member_name,
+                   o.name as org_name, o.short_name as org_short_name
+            FROM savings s JOIN members m ON m.id=s.member_id
+            LEFT JOIN organizations o ON o.id=s.org_id
+            ORDER BY s.created_at DESC
+        """)
+        data = generate_savings_list_xlsx(rows)
+        ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        fn = 'savings_%s.xlsx' % datetime.now().strftime('%Y%m%d')
         return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
 
     if not item_id:

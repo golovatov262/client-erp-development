@@ -4,6 +4,7 @@ import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -77,6 +78,7 @@ const Loans = () => {
   const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
   const [showReconciliation, setShowReconciliation] = useState(false);
   const [showEditLoan, setShowEditLoan] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
@@ -380,6 +382,18 @@ const Loans = () => {
     }
   };
 
+  const handleExportLoans = async () => {
+    setExporting(true);
+    try {
+      await api.export.download("loans_list", undefined, "xlsx");
+      toast({ title: "Список займов выгружен в Excel" });
+    } catch {
+      toast({ title: "Ошибка выгрузки", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -417,6 +431,10 @@ const Loans = () => {
               Сбросить
             </button>
           )}
+          <Button variant="outline" size="sm" onClick={handleExportLoans} disabled={exporting} className="gap-1.5">
+            <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
+            {exporting ? "Выгрузка..." : "Excel"}
+          </Button>
         </div>
       </PageHeader>
 
