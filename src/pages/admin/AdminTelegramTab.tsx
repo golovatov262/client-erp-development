@@ -248,6 +248,7 @@ const AdminTelegramTab = () => {
           <TabsTrigger value="history">История ({messagesTotal})</TabsTrigger>
           <TabsTrigger value="subscribers">Подписчики ({subscribers.length})</TabsTrigger>
           <TabsTrigger value="auto">Авто</TabsTrigger>
+          <TabsTrigger value="templates">Шаблоны</TabsTrigger>
           <TabsTrigger value="settings">Настройки</TabsTrigger>
         </TabsList>
 
@@ -449,6 +450,105 @@ const AdminTelegramTab = () => {
             <Button onClick={handleSaveAutoSettings} disabled={savingAuto}>
               {savingAuto && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
               Сохранить настройки
+            </Button>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="templates" className="mt-4">
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm text-muted-foreground">
+                Используйте переменные: <code className="bg-muted px-1 rounded text-xs">{"{contract_no}"}</code> — номер договора, <code className="bg-muted px-1 rounded text-xs">{"{amount}"}</code> — сумма, <code className="bg-muted px-1 rounded text-xs">{"{days}"}</code> — кол-во дней (для шаблона «за N дней»). Поддерживается HTML: <code className="bg-muted px-1 rounded text-xs">{"<b>жирный</b>"}</code>
+              </p>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="CalendarClock" size={18} />
+                  Напоминание о платеже — в день платежа
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_payment_today || "Сегодня дата платежа по займу <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_today: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="CalendarClock" size={18} />
+                  Напоминание о платеже — за 1 день
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_payment_tomorrow || "До даты платежа по займу <b>{contract_no}</b> остался <b>1 день</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_tomorrow: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="CalendarClock" size={18} />
+                  Напоминание о платеже — за N дней
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_payment_days || "До даты платежа по займу <b>{contract_no}</b> осталось <b>{days} дн.</b>\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_days: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="AlertTriangle" size={18} className="text-red-500" />
+                  Уведомление о просрочке
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_overdue || "Платёж по займу <b>{contract_no}</b> просрочен.\nСумма: <b>{amount}</b> руб.\n\nВо избежание пени оплатите как можно скорее."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_overdue: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="PiggyBank" size={18} />
+                  Сбережения — в день окончания
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_savings_today || "Сегодня истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_today: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="PiggyBank" size={18} />
+                  Сбережения — за 1 день
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_savings_tomorrow || "Завтра истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_tomorrow: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="PiggyBank" size={18} />
+                  Сбережения — за N дней
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea rows={3} value={autoSettings.tpl_savings_days || "Через <b>{days} дн.</b> истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_days: e.target.value }))} />
+              </CardContent>
+            </Card>
+
+            <Button onClick={handleSaveAutoSettings} disabled={savingAuto}>
+              {savingAuto && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
+              Сохранить шаблоны
             </Button>
           </div>
         </TabsContent>

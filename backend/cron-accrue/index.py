@@ -221,30 +221,39 @@ def send_payment_reminders(cur, conn, check_date):
 
     overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
 
+    tpl_payment_today_title = settings.get('tpl_payment_today_title', 'Платёж сегодня')
+    tpl_payment_today_body = settings.get('tpl_payment_today_body', 'Сегодня дата платежа по займу {contract_no}. Сумма: {amount} руб.')
+    tpl_payment_tomorrow_title = settings.get('tpl_payment_tomorrow_title', 'Платёж завтра')
+    tpl_payment_tomorrow_body = settings.get('tpl_payment_tomorrow_body', 'До даты платежа по займу {contract_no} остался 1 день. Сумма: {amount} руб.')
+    tpl_payment_days_title = settings.get('tpl_payment_days_title', 'Платёж через {days} дн.')
+    tpl_payment_days_body = settings.get('tpl_payment_days_body', 'До даты платежа по займу {contract_no} осталось {days} дн. Сумма: {amount} руб.')
+    tpl_overdue_title = settings.get('tpl_overdue_title', 'Просрочка платежа')
+    tpl_overdue_body = settings.get('tpl_overdue_body', 'Платёж по займу {contract_no} просрочен. Сумма: {amount} руб. Во избежание пени оплатите как можно скорее.')
+
     reminders = []
     for days in reminder_days:
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             reminders.append(
                 ('reminder_today', target_date, 'pending',
-                 'Платёж сегодня',
-                 'Сегодня дата платежа по займу %s. Сумма: %s руб.'))
+                 tpl_payment_today_title,
+                 tpl_payment_today_body))
         elif days == 1:
             reminders.append(
                 ('reminder_1d', target_date, 'pending',
-                 'Платёж завтра',
-                 'До даты платежа по займу %s остался 1 день. Сумма: %s руб.'))
+                 tpl_payment_tomorrow_title,
+                 tpl_payment_tomorrow_body))
         else:
             reminders.append(
                 ('reminder_%dd' % days, target_date, 'pending',
-                 'Платёж через %d дн.' % days,
-                 'До даты платежа по займу %%s осталось %d дн. Сумма: %%s руб.' % days))
+                 tpl_payment_days_title.format(days=days),
+                 tpl_payment_days_body.format(contract_no='{contract_no}', amount='{amount}', days=days)))
 
     if overdue_enabled:
         reminders.append(
             ('overdue_1d', today_str, 'overdue',
-             'Просрочка платежа',
-             'Платёж по займу %s просрочен. Сумма: %s руб. Во избежание пени оплатите как можно скорее.'))
+             tpl_overdue_title,
+             tpl_overdue_body))
 
     sent_total = 0
     failed_total = 0
@@ -285,8 +294,8 @@ def send_payment_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-                title = title_tpl
-                body_text = body_tpl % (contract_no, amount_str)
+                title = title_tpl.format(contract_no=contract_no, amount=amount_str)
+                body_text = body_tpl.format(contract_no=contract_no, amount=amount_str)
                 payload = json.dumps({'title': title, 'body': body_text, 'url': '/'})
 
                 sub_sent = False
@@ -344,6 +353,13 @@ def send_savings_reminders(cur, conn, check_date):
         if d.isdigit():
             reminder_days.append(int(d))
 
+    tpl_savings_today_title = settings.get('tpl_savings_today_title', 'Договор сбережений истекает сегодня')
+    tpl_savings_today_body = settings.get('tpl_savings_today_body', 'Сегодня истекает срок договора сбережений {contract_no}. Сумма: {amount} руб.')
+    tpl_savings_tomorrow_title = settings.get('tpl_savings_tomorrow_title', 'Договор сбережений истекает завтра')
+    tpl_savings_tomorrow_body = settings.get('tpl_savings_tomorrow_body', 'Завтра истекает срок договора сбережений {contract_no}. Сумма: {amount} руб.')
+    tpl_savings_days_title = settings.get('tpl_savings_days_title', 'Окончание договора сбережений через {days} дн.')
+    tpl_savings_days_body = settings.get('tpl_savings_days_body', 'Через {days} дн. истекает срок договора сбережений {contract_no}. Сумма: {amount} руб.')
+
     sent_total = 0
     failed_total = 0
     errors = []
@@ -352,16 +368,16 @@ def send_savings_reminders(cur, conn, check_date):
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             rtype = 'savings_end_today'
-            title = 'Договор сбережений истекает сегодня'
-            body_tpl = 'Сегодня истекает срок договора сбережений %s. Сумма: %s руб.'
+            title = tpl_savings_today_title
+            body_tpl = tpl_savings_today_body
         elif days == 1:
             rtype = 'savings_end_1d'
-            title = 'Договор сбережений истекает завтра'
-            body_tpl = 'Завтра истекает срок договора сбережений %s. Сумма: %s руб.'
+            title = tpl_savings_tomorrow_title
+            body_tpl = tpl_savings_tomorrow_body
         else:
             rtype = 'savings_end_%dd' % days
-            title = 'Окончание договора сбережений через %d дн.' % days
-            body_tpl = 'Через %d дн. истекает срок договора сбережений %%s. Сумма: %%s руб.' % days
+            title = tpl_savings_days_title.format(days=days)
+            body_tpl = tpl_savings_days_body.format(contract_no='{contract_no}', amount='{amount}', days=days)
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -395,8 +411,9 @@ def send_savings_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-                body_text = body_tpl % (contract_no, amount_str)
-                payload = json.dumps({'title': title, 'body': body_text, 'url': '/'})
+                body_text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+                title_text = title.format(contract_no=contract_no, amount=amount_str)
+                payload = json.dumps({'title': title_text, 'body': body_text, 'url': '/'})
 
                 sub_sent = False
                 for sub_id, endpoint, p256dh, auth_key in subs:
@@ -499,22 +516,27 @@ def send_max_payment_reminders(cur, conn, check_date):
 
     overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
 
+    tpl_payment_today = settings.get('tpl_payment_today', 'Сегодня дата платежа по займу <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_payment_tomorrow = settings.get('tpl_payment_tomorrow', 'До даты платежа по займу <b>{contract_no}</b> остался <b>1 день</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_payment_days = settings.get('tpl_payment_days', 'До даты платежа по займу <b>{contract_no}</b> осталось <b>{days} дн.</b>\nСумма: <b>{amount}</b> руб.')
+    tpl_overdue = settings.get('tpl_overdue', 'Платёж по займу <b>{contract_no}</b> просрочен.\nСумма: <b>{amount}</b> руб.\n\nВо избежание пени оплатите как можно скорее.')
+
     reminders = []
     for days in reminder_days:
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             reminders.append(('max_reminder_today', target_date, 'pending',
-                'Сегодня дата платежа по займу <b>%s</b>.\nСумма: <b>%s</b> руб.'))
+                tpl_payment_today))
         elif days == 1:
             reminders.append(('max_reminder_1d', target_date, 'pending',
-                'До даты платежа по займу <b>%s</b> остался <b>1 день</b>.\nСумма: <b>%s</b> руб.'))
+                tpl_payment_tomorrow))
         else:
             reminders.append(('max_reminder_%dd' % days, target_date, 'pending',
-                'До даты платежа по займу <b>%%s</b> осталось <b>%d дн.</b>\nСумма: <b>%%s</b> руб.' % days))
+                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
 
     if overdue_enabled:
         reminders.append(('max_overdue_1d', today_str, 'overdue',
-            'Платёж по займу <b>%s</b> просрочен.\nСумма: <b>%s</b> руб.\n\nВо избежание пени оплатите как можно скорее.'))
+            tpl_overdue))
 
     sent_total = 0
     failed_total = 0
@@ -563,7 +585,7 @@ def send_max_payment_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-                text = body_tpl % (contract_no, amount_str)
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
 
                 sub_sent = False
                 for (chat_id,) in max_subs:
@@ -605,6 +627,10 @@ def send_max_savings_reminders(cur, conn, check_date):
         if d.isdigit():
             reminder_days.append(int(d))
 
+    tpl_savings_today = settings.get('tpl_savings_today', 'Сегодня истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_savings_tomorrow = settings.get('tpl_savings_tomorrow', 'Завтра истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_savings_days = settings.get('tpl_savings_days', 'Через <b>{days} дн.</b> истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+
     sent_total = 0
     failed_total = 0
     errors = []
@@ -613,13 +639,13 @@ def send_max_savings_reminders(cur, conn, check_date):
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             rtype = 'max_savings_end_today'
-            body_tpl = 'Сегодня истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+            body_tpl = tpl_savings_today
         elif days == 1:
             rtype = 'max_savings_end_1d'
-            body_tpl = 'Завтра истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+            body_tpl = tpl_savings_tomorrow
         else:
             rtype = 'max_savings_end_%dd' % days
-            body_tpl = 'Через <b>%d дн.</b> истекает срок договора сбережений <b>%%s</b>.\nСумма: <b>%%s</b> руб.' % days
+            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -661,7 +687,7 @@ def send_max_savings_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-                text = body_tpl % (contract_no, amount_str)
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
 
                 sub_sent = False
                 for (chat_id,) in max_subs:
@@ -705,22 +731,27 @@ def send_telegram_payment_reminders(cur, conn, check_date):
 
     overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
 
+    tpl_payment_today = settings.get('tpl_payment_today', 'Сегодня дата платежа по займу <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_payment_tomorrow = settings.get('tpl_payment_tomorrow', 'До даты платежа по займу <b>{contract_no}</b> остался <b>1 день</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_payment_days = settings.get('tpl_payment_days', 'До даты платежа по займу <b>{contract_no}</b> осталось <b>{days} дн.</b>\nСумма: <b>{amount}</b> руб.')
+    tpl_overdue = settings.get('tpl_overdue', 'Платёж по займу <b>{contract_no}</b> просрочен.\nСумма: <b>{amount}</b> руб.\n\nВо избежание пени оплатите как можно скорее.')
+
     reminders = []
     for days in reminder_days:
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             reminders.append(('tg_reminder_today', target_date, 'pending',
-                'Сегодня дата платежа по займу <b>%s</b>.\nСумма: <b>%s</b> руб.'))
+                tpl_payment_today))
         elif days == 1:
             reminders.append(('tg_reminder_1d', target_date, 'pending',
-                'До даты платежа по займу <b>%s</b> остался <b>1 день</b>.\nСумма: <b>%s</b> руб.'))
+                tpl_payment_tomorrow))
         else:
             reminders.append(('tg_reminder_%dd' % days, target_date, 'pending',
-                'До даты платежа по займу <b>%%s</b> осталось <b>%d дн.</b>\nСумма: <b>%%s</b> руб.' % days))
+                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
 
     if overdue_enabled:
         reminders.append(('tg_overdue_1d', today_str, 'overdue',
-            'Платёж по займу <b>%s</b> просрочен.\nСумма: <b>%s</b> руб.\n\nВо избежание пени оплатите как можно скорее.'))
+            tpl_overdue))
 
     sent_total = 0
     failed_total = 0
@@ -761,7 +792,7 @@ def send_telegram_payment_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-                text = body_tpl % (contract_no, amount_str)
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
 
                 sub_sent = False
                 for (chat_id,) in tg_subs:
@@ -803,6 +834,10 @@ def send_telegram_savings_reminders(cur, conn, check_date):
         if d.isdigit():
             reminder_days.append(int(d))
 
+    tpl_savings_today = settings.get('tpl_savings_today', 'Сегодня истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_savings_tomorrow = settings.get('tpl_savings_tomorrow', 'Завтра истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+    tpl_savings_days = settings.get('tpl_savings_days', 'Через <b>{days} дн.</b> истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.')
+
     sent_total = 0
     failed_total = 0
     errors = []
@@ -811,13 +846,13 @@ def send_telegram_savings_reminders(cur, conn, check_date):
         target_date = (today_date + timedelta(days=days)).isoformat()
         if days == 0:
             rtype = 'tg_savings_end_today'
-            body_tpl = 'Сегодня истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+            body_tpl = tpl_savings_today
         elif days == 1:
             rtype = 'tg_savings_end_1d'
-            body_tpl = 'Завтра истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+            body_tpl = tpl_savings_tomorrow
         else:
             rtype = 'tg_savings_end_%dd' % days
-            body_tpl = 'Через <b>%d дн.</b> истекает срок договора сбережений <b>%%s</b>.\nСумма: <b>%%s</b> руб.' % days
+            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -851,7 +886,7 @@ def send_telegram_savings_reminders(cur, conn, check_date):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-                text = body_tpl % (contract_no, amount_str)
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
 
                 sub_sent = False
                 for (chat_id,) in tg_subs:

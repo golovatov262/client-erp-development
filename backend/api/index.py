@@ -4576,7 +4576,14 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
 
     if action == 'save_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_enabled', 'savings_reminder_days', 'savings_remind_time'}
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_enabled', 'savings_reminder_days', 'savings_remind_time',
+                   'tpl_payment_today_title', 'tpl_payment_today_body',
+                   'tpl_payment_tomorrow_title', 'tpl_payment_tomorrow_body',
+                   'tpl_payment_days_title', 'tpl_payment_days_body',
+                   'tpl_overdue_title', 'tpl_overdue_body',
+                   'tpl_savings_today_title', 'tpl_savings_today_body',
+                   'tpl_savings_tomorrow_title', 'tpl_savings_tomorrow_body',
+                   'tpl_savings_days_title', 'tpl_savings_days_body'}
         for k, v in settings.items():
             if k not in allowed:
                 continue
@@ -5003,7 +5010,9 @@ def handle_notifications(method, params, body, staff, cur, conn):
 
     if action == 'save_telegram_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days'}
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days',
+                   'tpl_payment_today', 'tpl_payment_tomorrow', 'tpl_payment_days', 'tpl_overdue',
+                   'tpl_savings_today', 'tpl_savings_tomorrow', 'tpl_savings_days'}
         for k, v in settings.items():
             if k not in allowed:
                 continue
@@ -5023,7 +5032,9 @@ def handle_notifications(method, params, body, staff, cur, conn):
 
     if action == 'save_max_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days'}
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days',
+                   'tpl_payment_today', 'tpl_payment_tomorrow', 'tpl_payment_days', 'tpl_overdue',
+                   'tpl_savings_today', 'tpl_savings_tomorrow', 'tpl_savings_days'}
         for k, v in settings.items():
             if k not in allowed:
                 continue

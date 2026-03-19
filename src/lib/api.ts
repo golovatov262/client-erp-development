@@ -895,6 +895,21 @@ export interface PushSettings {
   savings_enabled: string;
   savings_reminder_days: string;
   savings_remind_time: string;
+  tpl_payment_today_title?: string;
+  tpl_payment_today_body?: string;
+  tpl_payment_tomorrow_title?: string;
+  tpl_payment_tomorrow_body?: string;
+  tpl_payment_days_title?: string;
+  tpl_payment_days_body?: string;
+  tpl_overdue_title?: string;
+  tpl_overdue_body?: string;
+  tpl_savings_today_title?: string;
+  tpl_savings_today_body?: string;
+  tpl_savings_tomorrow_title?: string;
+  tpl_savings_tomorrow_body?: string;
+  tpl_savings_days_title?: string;
+  tpl_savings_days_body?: string;
+  [key: string]: string | undefined;
 }
 
 export interface NotificationChannel {
