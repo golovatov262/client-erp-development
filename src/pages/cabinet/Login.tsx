@@ -10,6 +10,25 @@ import api from "@/lib/api";
 
 type Step = "choose" | "phone" | "sms" | "password_login" | "set_password" | "login_form";
 
+const formatPhone = (value: string): string => {
+  const digits = value.replace(/\D/g, "");
+  const d = digits.startsWith("8") ? "7" + digits.slice(1) : digits.startsWith("7") ? digits : digits.length > 0 ? "7" + digits : "";
+  if (!d) return "";
+  if (d.length <= 1) return "+7";
+  if (d.length <= 4) return `+7 (${d.slice(1)}`;
+  if (d.length <= 7) return `+7 (${d.slice(1, 4)}) ${d.slice(4)}`;
+  if (d.length <= 9) return `+7 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
+  return `+7 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7, 9)}-${d.slice(9, 11)}`;
+};
+
+const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) => {
+  const raw = e.target.value;
+  if (raw === "" || raw === "+") { setter(""); return; }
+  setter(formatPhone(raw));
+};
+
+const isPhoneComplete = (value: string) => value.replace(/\D/g, "").length === 11;
+
 const Login = () => {
   const [step, setStep] = useState<Step>("choose");
   const [phone, setPhone] = useState("");
@@ -196,13 +215,15 @@ const Login = () => {
                   <Label className="text-xs">Номер телефона</Label>
                   <Input
                     value={phone}
-                    onChange={e => setPhone(e.target.value)}
+                    onChange={e => handlePhoneChange(e, setPhone)}
                     placeholder="+7 (___) ___-__-__"
+                    type="tel"
+                    maxLength={18}
                     onKeyDown={e => e.key === "Enter" && handleSendSms()}
                   />
                   <p className="text-xs text-muted-foreground">Укажите номер, который зарегистрирован в кооперативе</p>
                 </div>
-                <Button className="w-full gap-2" onClick={handleSendSms} disabled={loading || !phone.trim()}>
+                <Button className="w-full gap-2" onClick={handleSendSms} disabled={loading || !isPhoneComplete(phone)}>
                   {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Send" size={16} />}
                   Получить SMS-код
                 </Button>
