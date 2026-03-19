@@ -136,8 +136,10 @@ export const api = {
   },
 
   export: {
-    download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure", id: number, format: "xlsx" | "pdf", extra?: Record<string, string>) => {
-      const res = await request<ExportResult>("GET", { entity: "export", type, id, format, ...extra });
+    download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure" | "members", id: number | undefined, format: "xlsx" | "pdf", extra?: Record<string, string>) => {
+      const params: Record<string, unknown> = { entity: "export", type, format, ...extra };
+      if (id !== undefined) params.id = id;
+      const res = await request<ExportResult>("GET", params);
       const binary = atob(res.file);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);

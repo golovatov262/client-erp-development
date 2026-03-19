@@ -3262,10 +3262,110 @@ def generate_loan_closure_pdf(loan, member, org, closed_date):
     doc.build(story)
     return buf.getvalue()
 
+def generate_members_xlsx(members):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Пайщики'
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    cols = [
+        ('Номер', 'member_no', 14),
+        ('Тип', 'member_type_label', 6),
+        ('Фамилия', 'last_name', 18),
+        ('Имя', 'first_name', 15),
+        ('Отчество', 'middle_name', 18),
+        ('Наименование компании', 'company_name', 30),
+        ('ИНН', 'inn', 14),
+        ('Телефон', 'phone', 18),
+        ('Email', 'email', 22),
+        ('Telegram', 'telegram', 16),
+        ('Дата рождения', 'birth_date', 14),
+        ('Место рождения', 'birth_place', 22),
+        ('Серия паспорта', 'passport_series', 10),
+        ('Номер паспорта', 'passport_number', 10),
+        ('Код подразделения', 'passport_dept_code', 12),
+        ('Дата выдачи паспорта', 'passport_issue_date', 14),
+        ('Кем выдан', 'passport_issued_by', 30),
+        ('Адрес регистрации', 'registration_address', 35),
+        ('Семейное положение', 'marital_status', 16),
+        ('ФИО супруга(и)', 'spouse_fio', 22),
+        ('Телефон супруга(и)', 'spouse_phone', 16),
+        ('Доп. телефон', 'extra_phone', 16),
+        ('Доп. контакт ФИО', 'extra_contact_fio', 22),
+        ('Руководитель ФИО', 'director_fio', 22),
+        ('Телефон руководителя', 'director_phone', 16),
+        ('Контактное лицо ФИО', 'contact_person_fio', 22),
+        ('Телефон контактного лица', 'contact_person_phone', 16),
+        ('БИК банка', 'bank_bik', 12),
+        ('Расчётный счёт', 'bank_account', 22),
+        ('Статус', 'status_label', 12),
+        ('Активные займы', 'active_loans', 10),
+        ('Активные вклады', 'active_savings', 10),
+        ('Дата регистрации', 'created_at', 16),
+    ]
+    for ci, (title, _, width) in enumerate(cols, 1):
+        cell = ws.cell(row=1, column=ci, value=title)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[chr(64 + ci) if ci <= 26 else ('A' + chr(64 + ci - 26))].width = width
+    status_map = {'active': 'Активен', 'inactive': 'Неактивен', 'deleted': 'Удалён'}
+    type_map = {'FL': 'ФЛ', 'UL': 'ЮЛ'}
+    for ri, m in enumerate(members, 2):
+        m['member_type_label'] = type_map.get(m.get('member_type', ''), m.get('member_type', ''))
+        m['status_label'] = status_map.get(m.get('status', ''), m.get('status', ''))
+        if m.get('created_at'):
+            raw = str(m['created_at'])
+            if 'T' in raw:
+                raw = raw.split('T')[0]
+            parts = raw.split('-')
+            if len(parts) == 3:
+                m['created_at'] = '%s.%s.%s' % (parts[2], parts[1], parts[0])
+        for df in ('birth_date', 'passport_issue_date'):
+            if m.get(df):
+                raw = str(m[df])
+                parts = raw.split('-')
+                if len(parts) == 3:
+                    m[df] = '%s.%s.%s' % (parts[2], parts[1], parts[0])
+        for ci, (_, key, _) in enumerate(cols, 1):
+            val = m.get(key, '')
+            if val is None:
+                val = ''
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center')
+    ws.auto_filter.ref = 'A1:%s%s' % (chr(64 + len(cols)) if len(cols) <= 26 else ('A' + chr(64 + len(cols) - 26)), len(members) + 1)
+    ws.freeze_panes = 'A2'
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 def handle_export(params, cur):
     export_type = params.get('type', 'loan')
     format_ = params.get('format', 'xlsx')
     item_id = params.get('id')
+
+    if export_type == 'members':
+        rows = query_rows(cur, """
+            SELECT m.*, 
+                   (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.status != 'closed') as active_loans,
+                   (SELECT COUNT(*) FROM savings s WHERE s.member_id = m.id AND s.status = 'active') as active_savings
+            FROM members m WHERE m.status != 'deleted' ORDER BY m.created_at DESC
+        """)
+        data = generate_members_xlsx(rows)
+        ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        fn = 'members_%s.xlsx' % datetime.now().strftime('%Y%m%d')
+        return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
     if not item_id:
         return None
 

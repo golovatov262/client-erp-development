@@ -50,6 +50,7 @@ const Members = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const { toast } = useToast();
 
+  const [exporting, setExporting] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const setField = (key: string, val: string) => setForm(prev => ({ ...prev, [key]: val }));
 
@@ -59,6 +60,18 @@ const Members = () => {
   };
 
   useEffect(() => { loadMembers(); }, []);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await api.export.download("members", undefined, "xlsx");
+      toast({ title: "Список пайщиков выгружен в Excel" });
+    } catch {
+      toast({ title: "Ошибка выгрузки", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const filtered = members.filter(
     (m) => m.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -159,6 +172,10 @@ const Members = () => {
           <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Поиск по ФИО, ИНН, номеру..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
         </div>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="gap-1.5 shrink-0">
+          <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
+          {exporting ? "Выгрузка..." : "Экспорт в Excel"}
+        </Button>
       </div>
 
       <DataTable columns={columns} data={filtered} onRowClick={openEdit} emptyMessage="Пайщики не найдены. Добавьте первого пайщика." />
