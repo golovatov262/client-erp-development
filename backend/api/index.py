@@ -4416,31 +4416,6 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
         conn.commit()
         return {'success': True}
 
-    elif action == 'notification_settings':
-        cur.execute("SELECT channel, setting_key, setting_value FROM notification_settings WHERE user_id=%s" % user_id)
-        rows = cur.fetchall()
-        settings = {}
-        for r in rows:
-            ch = r[0]
-            if ch not in settings:
-                settings[ch] = {}
-            settings[ch][r[1]] = r[2]
-        return {'settings': settings}
-
-    elif action == 'save_notification_settings':
-        channel = body.get('channel', '')
-        setting_key = body.get('setting_key', '')
-        setting_value = body.get('setting_value', 'true')
-        if not channel or not setting_key:
-            return {'error': 'Не указан канал или ключ настройки'}
-        cur.execute("""
-            INSERT INTO notification_settings (user_id, channel, setting_key, setting_value, updated_at)
-            VALUES (%s, '%s', '%s', '%s', NOW())
-            ON CONFLICT (user_id, channel, setting_key) DO UPDATE SET setting_value='%s', updated_at=NOW()
-        """ % (user_id, esc(channel), esc(setting_key), esc(setting_value), esc(setting_value)))
-        conn.commit()
-        return {'success': True}
-
     return {'error': 'Неизвестное действие'}
 
 def handle_audit(params, staff, cur):
