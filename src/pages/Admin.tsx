@@ -55,7 +55,7 @@ const Admin = () => {
     if (form.role) updates.role = form.role;
     if (form.member_id) updates.member_id = Number(form.member_id);
     if (form.password) updates.password = form.password;
-    await api.users.update(userId, updates);
+    await api.users.update({ id: userId, ...updates } as Parameters<typeof api.users.update>[0]);
     toast({ title: "Пользователь обновлён" });
     load();
   };
@@ -72,7 +72,7 @@ const Admin = () => {
     const u = users.find(x => x.id === userId);
     if (!u) return;
     const newStatus = u.status === "active" ? "blocked" : "active";
-    await api.users.update(userId, { status: newStatus });
+    await api.users.update({ id: userId, status: newStatus });
     toast({ title: newStatus === "blocked" ? "Пользователь заблокирован" : "Пользователь разблокирован" });
     load();
   };
