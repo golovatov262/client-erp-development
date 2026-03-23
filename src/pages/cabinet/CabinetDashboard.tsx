@@ -73,7 +73,7 @@ interface CabinetDashboardProps {
 }
 
 const CabinetDashboard = ({ data, userName, onOpenLoan, onOpenSaving }: CabinetDashboardProps) => {
-  const totalLoanBalance = data.loans.filter(l => l.status === "active").reduce((s, l) => s + l.balance, 0);
+  const totalLoanBalance = data.loans.filter(l => l.status === "active" || l.status === "overdue").reduce((s, l) => s + l.balance, 0);
   const totalSavings = data.savings.filter(s => s.status === "active").reduce((s, i) => s + (i.current_balance || i.amount), 0);
   const totalShares = data.shares.reduce((s, a) => s + a.balance, 0);
 
