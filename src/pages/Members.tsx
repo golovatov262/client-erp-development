@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { Member, MemberDetail } from "@/lib/api";
 import MemberChecksTab from "@/pages/members/MemberChecksTab";
+import PodftTab from "@/pages/members/PodftTab";
 
 const columns: Column<Member>[] = [
   { key: "member_no", label: "Номер" },
@@ -53,6 +54,7 @@ const Members = () => {
   const { toast } = useToast();
 
   const [exporting, setExporting] = useState(false);
+  const [pageTab, setPageTab] = useState("list");
   const [mainTab, setMainTab] = useState("data");
   const { isAdmin } = useAuth();
   const [form, setForm] = useState<Record<string, string>>({});
@@ -317,23 +319,36 @@ const Members = () => {
       <PageHeader
         title="Пайщики"
         description={`Всего ${members.length} пайщиков в системе`}
-        actionLabel="Добавить пайщика"
-        actionIcon="UserPlus"
-        onAction={openCreate}
+        actionLabel={pageTab === "list" ? "Добавить пайщика" : undefined}
+        actionIcon={pageTab === "list" ? "UserPlus" : undefined}
+        onAction={pageTab === "list" ? openCreate : undefined}
       />
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Поиск по ФИО, ИНН, номеру..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
-        </div>
-        <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="gap-1.5 shrink-0">
-          <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
-          {exporting ? "Выгрузка..." : "Экспорт в Excel"}
-        </Button>
-      </div>
+      <Tabs value={pageTab} onValueChange={setPageTab}>
+        <TabsList>
+          <TabsTrigger value="list" className="gap-1.5"><Icon name="Users" size={14} />Список пайщиков</TabsTrigger>
+          <TabsTrigger value="podft" className="gap-1.5"><Icon name="ShieldAlert" size={14} />ПОД/ФТ</TabsTrigger>
+        </TabsList>
 
-      <DataTable columns={columns} data={filtered} onRowClick={openEdit} emptyMessage="Пайщики не найдены. Добавьте первого пайщика." />
+        <TabsContent value="list" className="space-y-4 mt-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Поиск по ФИО, ИНН, номеру..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            </div>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting} className="gap-1.5 shrink-0">
+              <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
+              {exporting ? "Выгрузка..." : "Экспорт в Excel"}
+            </Button>
+          </div>
+
+          <DataTable columns={columns} data={filtered} onRowClick={openEdit} emptyMessage="Пайщики не найдены. Добавьте первого пайщика." />
+        </TabsContent>
+
+        <TabsContent value="podft" className="mt-4">
+          <PodftTab />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={showForm} onOpenChange={v => { setShowForm(v); if (!v) { setEditingId(null); setForm({}); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

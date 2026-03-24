@@ -6057,7 +6057,167 @@ def handle_member_checks(method, params, body, cur, conn, staff, ip=''):
 
     return {'error': 'Метод не поддерживается'}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks'}
+def handle_podft(method, params, body, cur, conn, staff, ip=''):
+    """ПОД/ФТ — проверка пайщиков по спискам РФМ (террористы, МВК, ООН)"""
+    action = params.get('action') or body.get('action', '')
+
+    if method == 'GET' and action == 'history':
+        return query_rows(cur, "SELECT id, check_date, total_members, checked_count, found_count, status, started_by, completed_at, created_at FROM rfm_checks ORDER BY created_at DESC LIMIT 50")
+
+    if method == 'GET' and action == 'detail':
+        check_id = params.get('id')
+        if not check_id:
+            return {'error': 'Не указан id'}
+        row = query_one(cur, "SELECT * FROM rfm_checks WHERE id=%s" % check_id)
+        if not row:
+            return None
+        if row.get('results') and isinstance(row['results'], str):
+            row['results'] = json.loads(row['results'])
+        return row
+
+    if method == 'GET' and action == 'last':
+        row = query_one(cur, "SELECT * FROM rfm_checks WHERE status='completed' ORDER BY created_at DESC LIMIT 1")
+        if row and row.get('results') and isinstance(row['results'], str):
+            row['results'] = json.loads(row['results'])
+        return row or {'status': 'none'}
+
+    if method == 'POST' and action == 'run':
+        rfm_key = os.environ.get('RFM_API_KEY', '')
+        if not rfm_key:
+            return {'error': 'Не настроен ключ RFM_API_KEY'}
+
+        cur.execute("SELECT id FROM rfm_checks WHERE status='running' LIMIT 1")
+        if cur.fetchone():
+            return {'error': 'Проверка уже запущена, дождитесь завершения'}
+
+        cur.execute("SELECT id, last_name, first_name, middle_name, birth_date, inn, member_type, company_name, member_no FROM members WHERE status='active' ORDER BY id")
+        members = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        members_list = [{cols[i]: serialize(m[i]) for i in range(len(cols))} for m in members]
+
+        if not members_list:
+            return {'error': 'Нет активных пайщиков для проверки'}
+
+        cur.execute("INSERT INTO rfm_checks (total_members, checked_count, found_count, status, started_by) VALUES (%s, 0, 0, 'running', '%s') RETURNING id" % (
+            len(members_list), esc(staff.get('name', ''))))
+        check_id = cur.fetchone()[0]
+        conn.commit()
+
+        batch_size = 50
+        all_found = []
+        checked = 0
+
+        for i in range(0, len(members_list), batch_size):
+            batch = members_list[i:i+batch_size]
+            clients = []
+            for m in batch:
+                client = {}
+                if m.get('member_type') == 'FL':
+                    parts = []
+                    if m.get('last_name'):
+                        parts.append(m['last_name'])
+                    if m.get('first_name'):
+                        parts.append(m['first_name'])
+                    if m.get('middle_name'):
+                        parts.append(m['middle_name'])
+                    if parts:
+                        client['full_name'] = ' '.join(parts)
+                    if m.get('birth_date'):
+                        client['birth_date'] = m['birth_date']
+                else:
+                    if m.get('company_name'):
+                        client['full_name'] = m['company_name']
+                if m.get('inn'):
+                    client['inn'] = m['inn']
+                if client:
+                    client['_member_id'] = m['id']
+                    client['_member_no'] = m.get('member_no', '')
+                    client['_member_name'] = client.get('full_name', m.get('company_name', ''))
+                    clients.append(client)
+
+            if not clients:
+                checked += len(batch)
+                continue
+
+            req_clients = []
+            for c in clients:
+                rc = {}
+                if c.get('full_name'):
+                    rc['full_name'] = c['full_name']
+                if c.get('birth_date'):
+                    rc['birth_date'] = c['birth_date']
+                if c.get('inn'):
+                    rc['inn'] = c['inn']
+                req_clients.append(rc)
+
+            req_body = json.dumps({'clients': req_clients}, ensure_ascii=False)
+            req = urllib.request.Request(
+                'https://rfm.loanapp.ru/check-batch',
+                data=req_body.encode('utf-8'),
+                headers={'Content-Type': 'application/json', 'X-API-Key': rfm_key},
+                method='POST'
+            )
+            try:
+                resp = urllib.request.urlopen(req, timeout=60)
+                resp_data = json.loads(resp.read().decode('utf-8'))
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode('utf-8') if e.fp else ''
+                checked += len(batch)
+                cur.execute("UPDATE rfm_checks SET checked_count=%s WHERE id=%s" % (checked, check_id))
+                conn.commit()
+                continue
+            except Exception:
+                checked += len(batch)
+                cur.execute("UPDATE rfm_checks SET checked_count=%s WHERE id=%s" % (checked, check_id))
+                conn.commit()
+                continue
+
+            results = resp_data.get('results', [])
+            for idx, res in enumerate(results):
+                checked += 1
+                if not res.get('found', False):
+                    continue
+                client_info = clients[idx] if idx < len(clients) else {}
+                found_entry = {
+                    'member_id': client_info.get('_member_id'),
+                    'member_no': client_info.get('_member_no', ''),
+                    'member_name': client_info.get('_member_name', ''),
+                    'matches': res.get('matches', []),
+                    'lists': res.get('lists', []),
+                }
+                all_found.append(found_entry)
+
+                mid = client_info.get('_member_id')
+                if mid:
+                    match_lists = ', '.join(res.get('lists', []))
+                    match_count = len(res.get('matches', []))
+                    comment_text = 'Найден в перечнях: %s (%d совпадений)' % (match_lists, match_count)
+                    result_json = json.dumps(res, ensure_ascii=False, default=str).replace("'", "''")
+                    cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'terrorist', 'fail', '%s', '%s', '%s')" % (
+                        mid, result_json, esc(comment_text), esc(staff.get('name', ''))))
+
+            if checked > (i + batch_size - 10):
+                cur.execute("UPDATE rfm_checks SET checked_count=%s, found_count=%s WHERE id=%s" % (checked, len(all_found), check_id))
+                conn.commit()
+
+        results_json = json.dumps(all_found, ensure_ascii=False, default=str).replace("'", "''")
+        cur.execute("UPDATE rfm_checks SET checked_count=%s, found_count=%s, status='completed', results='%s', completed_at=NOW() WHERE id=%s" % (
+            checked, len(all_found), results_json, check_id))
+        audit_log(cur, staff, 'podft_check', 'system', 0, '', 'ПОД/ФТ проверка: %d пайщиков, найдено совпадений: %d' % (checked, len(all_found)), ip)
+        conn.commit()
+
+        return {
+            'check_id': check_id,
+            'total_members': len(members_list),
+            'checked': checked,
+            'found': len(all_found),
+            'found_details': all_found,
+            'status': 'completed'
+        }
+
+    return {'error': 'Неизвестное действие'}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
@@ -6092,6 +6252,8 @@ def handler(event, context):
             result = handle_members(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'member_checks':
             result = handle_member_checks(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'podft':
+            result = handle_podft(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
             result = handle_loans(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'savings':

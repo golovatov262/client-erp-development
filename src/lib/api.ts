@@ -312,7 +312,48 @@ export const api = {
     uploadImage: (orgId: number, imageType: "signature" | "stamp", base64: string, contentType?: string) => request<{ success: boolean; url: string }>("POST", undefined, { entity: "organizations", action: "upload_image", id: orgId, image_type: imageType, image: base64, content_type: contentType }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "delete", id }),
   },
+
+  podft: {
+    history: () => request<RfmCheck[]>("GET", { entity: "podft", action: "history" }),
+    detail: (id: number) => request<RfmCheckDetail>("GET", { entity: "podft", action: "detail", id }),
+    last: () => request<RfmCheckDetail | { status: string }>("GET", { entity: "podft", action: "last" }),
+    run: () => request<RfmRunResult>("POST", undefined, { entity: "podft", action: "run" }),
+  },
 };
+
+export interface RfmCheck {
+  id: number;
+  check_date: string;
+  total_members: number;
+  checked_count: number;
+  found_count: number;
+  status: string;
+  started_by: string;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface RfmFoundEntry {
+  member_id: number;
+  member_no: string;
+  member_name: string;
+  matches: Array<Record<string, unknown>>;
+  lists: string[];
+}
+
+export interface RfmCheckDetail extends RfmCheck {
+  results: RfmFoundEntry[];
+}
+
+export interface RfmRunResult {
+  check_id: number;
+  total_members: number;
+  checked: number;
+  found: number;
+  found_details: RfmFoundEntry[];
+  status: string;
+  error?: string;
+}
 
 export interface OverdueLoanItem {
   loan_id: number;
