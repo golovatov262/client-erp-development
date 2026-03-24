@@ -5744,6 +5744,244 @@ def kvell_passport_poll(request_id, member_id, check_id, cur, conn, staff, ip=''
 
     return {'check_id': check_id, 'status': check_status, 'comment': comment, 'result': poll_data}
 
+def fssp_check(member_id, cur, conn, staff, ip=''):
+    """Проверка исполнительных производств через API ФССП"""
+    token = os.environ.get('FSSP_API_TOKEN', '')
+    if not token:
+        return {'error': 'Не настроен токен ФССП API (FSSP_API_TOKEN)'}
+
+    cur.execute("SELECT last_name, first_name, middle_name, birth_date, member_type FROM members WHERE id=%s" % member_id)
+    m = cur.fetchone()
+    if not m:
+        return {'error': 'Пайщик не найден'}
+    last_name, first_name, middle_name, birth_date, member_type = m
+    if member_type != 'FL':
+        return {'error': 'Проверка ФССП доступна только для физических лиц'}
+    if not last_name or not first_name:
+        return {'error': 'У пайщика не заполнены фамилия и имя'}
+
+    search_params = {
+        'token': token,
+        'lastname': last_name,
+        'firstname': first_name,
+    }
+    if middle_name:
+        search_params['secondname'] = middle_name
+    if birth_date:
+        bd = birth_date.isoformat() if hasattr(birth_date, 'isoformat') else str(birth_date)
+        parts = bd.split('-')
+        if len(parts) == 3:
+            search_params['birthdate'] = '%s.%s.%s' % (parts[2], parts[1], parts[0])
+
+    qs = urllib.parse.urlencode(search_params)
+    req = urllib.request.Request(
+        'https://api-ip.fssp.gov.ru/api/v1.0/search/physical?%s' % qs,
+        method='GET'
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        resp_data = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8') if e.fp else ''
+        return {'error': 'ФССП API ошибка %s: %s' % (e.code, err_body[:500])}
+    except Exception as e:
+        return {'error': 'Ошибка соединения с ФССП: %s' % str(e)[:300]}
+
+    if resp_data.get('code') != 0 and resp_data.get('status') != 'success':
+        return {'error': 'ФССП: %s' % (resp_data.get('exception', resp_data.get('message', 'Неизвестная ошибка')))}
+
+    task_id = resp_data.get('response', {}).get('task', '')
+    if not task_id:
+        staff_name = esc(staff.get('name', ''))
+        result_data = json.dumps(resp_data, ensure_ascii=False, default=str).replace("'", "''")
+        cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'fssp', 'warning', '%s', '%s', '%s') RETURNING id" % (
+            member_id, result_data, esc('Не получен task_id от ФССП'), staff_name))
+        check_id = cur.fetchone()[0]
+        conn.commit()
+        return {'check_id': check_id, 'status': 'warning', 'message': 'Запрос отправлен, но не получен task_id'}
+
+    import time
+    final_result = None
+    for attempt in range(12):
+        time.sleep(3)
+        status_qs = urllib.parse.urlencode({'token': token, 'task': task_id})
+        try:
+            req_st = urllib.request.Request('https://api-ip.fssp.gov.ru/api/v1.0/status?%s' % status_qs, method='GET')
+            resp_st = urllib.request.urlopen(req_st, timeout=30)
+            status_data = json.loads(resp_st.read().decode('utf-8'))
+        except Exception:
+            continue
+
+        progress = status_data.get('response', {}).get('status', -1)
+        if progress == 0:
+            try:
+                result_qs = urllib.parse.urlencode({'token': token, 'task': task_id})
+                req_res = urllib.request.Request('https://api-ip.fssp.gov.ru/api/v1.0/result?%s' % result_qs, method='GET')
+                resp_res = urllib.request.urlopen(req_res, timeout=30)
+                final_result = json.loads(resp_res.read().decode('utf-8'))
+            except Exception as e:
+                final_result = {'error': str(e)[:300]}
+            break
+        if progress == 3:
+            final_result = status_data
+            break
+
+    if not final_result:
+        staff_name = esc(staff.get('name', ''))
+        result_data = json.dumps({'task': task_id, 'note': 'Превышено время ожидания ответа'}, ensure_ascii=False).replace("'", "''")
+        cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'fssp', 'pending', '%s', '%s', '%s') RETURNING id" % (
+            member_id, result_data, esc('Ожидание ответа от ФССП (task: %s)' % task_id), staff_name))
+        check_id = cur.fetchone()[0]
+        audit_log(cur, staff, 'create_check', 'member', member_id, esc('%s %s' % (last_name, first_name)), 'Проверка ФССП: ожидание ответа', ip)
+        conn.commit()
+        return {'check_id': check_id, 'task': task_id, 'status': 'pending', 'message': 'Запрос отправлен, ожидается ответ ФССП'}
+
+    result_resp = final_result.get('response', {})
+    result_list = result_resp.get('result', [])
+
+    total_ip = 0
+    total_debt = 0.0
+    active_ip = 0
+    ip_details = []
+
+    if isinstance(result_list, list):
+        for group in result_list:
+            items = group.get('result', []) if isinstance(group, dict) else []
+            if isinstance(items, list):
+                for item in items:
+                    total_ip += 1
+                    debt = 0
+                    try:
+                        debt = float(item.get('ip_end', {}).get('debt_rest', 0) or 0) if isinstance(item.get('ip_end'), dict) else 0
+                    except (ValueError, TypeError):
+                        pass
+                    total_debt += debt
+                    exe_production = item.get('exe_production', '')
+                    if not item.get('ip_end') or debt > 0:
+                        active_ip += 1
+                    ip_details.append({
+                        'subject': item.get('name', ''),
+                        'exe_production': exe_production,
+                        'details': item.get('details', ''),
+                        'debt_rest': debt,
+                    })
+
+    if total_ip == 0:
+        check_status = 'ok'
+        comment = 'Исполнительные производства не найдены'
+    elif active_ip == 0:
+        check_status = 'ok'
+        comment = 'Найдено %d ИП, все завершены' % total_ip
+    elif total_debt > 0:
+        check_status = 'fail'
+        comment = 'Найдено %d ИП, активных: %d, остаток долга: %.2f руб.' % (total_ip, active_ip, total_debt)
+    else:
+        check_status = 'warning'
+        comment = 'Найдено %d ИП, активных: %d' % (total_ip, active_ip)
+
+    save_result = {
+        'task': task_id,
+        'total_ip': total_ip,
+        'active_ip': active_ip,
+        'total_debt': total_debt,
+        'details': ip_details[:20],
+    }
+
+    staff_name = esc(staff.get('name', ''))
+    result_data = json.dumps(save_result, ensure_ascii=False, default=str).replace("'", "''")
+    cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'fssp', '%s', '%s', '%s', '%s') RETURNING id" % (
+        member_id, check_status, result_data, esc(comment), staff_name))
+    check_id = cur.fetchone()[0]
+    audit_log(cur, staff, 'create_check', 'member', member_id, esc('%s %s' % (last_name, first_name)), 'Проверка ФССП: %s' % comment, ip)
+    conn.commit()
+
+    return {'check_id': check_id, 'status': check_status, 'comment': comment, 'result': save_result}
+
+def fssp_poll(task_id, member_id, check_id, cur, conn, staff, ip=''):
+    """Повторный опрос результата проверки ФССП по task_id"""
+    token = os.environ.get('FSSP_API_TOKEN', '')
+    if not token:
+        return {'error': 'Не настроен токен ФССП API'}
+
+    status_qs = urllib.parse.urlencode({'token': token, 'task': task_id})
+    try:
+        req_st = urllib.request.Request('https://api-ip.fssp.gov.ru/api/v1.0/status?%s' % status_qs, method='GET')
+        resp_st = urllib.request.urlopen(req_st, timeout=30)
+        status_data = json.loads(resp_st.read().decode('utf-8'))
+    except Exception as e:
+        return {'error': 'Ошибка соединения: %s' % str(e)[:300]}
+
+    progress = status_data.get('response', {}).get('status', -1)
+    if progress != 0:
+        if progress == 3:
+            return {'status': 'warning', 'message': 'Ошибка обработки запроса на стороне ФССП'}
+        return {'status': 'pending', 'message': 'Ответ ещё не готов (статус: %s)' % progress}
+
+    result_qs = urllib.parse.urlencode({'token': token, 'task': task_id})
+    try:
+        req_res = urllib.request.Request('https://api-ip.fssp.gov.ru/api/v1.0/result?%s' % result_qs, method='GET')
+        resp_res = urllib.request.urlopen(req_res, timeout=30)
+        final_result = json.loads(resp_res.read().decode('utf-8'))
+    except Exception as e:
+        return {'error': 'Ошибка получения результата: %s' % str(e)[:300]}
+
+    result_resp = final_result.get('response', {})
+    result_list = result_resp.get('result', [])
+
+    total_ip = 0
+    total_debt = 0.0
+    active_ip = 0
+    ip_details = []
+
+    if isinstance(result_list, list):
+        for group in result_list:
+            items = group.get('result', []) if isinstance(group, dict) else []
+            if isinstance(items, list):
+                for item in items:
+                    total_ip += 1
+                    debt = 0
+                    try:
+                        debt = float(item.get('ip_end', {}).get('debt_rest', 0) or 0) if isinstance(item.get('ip_end'), dict) else 0
+                    except (ValueError, TypeError):
+                        pass
+                    total_debt += debt
+                    if not item.get('ip_end') or debt > 0:
+                        active_ip += 1
+                    ip_details.append({
+                        'subject': item.get('name', ''),
+                        'exe_production': item.get('exe_production', ''),
+                        'details': item.get('details', ''),
+                        'debt_rest': debt,
+                    })
+
+    if total_ip == 0:
+        check_status = 'ok'
+        comment = 'Исполнительные производства не найдены'
+    elif active_ip == 0:
+        check_status = 'ok'
+        comment = 'Найдено %d ИП, все завершены' % total_ip
+    elif total_debt > 0:
+        check_status = 'fail'
+        comment = 'Найдено %d ИП, активных: %d, остаток долга: %.2f руб.' % (total_ip, active_ip, total_debt)
+    else:
+        check_status = 'warning'
+        comment = 'Найдено %d ИП, активных: %d' % (total_ip, active_ip)
+
+    save_result = {
+        'task': task_id,
+        'total_ip': total_ip,
+        'active_ip': active_ip,
+        'total_debt': total_debt,
+        'details': ip_details[:20],
+    }
+
+    result_data = json.dumps(save_result, ensure_ascii=False, default=str).replace("'", "''")
+    cur.execute("UPDATE member_checks SET status='%s', result='%s', comment='%s', checked_by_name='%s', updated_at=NOW() WHERE id=%s AND member_id=%s" % (
+        check_status, result_data, esc(comment), esc(staff.get('name', '')), check_id, member_id))
+    conn.commit()
+
+    return {'check_id': check_id, 'status': check_status, 'comment': comment, 'result': save_result}
+
 def handle_member_checks(method, params, body, cur, conn, staff, ip=''):
     """Управление проверками пайщиков (паспорт, ФССП и др.)"""
     member_id = params.get('member_id') or body.get('member_id')
