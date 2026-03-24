@@ -23,5 +23,6 @@
   {"name": "Cabinet MAX status unauthorized", "method": "GET", "path": "/?entity=cabinet&action=max_status&token=invalid", "expectedStatus": 401},
   {"name": "Cabinet notification settings unauthorized", "method": "GET", "path": "/?entity=cabinet&action=notification_settings&token=invalid", "expectedStatus": 401},
   {"name": "Export members requires auth", "method": "GET", "path": "/?entity=export&type=members", "expectedStatus": 401},
-  {"name": "Member checks requires auth", "method": "GET", "path": "/?entity=member_checks&member_id=1", "expectedStatus": 401}
+  {"name": "Member checks requires auth", "method": "GET", "path": "/?entity=member_checks&member_id=1", "expectedStatus": 401},
+  {"name": "Passport auto check requires auth", "method": "POST", "path": "/", "body": {"entity": "member_checks", "member_id": 1, "action": "passport_auto"}, "expectedStatus": 401}
 ]}

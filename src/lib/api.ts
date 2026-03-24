@@ -50,6 +50,10 @@ export const api = {
       request<{ success: boolean }>("PUT", { entity: "member_checks" }, { entity: "member_checks", ...data }),
     delete: (memberId: number, checkId: number) =>
       request<{ success: boolean }>("DELETE", { entity: "member_checks", member_id: memberId, check_id: checkId }),
+    passportAutoCheck: (memberId: number) =>
+      request<PassportCheckResult>("POST", undefined, { entity: "member_checks", member_id: memberId, action: "passport_auto" }),
+    passportPoll: (memberId: number, requestId: string, checkId: number) =>
+      request<PassportCheckResult>("POST", undefined, { entity: "member_checks", member_id: memberId, action: "passport_poll", request_id: requestId, check_id: checkId }),
   },
 
   loans: {
@@ -401,6 +405,16 @@ export interface MemberCheck {
   checked_by_name: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface PassportCheckResult {
+  check_id?: number;
+  request_id?: string;
+  status: string;
+  comment?: string;
+  message?: string;
+  result?: Record<string, unknown>;
+  error?: string;
 }
 
 export interface Member {

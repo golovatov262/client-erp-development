@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +31,47 @@ const fmtDate = (d: string) => {
   return dt.toLocaleDateString("ru-RU") + " " + dt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 };
 
+const renderPassportResult = (result: Record<string, unknown>) => {
+  if (!result || Object.keys(result).length === 0) return null;
+
+  const inner = (result.result || result) as Record<string, unknown>;
+  const status = (inner.status || result.state || "") as string;
+  const reason = (inner.reason || inner.message || "") as string;
+  const requestId = (result.request_id || result.requestId || inner.request_id || "") as string;
+
+  return (
+    <div className="mt-2 p-2.5 bg-muted/50 rounded-md text-xs space-y-1">
+      <div className="font-medium text-foreground">Данные СМЭВ3:</div>
+      {status && (
+        <div className="flex gap-1.5">
+          <span className="text-muted-foreground">Статус:</span>
+          <span className={
+            ["valid", "VALID", "действителен"].includes(status) ? "text-green-600 font-medium" :
+            ["invalid", "INVALID", "недействителен"].includes(status) ? "text-red-600 font-medium" :
+            "text-yellow-600 font-medium"
+          }>
+            {["valid", "VALID", "действителен"].includes(status) ? "Действителен" :
+             ["invalid", "INVALID", "недействителен"].includes(status) ? "Недействителен" :
+             ["not_found", "NOT_FOUND"].includes(status) ? "Не найден" : status}
+          </span>
+        </div>
+      )}
+      {reason && (
+        <div className="flex gap-1.5">
+          <span className="text-muted-foreground">Причина:</span>
+          <span>{reason}</span>
+        </div>
+      )}
+      {requestId && (
+        <div className="flex gap-1.5">
+          <span className="text-muted-foreground">ID запроса:</span>
+          <span className="font-mono">{String(requestId).slice(0, 24)}...</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface Props {
   memberId: number;
   isAdmin: boolean;
@@ -42,6 +82,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [passportChecking, setPassportChecking] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState({ check_type: "", status: "pending", comment: "" });
   const { toast } = useToast();
@@ -99,14 +140,76 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
     setShowAdd(true);
   };
 
+  const handlePassportAutoCheck = async () => {
+    if (!confirm("Запустить автоматическую проверку паспорта через СМЭВ3?\n\nБудут использованы паспортные данные из карточки пайщика.")) return;
+    setPassportChecking(true);
+    try {
+      const result = await api.memberChecks.passportAutoCheck(memberId);
+      if (result.error) {
+        toast({ title: "Ошибка проверки", description: result.error, variant: "destructive" });
+      } else if (result.status === "pending") {
+        toast({ title: "Запрос отправлен", description: result.message || "Ожидается ответ от СМЭВ3. Обновите через минуту." });
+      } else {
+        const statusLabel = result.status === "ok" ? "Пройдена" : result.status === "fail" ? "Не пройдена" : "Внимание";
+        toast({ title: `Проверка: ${statusLabel}`, description: result.comment });
+      }
+      loadChecks();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setPassportChecking(false);
+    }
+  };
+
+  const handlePollPending = async (check: MemberCheck) => {
+    const reqId = check.result?.request_id || check.result?.requestId;
+    if (!reqId) {
+      toast({ title: "Нет request_id для повторного запроса", variant: "destructive" });
+      return;
+    }
+    setPassportChecking(true);
+    try {
+      const result = await api.memberChecks.passportPoll(memberId, String(reqId), check.id);
+      if (result.error) {
+        toast({ title: "Ошибка", description: result.error, variant: "destructive" });
+      } else if (result.status === "pending") {
+        toast({ title: "Ответ ещё не готов", description: "Попробуйте повторить через минуту" });
+      } else {
+        toast({ title: "Результат получен", description: result.comment });
+      }
+      loadChecks();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setPassportChecking(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>;
   }
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+        <Icon name="Zap" size={18} className="text-blue-600 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-blue-900 dark:text-blue-100">Автоматическая проверка паспорта</div>
+          <div className="text-xs text-blue-700 dark:text-blue-300">Проверка через СМЭВ3 (Kvell). Использует паспортные данные из карточки пайщика.</div>
+        </div>
+        <Button
+          size="sm"
+          onClick={handlePassportAutoCheck}
+          disabled={passportChecking}
+          className="gap-1.5 shrink-0 bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          {passportChecking ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Search" size={14} />}
+          {passportChecking ? "Проверка..." : "Проверить"}
+        </Button>
+      </div>
+
       {checks.length === 0 && !showAdd && (
-        <div className="text-center py-8 text-muted-foreground">
+        <div className="text-center py-6 text-muted-foreground">
           <Icon name="ShieldCheck" size={40} className="mx-auto mb-3 opacity-40" />
           <div className="text-sm">Проверки ещё не проводились</div>
         </div>
@@ -115,8 +218,9 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       {checks.map((check) => {
         const typeInfo = CHECK_TYPES[check.check_type] || { label: check.check_type, icon: "ClipboardCheck" };
         const statusInfo = STATUS_MAP[check.status] || STATUS_MAP.pending;
+        const isPendingPassport = check.check_type === "passport" && check.status === "pending" && check.result?.request_id;
         return (
-          <Card key={check.id}>
+          <Card key={check.id} className={check.check_type === "passport" ? "border-l-2 border-l-blue-400" : ""}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -127,15 +231,33 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">{typeInfo.label}</span>
                       <Badge variant={statusInfo.variant} className="text-xs">{statusInfo.label}</Badge>
+                      {check.check_type === "passport" && check.result && Object.keys(check.result).length > 0 && (
+                        <Badge variant="outline" className="text-xs">СМЭВ3</Badge>
+                      )}
                     </div>
                     {check.comment && (
                       <div className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">{check.comment}</div>
+                    )}
+                    {check.check_type === "passport" && check.result && Object.keys(check.result).length > 0 && (
+                      renderPassportResult(check.result)
                     )}
                     <div className="text-xs text-muted-foreground mt-1.5">
                       {fmtDate(check.created_at)}
                       {check.checked_by_name && <span> · {check.checked_by_name}</span>}
                       {check.updated_at !== check.created_at && <span> · обновлено {fmtDate(check.updated_at)}</span>}
                     </div>
+                    {isPendingPassport && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePollPending(check)}
+                        disabled={passportChecking}
+                        className="mt-2 gap-1.5 text-xs h-7"
+                      >
+                        {passportChecking ? <Icon name="Loader2" size={12} className="animate-spin" /> : <Icon name="RefreshCw" size={12} />}
+                        Обновить результат
+                      </Button>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
@@ -206,7 +328,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       {!showAdd && (
         <Button variant="outline" size="sm" onClick={() => setShowAdd(true)} className="gap-1.5 w-full">
           <Icon name="Plus" size={14} />
-          Добавить проверку
+          Добавить проверку вручную
         </Button>
       )}
     </div>

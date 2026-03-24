@@ -5545,6 +5545,205 @@ def handle_max_bot(method, body, cur, conn):
 
     return {'ok': True}
 
+def kvell_passport_check(member_id, cur, conn, staff, ip=''):
+    """Проверка паспорта через Kvell СМЭВ3 API (rfp-actual-full)"""
+    api_key = os.environ.get('KVELL_API_KEY', '')
+    secret_key = os.environ.get('KVELL_SECRET_KEY', '')
+    if not api_key or not secret_key:
+        return {'error': 'Не настроены ключи Kvell API (KVELL_API_KEY / KVELL_SECRET_KEY)'}
+
+    cur.execute("SELECT passport_series, passport_number, passport_issue_date, passport_dept_code, last_name, first_name, middle_name, birth_date FROM members WHERE id=%s" % member_id)
+    m = cur.fetchone()
+    if not m:
+        return {'error': 'Пайщик не найден'}
+    passport_series, passport_number, issue_date, dept_code, last_name, first_name, middle_name, birth_date = m
+    if not passport_series or not passport_number:
+        return {'error': 'У пайщика не заполнены серия и номер паспорта'}
+    if not last_name or not first_name or not birth_date:
+        return {'error': 'У пайщика не заполнены ФИО или дата рождения'}
+
+    req_body = {
+        'seriya': passport_series,
+        'number': passport_number,
+        'last_name': last_name,
+        'first_name': first_name,
+    }
+    if middle_name:
+        req_body['middle_name'] = middle_name
+    if birth_date:
+        req_body['birth_date'] = birth_date.isoformat() if hasattr(birth_date, 'isoformat') else str(birth_date)
+    if issue_date:
+        req_body['issue_date'] = issue_date.isoformat() if hasattr(issue_date, 'isoformat') else str(issue_date)
+    if dept_code:
+        req_body['issuer_code'] = dept_code.replace('-', '')
+
+    json_body = json.dumps(req_body, ensure_ascii=False, separators=(',', ':'))
+    signature = hashlib.sha256(('%s%s%s' % (api_key, json_body, secret_key)).encode('utf-8')).hexdigest()
+
+    data = json_body.encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.baas.kvell.group/v1/smev3/gismu/rfp-actual-full',
+        data=data,
+        headers={'Content-Type': 'application/json', 'X-Api-Key': api_key, 'X-Signature': signature},
+        method='POST'
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        resp_data = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8') if e.fp else ''
+        return {'error': 'Kvell API ошибка %s: %s' % (e.code, err_body[:500])}
+    except Exception as e:
+        return {'error': 'Ошибка соединения с Kvell: %s' % str(e)[:300]}
+
+    request_id = resp_data.get('request_id') or resp_data.get('requestId') or resp_data.get('id', '')
+    if not request_id:
+        staff_name = esc(staff.get('name', ''))
+        status = 'warning'
+        comment = 'Запрос отправлен, но не получен request_id'
+        result_data = json.dumps(resp_data, ensure_ascii=False).replace("'", "''")
+        cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'passport', '%s', '%s', '%s', '%s') RETURNING id" % (
+            member_id, status, result_data, esc(comment), staff_name))
+        check_id = cur.fetchone()[0]
+        conn.commit()
+        return {'check_id': check_id, 'status': status, 'message': comment}
+
+    import time
+    final_result = None
+    for attempt in range(10):
+        time.sleep(3)
+        sig_get = hashlib.sha256(('%s%s%s' % (api_key, request_id, secret_key)).encode('utf-8')).hexdigest()
+        req_get = urllib.request.Request(
+            'https://api.baas.kvell.group/v1/smev3/gismu/rfp-actual-full/%s' % request_id,
+            headers={'X-Api-Key': api_key, 'X-Signature': sig_get},
+            method='GET'
+        )
+        try:
+            resp2 = urllib.request.urlopen(req_get, timeout=30)
+            poll_data = json.loads(resp2.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            if e.code == 404 or e.code == 202:
+                continue
+            err_body = e.read().decode('utf-8') if e.fp else ''
+            poll_data = {'error': 'HTTP %s: %s' % (e.code, err_body[:300])}
+            break
+        except Exception:
+            continue
+
+        state = poll_data.get('state', '')
+        if state == 'finished' or 'result' in poll_data:
+            final_result = poll_data
+            break
+        if state in ('error', 'failed'):
+            final_result = poll_data
+            break
+
+    if not final_result:
+        staff_name = esc(staff.get('name', ''))
+        result_data = json.dumps({'request_id': request_id, 'note': 'Превышено время ожидания ответа'}, ensure_ascii=False).replace("'", "''")
+        cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'passport', 'pending', '%s', '%s', '%s') RETURNING id" % (
+            member_id, result_data, esc('Ожидание ответа от СМЭВ3 (request_id: %s)' % request_id), staff_name))
+        check_id = cur.fetchone()[0]
+        cur.execute("SELECT last_name, first_name FROM members WHERE id=%s" % member_id)
+        mr = cur.fetchone()
+        label = ('%s %s' % (mr[0] or '', mr[1] or '')).strip() if mr else ''
+        audit_log(cur, staff, 'create_check', 'member', member_id, esc(label), 'Проверка паспорта: ожидание ответа СМЭВ3', ip)
+        conn.commit()
+        return {'check_id': check_id, 'request_id': request_id, 'status': 'pending', 'message': 'Запрос отправлен, ожидается ответ от СМЭВ3'}
+
+    result_obj = final_result.get('result', final_result)
+    smev_status = ''
+    if isinstance(result_obj, dict):
+        smev_status = result_obj.get('status', '')
+    elif isinstance(result_obj, str):
+        smev_status = result_obj
+
+    if smev_status in ('valid', 'VALID', 'действителен'):
+        check_status = 'ok'
+        comment = 'Паспорт действителен'
+    elif smev_status in ('invalid', 'INVALID', 'недействителен'):
+        check_status = 'fail'
+        reason = ''
+        if isinstance(result_obj, dict):
+            reason = result_obj.get('reason', '') or result_obj.get('message', '')
+        comment = 'Паспорт недействителен' + (': %s' % reason if reason else '')
+    elif smev_status in ('not_found', 'NOT_FOUND'):
+        check_status = 'warning'
+        comment = 'Паспорт не найден в базе СМЭВ3'
+    elif final_result.get('state') in ('error', 'failed'):
+        check_status = 'warning'
+        error_msg = final_result.get('error', '') or final_result.get('message', '')
+        comment = 'Ошибка проверки: %s' % (error_msg if error_msg else 'неизвестная ошибка')
+    else:
+        check_status = 'warning'
+        comment = 'Получен ответ, статус: %s' % (smev_status or 'не определён')
+
+    staff_name = esc(staff.get('name', ''))
+    result_data = json.dumps(final_result, ensure_ascii=False, default=str).replace("'", "''")
+    cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, 'passport', '%s', '%s', '%s', '%s') RETURNING id" % (
+        member_id, check_status, result_data, esc(comment), staff_name))
+    check_id = cur.fetchone()[0]
+
+    cur.execute("SELECT last_name, first_name FROM members WHERE id=%s" % member_id)
+    mr = cur.fetchone()
+    label = ('%s %s' % (mr[0] or '', mr[1] or '')).strip() if mr else ''
+    audit_log(cur, staff, 'create_check', 'member', member_id, esc(label), 'Проверка паспорта: %s' % comment, ip)
+    conn.commit()
+
+    return {'check_id': check_id, 'status': check_status, 'comment': comment, 'result': final_result}
+
+def kvell_passport_poll(request_id, member_id, check_id, cur, conn, staff, ip=''):
+    """Повторный опрос результата проверки паспорта по request_id"""
+    api_key = os.environ.get('KVELL_API_KEY', '')
+    secret_key = os.environ.get('KVELL_SECRET_KEY', '')
+    if not api_key or not secret_key:
+        return {'error': 'Не настроены ключи Kvell API'}
+
+    sig = hashlib.sha256(('%s%s%s' % (api_key, request_id, secret_key)).encode('utf-8')).hexdigest()
+    req_get = urllib.request.Request(
+        'https://api.baas.kvell.group/v1/smev3/gismu/rfp-actual-full/%s' % request_id,
+        headers={'X-Api-Key': api_key, 'X-Signature': sig},
+        method='GET'
+    )
+    try:
+        resp = urllib.request.urlopen(req_get, timeout=30)
+        poll_data = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8') if e.fp else ''
+        return {'error': 'Kvell API ошибка %s: %s' % (e.code, err_body[:300])}
+    except Exception as e:
+        return {'error': 'Ошибка соединения: %s' % str(e)[:300]}
+
+    state = poll_data.get('state', '')
+    if state not in ('finished', 'error', 'failed') and 'result' not in poll_data:
+        return {'status': 'pending', 'message': 'Ответ ещё не готов'}
+
+    result_obj = poll_data.get('result', poll_data)
+    smev_status = ''
+    if isinstance(result_obj, dict):
+        smev_status = result_obj.get('status', '')
+
+    if smev_status in ('valid', 'VALID', 'действителен'):
+        check_status = 'ok'
+        comment = 'Паспорт действителен'
+    elif smev_status in ('invalid', 'INVALID', 'недействителен'):
+        check_status = 'fail'
+        reason = result_obj.get('reason', '') if isinstance(result_obj, dict) else ''
+        comment = 'Паспорт недействителен' + (': %s' % reason if reason else '')
+    elif smev_status in ('not_found', 'NOT_FOUND'):
+        check_status = 'warning'
+        comment = 'Паспорт не найден в базе СМЭВ3'
+    else:
+        check_status = 'warning'
+        comment = 'Статус: %s' % (smev_status or state or 'не определён')
+
+    result_data = json.dumps(poll_data, ensure_ascii=False, default=str).replace("'", "''")
+    cur.execute("UPDATE member_checks SET status='%s', result='%s', comment='%s', checked_by_name='%s', updated_at=NOW() WHERE id=%s AND member_id=%s" % (
+        check_status, result_data, esc(comment), esc(staff.get('name', '')), check_id, member_id))
+    conn.commit()
+
+    return {'check_id': check_id, 'status': check_status, 'comment': comment, 'result': poll_data}
+
 def handle_member_checks(method, params, body, cur, conn, staff, ip=''):
     """Управление проверками пайщиков (паспорт, ФССП и др.)"""
     member_id = params.get('member_id') or body.get('member_id')
@@ -5556,6 +5755,16 @@ def handle_member_checks(method, params, body, cur, conn, staff, ip=''):
         return query_rows(cur, "SELECT * FROM member_checks WHERE member_id = %s ORDER BY created_at DESC" % member_id)
 
     if method == 'POST':
+        action = body.get('action', '')
+        if action == 'passport_auto':
+            return kvell_passport_check(member_id, cur, conn, staff, ip)
+        if action == 'passport_poll':
+            req_id = body.get('request_id', '')
+            chk_id = body.get('check_id')
+            if not req_id or not chk_id:
+                return {'error': 'Не указан request_id или check_id'}
+            return kvell_passport_poll(req_id, member_id, int(chk_id), cur, conn, staff, ip)
+
         check_type = body.get('check_type', '')
         if not check_type:
             return {'error': 'Не указан тип проверки'}
