@@ -4416,45 +4416,6 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
         conn.commit()
         return {'success': True}
 
-    elif action == 'get_profile':
-        cur.execute("SELECT member_type, last_name, first_name, middle_name, birth_date, birth_place, inn, passport_series, passport_number, passport_dept_code, passport_issue_date, passport_issued_by, registration_address, phone, email, telegram, bank_bik, bank_account, marital_status, spouse_fio, spouse_phone, extra_phone, extra_contact_fio, company_name, director_fio, director_phone, contact_person_fio, contact_person_phone FROM members WHERE id=%s" % member_id)
-        row = cur.fetchone()
-        if not row:
-            return {'error': 'Пайщик не найден'}
-        cols = [d[0] for d in cur.description]
-        profile = {}
-        for i, c in enumerate(cols):
-            v = row[i]
-            if v is not None:
-                profile[c] = str(v)
-            else:
-                profile[c] = ''
-        return profile
-
-    elif action == 'update_profile':
-        if method != 'PUT':
-            return {'_status': 405, 'error': 'Метод не поддерживается'}
-        updates = []
-        allowed = ['last_name','first_name','middle_name','birth_place','inn','passport_series','passport_number',
-                    'passport_dept_code','passport_issued_by','registration_address','phone','email','telegram',
-                    'bank_bik','bank_account','marital_status','spouse_fio','spouse_phone','extra_phone',
-                    'extra_contact_fio','company_name','director_fio','director_phone','contact_person_fio',
-                    'contact_person_phone']
-        for f in allowed:
-            if f in body:
-                updates.append("%s = '%s'" % (f, esc(body[f])))
-        for f in ['birth_date','passport_issue_date']:
-            if f in body:
-                if body[f]:
-                    updates.append("%s = '%s'" % (f, body[f]))
-                else:
-                    updates.append("%s = NULL" % f)
-        if updates:
-            updates.append("updated_at = NOW()")
-            cur.execute("UPDATE members SET %s WHERE id = %s" % (', '.join(updates), member_id))
-            conn.commit()
-        return {'success': True}
-
     return {'error': 'Неизвестное действие'}
 
 def handle_audit(params, staff, cur):
