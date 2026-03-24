@@ -207,8 +207,6 @@ export const api = {
     maxLink: (token: string) => request<{ bot_username: string; link_code: string; link_url: string }>("POST", undefined, { entity: "cabinet", action: "max_link", token }),
     maxStatus: (token: string) => request<{ linked: boolean; chat_id?: number; username?: string; first_name?: string; subscribed_at?: string }>("GET", { entity: "cabinet", action: "max_status", token }),
     maxUnlink: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "cabinet", action: "max_unlink", token }),
-    getProfile: (token: string) => request<CabinetProfile>("GET", { entity: "cabinet", action: "get_profile", token }),
-    updateProfile: (token: string, data: Partial<CabinetProfile>) => request<{ success: boolean }>("PUT", { entity: "cabinet" }, { entity: "cabinet", action: "update_profile", token, ...data }),
   },
 
   staffAuth: {
@@ -828,37 +826,6 @@ export interface CabinetOrgInfo {
   bik: string;
   rs: string;
   ks: string;
-}
-
-export interface CabinetProfile {
-  member_type: string;
-  last_name: string;
-  first_name: string;
-  middle_name: string;
-  birth_date: string;
-  birth_place: string;
-  inn: string;
-  passport_series: string;
-  passport_number: string;
-  passport_dept_code: string;
-  passport_issue_date: string;
-  passport_issued_by: string;
-  registration_address: string;
-  phone: string;
-  email: string;
-  telegram: string;
-  bank_bik: string;
-  bank_account: string;
-  marital_status: string;
-  spouse_fio: string;
-  spouse_phone: string;
-  extra_phone: string;
-  extra_contact_fio: string;
-  company_name: string;
-  director_fio: string;
-  director_phone: string;
-  contact_person_fio: string;
-  contact_person_phone: string;
 }
 
 export interface CabinetOverview {

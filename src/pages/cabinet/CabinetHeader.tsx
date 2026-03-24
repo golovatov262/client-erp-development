@@ -27,7 +27,6 @@ interface CabinetHeaderProps {
   maxLinking: boolean;
   onMaxLink: () => void;
   onMaxUnlink: () => void;
-  onOpenProfile: () => void;
   onOpenPassword: () => void;
   onLogout: () => void;
   showPassword: boolean;
@@ -62,7 +61,6 @@ const CabinetHeader = ({
   maxLinking,
   onMaxLink,
   onMaxUnlink,
-  onOpenProfile,
   onOpenPassword,
   onLogout,
   showPassword,
@@ -193,15 +191,6 @@ const CabinetHeader = ({
                 </div>
               </button>
             )}
-            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={onOpenProfile}>
-              <div className="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
-                <Icon name="UserPen" size={18} className="text-emerald-500" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-sm font-medium">Мои данные</div>
-                <div className="text-xs text-muted-foreground">Просмотр и редактирование профиля</div>
-              </div>
-            </button>
             <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={onOpenPassword}>
               <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
                 <Icon name="Lock" size={18} className="text-blue-500" />

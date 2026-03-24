@@ -7,7 +7,7 @@ import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, Pu
 import usePush from "@/hooks/use-push";
 import CabinetHeader from "./CabinetHeader";
 import CabinetDashboard from "./CabinetDashboard";
-import CabinetProfileDialog from "./CabinetProfileDialog";
+
 import LoanDetailView from "./LoanDetailView";
 import SavingDetailView from "./SavingDetailView";
 
@@ -20,7 +20,6 @@ const Cabinet = () => {
   const [showLoan, setShowLoan] = useState(false);
   const [showSaving, setShowSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messages, setMessages] = useState<PushClientMessage[]>([]);
@@ -229,7 +228,6 @@ const Cabinet = () => {
         maxLinking={maxLinking}
         onMaxLink={handleMaxLink}
         onMaxUnlink={handleMaxUnlink}
-        onOpenProfile={() => { setShowMenu(false); setShowProfile(true); }}
         onOpenPassword={() => { setShowMenu(false); setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}
         onLogout={() => { setShowMenu(false); handleLogout(); }}
         showPassword={showPassword}
@@ -249,18 +247,6 @@ const Cabinet = () => {
         userName={userName}
         onOpenLoan={openLoan}
         onOpenSaving={openSaving}
-      />
-
-      <CabinetProfileDialog
-        open={showProfile}
-        onOpenChange={setShowProfile}
-        token={token}
-        onSaved={() => {
-          api.cabinet.overview(token).then(d => {
-            setData(d);
-            if (d.info.name) setUserName(d.info.name);
-          }).catch(() => {});
-        }}
       />
 
       <Dialog open={showLoan} onOpenChange={setShowLoan}>
