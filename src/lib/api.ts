@@ -42,6 +42,16 @@ export const api = {
     delete: (memberId: number) => request<{ success: boolean }>("DELETE", { entity: "members", id: memberId }),
   },
 
+  memberChecks: {
+    list: (memberId: number) => request<MemberCheck[]>("GET", { entity: "member_checks", member_id: memberId }),
+    create: (data: { member_id: number; check_type: string; status: string; comment?: string; result?: Record<string, unknown> }) =>
+      request<{ id: number }>("POST", undefined, { entity: "member_checks", ...data }),
+    update: (data: { member_id: number; id: number; status?: string; comment?: string; result?: Record<string, unknown> }) =>
+      request<{ success: boolean }>("PUT", { entity: "member_checks" }, { entity: "member_checks", ...data }),
+    delete: (memberId: number, checkId: number) =>
+      request<{ success: boolean }>("DELETE", { entity: "member_checks", member_id: memberId, check_id: checkId }),
+  },
+
   loans: {
     list: () => request<Loan[]>("GET", { entity: "loans" }),
     get: (id: number) => request<LoanDetail>("GET", { entity: "loans", action: "detail", id }),
@@ -379,6 +389,18 @@ export interface CheckStatusResult {
     pending: number;
     overdue: number;
   };
+}
+
+export interface MemberCheck {
+  id: number;
+  member_id: number;
+  check_type: string;
+  status: string;
+  result: Record<string, unknown>;
+  comment: string;
+  checked_by_name: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Member {

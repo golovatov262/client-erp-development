@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Icon from "@/components/ui/icon";
 import CompanyInnSuggest from "@/components/ui/company-inn-suggest";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import api, { Member, MemberDetail } from "@/lib/api";
+import MemberChecksTab from "@/pages/members/MemberChecksTab";
 
 const columns: Column<Member>[] = [
   { key: "member_no", label: "Номер" },
@@ -51,6 +53,8 @@ const Members = () => {
   const { toast } = useToast();
 
   const [exporting, setExporting] = useState(false);
+  const [mainTab, setMainTab] = useState("data");
+  const { isAdmin } = useAuth();
   const [form, setForm] = useState<Record<string, string>>({});
   const setField = (key: string, val: string) => setForm(prev => ({ ...prev, [key]: val }));
 
@@ -99,6 +103,7 @@ const Members = () => {
       setForm(formData);
       setMemberType(detail.member_type === "UL" ? "ul" : "fl");
       setEditingId(detail.id);
+      setMainTab("data");
       setShowForm(true);
     } catch (e) {
       toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
@@ -109,6 +114,7 @@ const Members = () => {
     setForm({});
     setEditingId(null);
     setMemberType("fl");
+    setMainTab("data");
     setShowForm(true);
   };
 
@@ -153,6 +159,155 @@ const Members = () => {
     }
   };
 
+  const renderFlForm = () => (
+    <div className="space-y-4 mt-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">Фамилия *</Label><Input value={form.last_name || ""} onChange={e => setField("last_name", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Имя *</Label><Input value={form.first_name || ""} onChange={e => setField("first_name", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Отчество</Label><Input value={form.middle_name || ""} onChange={e => setField("middle_name", e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">Дата рождения</Label><Input type="date" value={form.birth_date || ""} onChange={e => setField("birth_date", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Место рождения</Label><Input value={form.birth_place || ""} onChange={e => setField("birth_place", e.target.value)} /></div>
+      </div>
+      <div className="space-y-1.5"><Label className="text-xs">ИНН *</Label><Input value={form.inn || ""} onChange={e => setField("inn", e.target.value)} maxLength={12} /></div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Паспортные данные</div>
+      <div className="grid grid-cols-4 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">Серия</Label><Input value={form.passport_series || ""} onChange={e => setField("passport_series", e.target.value)} maxLength={4} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Номер</Label><Input value={form.passport_number || ""} onChange={e => setField("passport_number", e.target.value)} maxLength={6} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Код подразд.</Label><Input value={form.passport_dept_code || ""} onChange={e => setField("passport_dept_code", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Дата выдачи</Label><Input type="date" value={form.passport_issue_date || ""} onChange={e => setField("passport_issue_date", e.target.value)} /></div>
+      </div>
+      <div className="space-y-1.5"><Label className="text-xs">Кем выдан</Label><Input value={form.passport_issued_by || ""} onChange={e => setField("passport_issued_by", e.target.value)} /></div>
+      <div className="space-y-1.5"><Label className="text-xs">Адрес регистрации</Label><Input value={form.registration_address || ""} onChange={e => setField("registration_address", e.target.value)} /></div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактная информация</div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">Телефон</Label><Input value={form.phone || ""} onChange={e => setField("phone", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Email</Label><Input value={form.email || ""} onChange={e => setField("email", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Telegram</Label><Input value={form.telegram || ""} onChange={e => setField("telegram", e.target.value)} /></div>
+      </div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Банковские реквизиты</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">БИК</Label><Input value={form.bank_bik || ""} onChange={e => setField("bank_bik", e.target.value)} maxLength={9} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Расчётный счёт</Label><Input value={form.bank_account || ""} onChange={e => setField("bank_account", e.target.value)} maxLength={20} /></div>
+      </div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Дополнительно</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Семейное положение</Label>
+          <Select value={form.marital_status || ""} onValueChange={v => setField("marital_status", v)}>
+            <SelectTrigger><SelectValue placeholder="Не указано" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="single">Не женат / Не замужем</SelectItem>
+              <SelectItem value="married">Женат / Замужем</SelectItem>
+              <SelectItem value="divorced">Разведён / Разведена</SelectItem>
+              <SelectItem value="widowed">Вдовец / Вдова</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5"><Label className="text-xs">ФИО супруга(и)</Label><Input value={form.spouse_fio || ""} onChange={e => setField("spouse_fio", e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">Телефон супруга(и)</Label><Input value={form.spouse_phone || ""} onChange={e => setField("spouse_phone", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Доп. телефон</Label><Input value={form.extra_phone || ""} onChange={e => setField("extra_phone", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">ФИО доп. контакта</Label><Input value={form.extra_contact_fio || ""} onChange={e => setField("extra_contact_fio", e.target.value)} /></div>
+      </div>
+
+      {editingId && (
+        <>
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
+          <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Активен</SelectItem>
+              <SelectItem value="blocked">Заблокирован</SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      )}
+
+      {renderFormActions(!form.last_name || !form.inn)}
+    </div>
+  );
+
+  const renderUlForm = () => (
+    <div className="space-y-4 mt-4">
+      <div className="space-y-1.5">
+        <Label className="text-xs">ИНН организации *</Label>
+        <CompanyInnSuggest
+          value={form.inn || ""}
+          onChange={v => setField("inn", v)}
+          onCompanySelect={data => {
+            setForm(prev => ({
+              ...prev,
+              inn: data.inn,
+              company_name: data.company_name,
+              director_fio: data.director_fio || prev.director_fio || "",
+              registration_address: data.address || prev.registration_address || "",
+              email: data.email || prev.email || "",
+            }));
+          }}
+        />
+      </div>
+      <div className="space-y-1.5"><Label className="text-xs">Наименование компании *</Label><Input value={form.company_name || ""} onChange={e => setField("company_name", e.target.value)} /></div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Руководитель</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">ФИО руководителя</Label><Input value={form.director_fio || ""} onChange={e => setField("director_fio", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Телефон руководителя</Label><Input value={form.director_phone || ""} onChange={e => setField("director_phone", e.target.value)} /></div>
+      </div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактное лицо</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">ФИО контактного лица</Label><Input value={form.contact_person_fio || ""} onChange={e => setField("contact_person_fio", e.target.value)} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Телефон контактного лица</Label><Input value={form.contact_person_phone || ""} onChange={e => setField("contact_person_phone", e.target.value)} /></div>
+      </div>
+
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Банковские реквизиты</div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5"><Label className="text-xs">БИК</Label><Input value={form.bank_bik || ""} onChange={e => setField("bank_bik", e.target.value)} maxLength={9} /></div>
+        <div className="space-y-1.5"><Label className="text-xs">Расчётный счёт</Label><Input value={form.bank_account || ""} onChange={e => setField("bank_account", e.target.value)} maxLength={20} /></div>
+      </div>
+
+      {editingId && (
+        <>
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
+          <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Активен</SelectItem>
+              <SelectItem value="blocked">Заблокирован</SelectItem>
+            </SelectContent>
+          </Select>
+        </>
+      )}
+
+      {renderFormActions(!form.inn || !form.company_name)}
+    </div>
+  );
+
+  const renderFormActions = (disableSave: boolean) => (
+    <div className="flex justify-between gap-2 pt-4">
+      {editingId && (
+        <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+          <Icon name="Trash2" size={16} className="mr-2" />
+          Удалить пайщика
+        </Button>
+      )}
+      <div className="flex gap-2 ml-auto">
+        <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
+        <Button onClick={handleSave} disabled={saving || disableSave} className="gap-2">
+          {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+          {editingId ? "Сохранить изменения" : "Сохранить"}
+        </Button>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Icon name="Loader2" size={32} className="animate-spin text-primary" /></div>;
   }
@@ -183,166 +338,30 @@ const Members = () => {
       <Dialog open={showForm} onOpenChange={v => { setShowForm(v); if (!v) { setEditingId(null); setForm({}); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? "Редактирование пайщика" : "Новый пайщик"}</DialogTitle></DialogHeader>
-          <Tabs value={memberType} onValueChange={editingId ? undefined : setMemberType}>
-            <TabsList className="w-full">
-              <TabsTrigger value="fl" className="flex-1" disabled={!!editingId}>Физическое лицо</TabsTrigger>
-              <TabsTrigger value="ul" className="flex-1" disabled={!!editingId}>Юридическое лицо</TabsTrigger>
-            </TabsList>
 
-            <TabsContent value="fl" className="space-y-4 mt-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">Фамилия *</Label><Input value={form.last_name || ""} onChange={e => setField("last_name", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Имя *</Label><Input value={form.first_name || ""} onChange={e => setField("first_name", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Отчество</Label><Input value={form.middle_name || ""} onChange={e => setField("middle_name", e.target.value)} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">Дата рождения</Label><Input type="date" value={form.birth_date || ""} onChange={e => setField("birth_date", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Место рождения</Label><Input value={form.birth_place || ""} onChange={e => setField("birth_place", e.target.value)} /></div>
-              </div>
-              <div className="space-y-1.5"><Label className="text-xs">ИНН *</Label><Input value={form.inn || ""} onChange={e => setField("inn", e.target.value)} maxLength={12} /></div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Паспортные данные</div>
-              <div className="grid grid-cols-4 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">Серия</Label><Input value={form.passport_series || ""} onChange={e => setField("passport_series", e.target.value)} maxLength={4} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Номер</Label><Input value={form.passport_number || ""} onChange={e => setField("passport_number", e.target.value)} maxLength={6} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Код подразделения</Label><Input value={form.passport_dept_code || ""} onChange={e => setField("passport_dept_code", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Дата выдачи</Label><Input type="date" value={form.passport_issue_date || ""} onChange={e => setField("passport_issue_date", e.target.value)} /></div>
-              </div>
-              <div className="space-y-1.5"><Label className="text-xs">Кем выдан</Label><Input value={form.passport_issued_by || ""} onChange={e => setField("passport_issued_by", e.target.value)} /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Адрес регистрации</Label><Input value={form.registration_address || ""} onChange={e => setField("registration_address", e.target.value)} /></div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактная информация</div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">Телефон *</Label><Input value={form.phone || ""} onChange={e => setField("phone", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Email</Label><Input value={form.email || ""} onChange={e => setField("email", e.target.value)} type="email" /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Telegram</Label><Input value={form.telegram || ""} onChange={e => setField("telegram", e.target.value)} /></div>
-              </div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Банковские реквизиты</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">БИК</Label><Input value={form.bank_bik || ""} onChange={e => setField("bank_bik", e.target.value)} maxLength={9} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Расчётный счёт</Label><Input value={form.bank_account || ""} onChange={e => setField("bank_account", e.target.value)} maxLength={20} /></div>
-              </div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Дополнительная информация</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Семейное положение</Label>
-                  <Select value={form.marital_status || ""} onValueChange={v => setField("marital_status", v)}>
-                    <SelectTrigger><SelectValue placeholder="Выберите" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="married">Женат/Замужем</SelectItem>
-                      <SelectItem value="single">Холост/Не замужем</SelectItem>
-                      <SelectItem value="divorced">Разведён(а)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5"><Label className="text-xs">Доп. телефон</Label><Input value={form.extra_phone || ""} onChange={e => setField("extra_phone", e.target.value)} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">ФИО супруга(и)</Label><Input value={form.spouse_fio || ""} onChange={e => setField("spouse_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон супруга(и)</Label><Input value={form.spouse_phone || ""} onChange={e => setField("spouse_phone", e.target.value)} /></div>
-              </div>
-              <div className="space-y-1.5"><Label className="text-xs">ФИО доп. контакта</Label><Input value={form.extra_contact_fio || ""} onChange={e => setField("extra_contact_fio", e.target.value)} /></div>
-
-              {editingId && (
-                <>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
-                  <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Активен</SelectItem>
-                      <SelectItem value="blocked">Заблокирован</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-
-              <div className="flex justify-between gap-2 pt-4">
-                {editingId && (
-                  <Button variant="destructive" onClick={handleDelete} disabled={saving}>
-                    <Icon name="Trash2" size={16} className="mr-2" />
-                    Удалить пайщика
-                  </Button>
-                )}
-                <div className="flex gap-2 ml-auto">
-                  <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
-                  <Button onClick={handleSave} disabled={saving || !form.last_name || !form.inn} className="gap-2">
-                    {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                    {editingId ? "Сохранить изменения" : "Сохранить"}
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="ul" className="space-y-4 mt-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">ИНН организации *</Label>
-                <CompanyInnSuggest
-                  value={form.inn || ""}
-                  onChange={v => setField("inn", v)}
-                  onCompanySelect={data => {
-                    setForm(prev => ({
-                      ...prev,
-                      inn: data.inn,
-                      company_name: data.company_name,
-                      director_fio: data.director_fio || prev.director_fio || "",
-                      registration_address: data.address || prev.registration_address || "",
-                      email: data.email || prev.email || "",
-                    }));
-                  }}
-                />
-              </div>
-              <div className="space-y-1.5"><Label className="text-xs">Наименование компании *</Label><Input value={form.company_name || ""} onChange={e => setField("company_name", e.target.value)} /></div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Руководитель</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">ФИО руководителя</Label><Input value={form.director_fio || ""} onChange={e => setField("director_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон руководителя</Label><Input value={form.director_phone || ""} onChange={e => setField("director_phone", e.target.value)} /></div>
-              </div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактное лицо</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">ФИО контактного лица</Label><Input value={form.contact_person_fio || ""} onChange={e => setField("contact_person_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон контактного лица</Label><Input value={form.contact_person_phone || ""} onChange={e => setField("contact_person_phone", e.target.value)} /></div>
-              </div>
-
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Банковские реквизиты</div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">БИК</Label><Input value={form.bank_bik || ""} onChange={e => setField("bank_bik", e.target.value)} maxLength={9} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Расчётный счёт</Label><Input value={form.bank_account || ""} onChange={e => setField("bank_account", e.target.value)} maxLength={20} /></div>
-              </div>
-
-              {editingId && (
-                <>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
-                  <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Активен</SelectItem>
-                      <SelectItem value="blocked">Заблокирован</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-
-              <div className="flex justify-between gap-2 pt-4">
-                {editingId && (
-                  <Button variant="destructive" onClick={handleDelete} disabled={saving}>
-                    <Icon name="Trash2" size={16} className="mr-2" />
-                    Удалить пайщика
-                  </Button>
-                )}
-                <div className="flex gap-2 ml-auto">
-                  <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
-                  <Button onClick={handleSave} disabled={saving || !form.inn || !form.company_name} className="gap-2">
-                    {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                    {editingId ? "Сохранить изменения" : "Сохранить"}
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+          {editingId ? (
+            <Tabs value={mainTab} onValueChange={setMainTab}>
+              <TabsList className="w-full">
+                <TabsTrigger value="data" className="flex-1 gap-1.5"><Icon name="User" size={14} />Данные</TabsTrigger>
+                <TabsTrigger value="checks" className="flex-1 gap-1.5"><Icon name="ShieldCheck" size={14} />Проверки</TabsTrigger>
+              </TabsList>
+              <TabsContent value="data">
+                {memberType === "fl" ? renderFlForm() : renderUlForm()}
+              </TabsContent>
+              <TabsContent value="checks">
+                <MemberChecksTab memberId={editingId} isAdmin={isAdmin} />
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <Tabs value={memberType} onValueChange={setMemberType}>
+              <TabsList className="w-full">
+                <TabsTrigger value="fl" className="flex-1">Физическое лицо</TabsTrigger>
+                <TabsTrigger value="ul" className="flex-1">Юридическое лицо</TabsTrigger>
+              </TabsList>
+              <TabsContent value="fl">{renderFlForm()}</TabsContent>
+              <TabsContent value="ul">{renderUlForm()}</TabsContent>
+            </Tabs>
+          )}
         </DialogContent>
       </Dialog>
     </div>

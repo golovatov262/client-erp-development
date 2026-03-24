@@ -5545,7 +5545,72 @@ def handle_max_bot(method, body, cur, conn):
 
     return {'ok': True}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
+def handle_member_checks(method, params, body, cur, conn, staff, ip=''):
+    """Управление проверками пайщиков (паспорт, ФССП и др.)"""
+    member_id = params.get('member_id') or body.get('member_id')
+    if not member_id:
+        return {'error': 'Не указан member_id'}
+    member_id = int(member_id)
+
+    if method == 'GET':
+        return query_rows(cur, "SELECT * FROM member_checks WHERE member_id = %s ORDER BY created_at DESC" % member_id)
+
+    if method == 'POST':
+        check_type = body.get('check_type', '')
+        if not check_type:
+            return {'error': 'Не указан тип проверки'}
+        status = body.get('status', 'pending')
+        if status not in ('pending', 'ok', 'warning', 'fail'):
+            return {'_status': 400, 'error': 'Недопустимый статус'}
+        result_data = json.dumps(body.get('result', {}))
+        comment = esc(body.get('comment', ''))
+        staff_name = esc(staff.get('name', ''))
+        cur.execute("INSERT INTO member_checks (member_id, check_type, status, result, comment, checked_by_name) VALUES (%s, '%s', '%s', '%s', '%s', '%s') RETURNING id" % (
+            member_id, esc(check_type), status, result_data.replace("'", "''"), comment, staff_name))
+        check_id = cur.fetchone()[0]
+        cur.execute("SELECT last_name, first_name, company_name FROM members WHERE id=%s" % member_id)
+        mr = cur.fetchone()
+        label = ('%s %s' % (mr[0] or '', mr[1] or '')).strip() if mr and mr[0] else (mr[2] if mr else '')
+        audit_log(cur, staff, 'create_check', 'member', member_id, esc(label), 'Проверка: %s, статус: %s' % (check_type, status), ip)
+        conn.commit()
+        return {'id': check_id}
+
+    if method == 'PUT':
+        check_id = body.get('id')
+        if not check_id:
+            return {'error': 'Не указан id проверки'}
+        updates = []
+        if 'status' in body:
+            if body['status'] not in ('pending', 'ok', 'warning', 'fail'):
+                return {'_status': 400, 'error': 'Недопустимый статус'}
+            updates.append("status='%s'" % body['status'])
+        if 'comment' in body:
+            updates.append("comment='%s'" % esc(body['comment']))
+        if 'result' in body:
+            updates.append("result='%s'" % json.dumps(body['result']).replace("'", "''"))
+        if updates:
+            updates.append("checked_by_name='%s'" % esc(staff.get('name', '')))
+            updates.append("updated_at=NOW()")
+            cur.execute("UPDATE member_checks SET %s WHERE id=%s AND member_id=%s" % (', '.join(updates), check_id, member_id))
+            conn.commit()
+        return {'success': True}
+
+    if method == 'DELETE':
+        check_id = params.get('check_id') or body.get('check_id')
+        if not check_id:
+            return {'error': 'Не указан check_id'}
+        cur.execute("SELECT check_type FROM member_checks WHERE id=%s AND member_id=%s" % (check_id, member_id))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Проверка не найдена'}
+        cur.execute("DELETE FROM member_checks WHERE id=%s" % check_id)
+        audit_log(cur, staff, 'delete_check', 'member', member_id, '', 'Удалена проверка: %s' % row[0], ip)
+        conn.commit()
+        return {'success': True}
+
+    return {'error': 'Метод не поддерживается'}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
@@ -5578,6 +5643,8 @@ def handler(event, context):
             result = handle_dashboard(cur, params)
         elif entity == 'members':
             result = handle_members(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'member_checks':
+            result = handle_member_checks(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
             result = handle_loans(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'savings':
