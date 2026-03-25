@@ -26,5 +26,6 @@
   {"name": "Member checks requires auth", "method": "GET", "path": "/?entity=member_checks&member_id=1", "expectedStatus": 401},
   {"name": "Passport auto check requires auth", "method": "POST", "path": "/", "body": {"entity": "member_checks", "member_id": 1, "action": "passport_auto"}, "expectedStatus": 401},
   {"name": "PODFT history requires auth", "method": "GET", "path": "/?entity=podft&action=history", "expectedStatus": 401},
-  {"name": "PODFT run requires auth", "method": "POST", "path": "/", "body": {"entity": "podft", "action": "run"}, "expectedStatus": 401}
+  {"name": "PODFT run requires auth", "method": "POST", "path": "/", "body": {"entity": "podft", "action": "run"}, "expectedStatus": 401},
+  {"name": "Member orgs requires auth", "method": "GET", "path": "/?entity=member_orgs&member_id=1", "expectedStatus": 401}
 ]}

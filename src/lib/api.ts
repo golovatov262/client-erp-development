@@ -42,6 +42,16 @@ export const api = {
     delete: (memberId: number) => request<{ success: boolean }>("DELETE", { entity: "members", id: memberId }),
   },
 
+  memberOrgs: {
+    list: (memberId: number) => request<MemberOrg[]>("GET", { entity: "member_orgs", member_id: memberId }),
+    create: (data: { member_id: number; org_id: number; joined_at: string; excluded_at?: string }) =>
+      request<{ id: number }>("POST", undefined, { entity: "member_orgs", ...data }),
+    update: (data: { member_id: number; id: number; org_id?: number; joined_at?: string; excluded_at?: string | null }) =>
+      request<{ success: boolean }>("PUT", { entity: "member_orgs" }, { entity: "member_orgs", ...data }),
+    remove: (memberId: number, id: number) =>
+      request<{ success: boolean }>("DELETE", { entity: "member_orgs", member_id: memberId, id }),
+  },
+
   memberChecks: {
     list: (memberId: number) => request<MemberCheck[]>("GET", { entity: "member_checks", member_id: memberId }),
     create: (data: { member_id: number; check_type: string; status: string; comment?: string; result?: Record<string, unknown> }) =>
@@ -456,6 +466,16 @@ export interface PassportCheckResult {
   message?: string;
   result?: Record<string, unknown>;
   error?: string;
+}
+
+export interface MemberOrg {
+  id: number;
+  member_id: number;
+  org_id: number;
+  org_name: string;
+  org_short_name: string;
+  joined_at: string;
+  excluded_at: string | null;
 }
 
 export interface Member {

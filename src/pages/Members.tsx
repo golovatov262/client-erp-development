@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { Member, MemberDetail } from "@/lib/api";
 import MemberChecksTab from "@/pages/members/MemberChecksTab";
+import MemberOrgsTab from "@/pages/members/MemberOrgsTab";
 import PodftTab from "@/pages/members/PodftTab";
 
 const columns: Column<Member>[] = [
@@ -358,10 +359,14 @@ const Members = () => {
             <Tabs value={mainTab} onValueChange={setMainTab}>
               <TabsList className="w-full">
                 <TabsTrigger value="data" className="flex-1 gap-1.5"><Icon name="User" size={14} />Данные</TabsTrigger>
+                <TabsTrigger value="orgs" className="flex-1 gap-1.5"><Icon name="Building2" size={14} />Членство</TabsTrigger>
                 <TabsTrigger value="checks" className="flex-1 gap-1.5"><Icon name="ShieldCheck" size={14} />Проверки</TabsTrigger>
               </TabsList>
               <TabsContent value="data">
                 {memberType === "fl" ? renderFlForm() : renderUlForm()}
+              </TabsContent>
+              <TabsContent value="orgs">
+                <MemberOrgsTab memberId={editingId} />
               </TabsContent>
               <TabsContent value="checks">
                 <MemberChecksTab memberId={editingId} isAdmin={isAdmin} />

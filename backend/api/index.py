@@ -3712,11 +3712,8 @@ def handle_dashboard(cur, params=None):
     stats = {}
 
     if org_id:
-        cur.execute("SELECT COUNT(DISTINCT m.id) FROM members m JOIN loans l ON l.member_id=m.id WHERE m.status='active' AND l.org_id=%s UNION SELECT COUNT(DISTINCT m.id) FROM members m JOIN savings s ON s.member_id=m.id WHERE m.status='active' AND s.org_id=%s UNION SELECT COUNT(DISTINCT m.id) FROM members m JOIN share_accounts sa ON sa.member_id=m.id WHERE m.status='active' AND sa.org_id=%s" % (org_id, org_id, org_id))
-        rows = cur.fetchall()
-        member_ids = set()
-        cur.execute("SELECT DISTINCT m.id FROM members m LEFT JOIN loans l ON l.member_id=m.id AND l.org_id=%s LEFT JOIN savings s ON s.member_id=m.id AND s.org_id=%s LEFT JOIN share_accounts sa ON sa.member_id=m.id AND sa.org_id=%s WHERE m.status='active' AND (l.id IS NOT NULL OR s.id IS NOT NULL OR sa.id IS NOT NULL)" % (org_id, org_id, org_id))
-        stats['total_members'] = len(cur.fetchall())
+        cur.execute("SELECT COUNT(*) FROM member_organizations mo JOIN members m ON m.id=mo.member_id WHERE mo.org_id=%s AND mo.excluded_at IS NULL AND m.status='active'" % org_id)
+        stats['total_members'] = cur.fetchone()[0]
     else:
         cur.execute("SELECT COUNT(*) FROM members WHERE status='active'")
         stats['total_members'] = cur.fetchone()[0]
@@ -6217,7 +6214,73 @@ def handle_podft(method, params, body, cur, conn, staff, ip=''):
 
     return {'error': 'Неизвестное действие'}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft'}
+def handle_member_orgs(method, params, body, cur, conn, staff=None, ip=''):
+    """CRUD для привязки пайщиков к организациям (членство)"""
+    member_id = params.get('member_id') or body.get('member_id')
+    if not member_id:
+        return {'error': 'member_id обязателен'}
+
+    if method == 'GET':
+        return query_rows(cur, """
+            SELECT mo.id, mo.member_id, mo.org_id, o.name as org_name, o.short_name as org_short_name,
+                   mo.joined_at::text as joined_at, mo.excluded_at::text as excluded_at
+            FROM member_organizations mo
+            JOIN organizations o ON o.id = mo.org_id
+            WHERE mo.member_id = %s
+            ORDER BY mo.joined_at DESC
+        """ % member_id)
+
+    elif method == 'POST':
+        org_id = body.get('org_id')
+        joined_at = body.get('joined_at')
+        excluded_at = body.get('excluded_at')
+        if not org_id:
+            return {'error': 'org_id обязателен'}
+        if not joined_at:
+            return {'error': 'Дата вступления обязательна'}
+        excl_sql = "'%s'" % esc(excluded_at) if excluded_at else 'NULL'
+        cur.execute("""
+            INSERT INTO member_organizations (member_id, org_id, joined_at, excluded_at)
+            VALUES (%s, %s, '%s', %s) RETURNING id
+        """ % (member_id, org_id, esc(joined_at), excl_sql))
+        row_id = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(o.short_name, o.name) FROM organizations o WHERE o.id=%s" % org_id)
+        org_label = cur.fetchone()[0] if cur.rowcount else ''
+        audit_log(cur, staff, 'create', 'member_org', row_id, 'Пайщик %s → %s' % (member_id, org_label), '', ip)
+        conn.commit()
+        return {'id': row_id}
+
+    elif method == 'PUT':
+        row_id = body.get('id')
+        if not row_id:
+            return {'error': 'id обязателен'}
+        updates = []
+        if 'org_id' in body:
+            updates.append("org_id=%s" % body['org_id'])
+        if 'joined_at' in body and body['joined_at']:
+            updates.append("joined_at='%s'" % esc(body['joined_at']))
+        if 'excluded_at' in body:
+            if body['excluded_at']:
+                updates.append("excluded_at='%s'" % esc(body['excluded_at']))
+            else:
+                updates.append("excluded_at=NULL")
+        if updates:
+            updates.append("updated_at=NOW()")
+            cur.execute("UPDATE member_organizations SET %s WHERE id=%s AND member_id=%s" % (', '.join(updates), row_id, member_id))
+            audit_log(cur, staff, 'update', 'member_org', row_id, '', '', ip)
+            conn.commit()
+        return {'success': True}
+
+    elif method == 'DELETE':
+        row_id = params.get('id') or body.get('id')
+        if not row_id:
+            return {'error': 'id обязателен'}
+        cur.execute("UPDATE member_organizations SET excluded_at=CURRENT_DATE, updated_at=NOW() WHERE id=%s AND member_id=%s AND excluded_at IS NULL" % (row_id, member_id))
+        audit_log(cur, staff, 'exclude', 'member_org', row_id, '', '', ip)
+        conn.commit()
+        return {'success': True}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
@@ -6254,6 +6317,8 @@ def handler(event, context):
             result = handle_member_checks(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'podft':
             result = handle_podft(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'member_orgs':
+            result = handle_member_orgs(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
             result = handle_loans(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'savings':
