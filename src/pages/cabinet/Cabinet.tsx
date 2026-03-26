@@ -1,13 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage } from "@/lib/api";
+import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage, ChatConversation } from "@/lib/api";
 import usePush from "@/hooks/use-push";
 import CabinetHeader from "./CabinetHeader";
 import CabinetDashboard from "./CabinetDashboard";
 import CabinetChat from "./CabinetChat";
+
+const playChatSound = () => {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.4);
+    setTimeout(() => ctx.close(), 500);
+  } catch (e) { console.error(e); }
+};
 
 import LoanDetailView from "./LoanDetailView";
 import SavingDetailView from "./SavingDetailView";
@@ -70,10 +89,51 @@ const Cabinet = () => {
       setMaxLinked(res.linked);
       if (res.username) setMaxUsername(res.username);
     }).catch(() => setMaxLinked(null));
-    api.chat.list(token).then(convs => {
-      setChatUnread(convs.reduce((s, c) => s + (c.unread_count || 0), 0));
-    }).catch(() => {});
   }, [token]);
+
+  const prevChatUnreadRef = useRef<Record<number, number>>({});
+  const chatInitRef = useRef(true);
+
+  const pollChatUnread = useCallback(async () => {
+    if (!token) return;
+    try {
+      const convs: ChatConversation[] = await api.chat.list(token);
+      const total = convs.reduce((s, c) => s + (c.unread_count || 0), 0);
+      setChatUnread(total);
+
+      if (chatInitRef.current) {
+        const map: Record<number, number> = {};
+        convs.forEach((c) => { map[c.id] = c.unread_count || 0; });
+        prevChatUnreadRef.current = map;
+        chatInitRef.current = false;
+        return;
+      }
+
+      for (const c of convs) {
+        const prev = prevChatUnreadRef.current[c.id] || 0;
+        if ((c.unread_count || 0) > prev) {
+          playChatSound();
+          toast({ title: "Новое сообщение", description: c.last_message?.slice(0, 100) || "У вас новое сообщение в чате" });
+          if (Notification.permission === "granted") {
+            try { new Notification("Новое сообщение", { body: c.last_message?.slice(0, 100) || "", icon: "/favicon.ico", tag: "cabinet-chat-" + c.id }); } catch (e) { console.error(e); }
+          }
+          break;
+        }
+      }
+
+      const map: Record<number, number> = {};
+      convs.forEach((c) => { map[c.id] = c.unread_count || 0; });
+      prevChatUnreadRef.current = map;
+    } catch (e) { console.error(e); }
+  }, [token, toast]);
+
+  useEffect(() => {
+    if (!token) return;
+    if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
+    pollChatUnread();
+    const iv = setInterval(pollChatUnread, 6000);
+    return () => clearInterval(iv);
+  }, [token, pollChatUnread]);
 
   const handleTelegramLink = async () => {
     setTgLinking(true);
@@ -271,7 +331,7 @@ const Cabinet = () => {
         </DialogContent>
       </Dialog>
 
-      <CabinetChat open={showChat} onClose={() => { setShowChat(false); api.chat.list(token).then(c => setChatUnread(c.reduce((s, x) => s + (x.unread_count || 0), 0))).catch(() => {}); }} />
+      <CabinetChat open={showChat} onClose={() => { setShowChat(false); pollChatUnread(); }} />
     </div>
   );
 };
