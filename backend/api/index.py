@@ -6300,6 +6300,200 @@ def handle_member_orgs(method, params, body, cur, conn, staff=None, ip=''):
         conn.commit()
         return {'success': True}
 
+def handle_chat(method, params, body, headers, cur, conn):
+    """Онлайн-чат: пайщик ↔ менеджер, с опциональным ИИ-агентом"""
+    action = params.get('action') or body.get('action', 'list')
+
+    token = params.get('token') or body.get('token', '')
+    if not token:
+        token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
+
+    cur.execute("SELECT u.id, u.member_id, u.role FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+    row = cur.fetchone()
+    if not row:
+        return {'_status': 401, 'error': 'Не авторизован'}
+    user_id = row[0]
+    member_id = row[1]
+    role = row[2] or 'client'
+    is_staff = role in ('admin', 'manager')
+
+    if action == 'list':
+        if is_staff:
+            rows = query_rows(cur, """
+                SELECT c.id, c.member_id, c.subject, c.status, c.ai_enabled, c.assigned_staff_id, c.created_at, c.updated_at,
+                       CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name) ELSE m.company_name END as member_name,
+                       m.member_no,
+                       (SELECT body FROM chat_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message,
+                       (SELECT created_at FROM chat_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message_at,
+                       (SELECT COUNT(*) FROM chat_messages WHERE conversation_id=c.id AND sender_type='client' AND read_at IS NULL) as unread_count
+                FROM chat_conversations c
+                JOIN members m ON m.id=c.member_id
+                ORDER BY c.updated_at DESC
+            """)
+        else:
+            rows = query_rows(cur, """
+                SELECT c.id, c.subject, c.status, c.ai_enabled, c.created_at, c.updated_at,
+                       (SELECT body FROM chat_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message,
+                       (SELECT created_at FROM chat_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message_at,
+                       (SELECT COUNT(*) FROM chat_messages WHERE conversation_id=c.id AND sender_type IN ('staff','ai') AND read_at IS NULL) as unread_count
+                FROM chat_conversations c
+                WHERE c.member_id=%s
+                ORDER BY c.updated_at DESC
+            """ % member_id)
+        return rows
+
+    elif action == 'create':
+        subject = esc(body.get('subject', ''))
+        cur.execute("INSERT INTO chat_conversations (member_id, subject) VALUES (%s, '%s') RETURNING id, created_at" % (member_id, subject))
+        r = cur.fetchone()
+        conn.commit()
+        return {'id': r[0], 'created_at': serialize(r[1])}
+
+    elif action == 'messages':
+        conv_id = params.get('conversation_id') or body.get('conversation_id')
+        if not conv_id:
+            return {'error': 'conversation_id обязателен'}
+        if is_staff:
+            cur.execute("SELECT id FROM chat_conversations WHERE id=%s" % conv_id)
+        else:
+            cur.execute("SELECT id FROM chat_conversations WHERE id=%s AND member_id=%s" % (conv_id, member_id))
+        if not cur.fetchone():
+            return {'_status': 403, 'error': 'Нет доступа к этому чату'}
+
+        if is_staff:
+            cur.execute("UPDATE chat_messages SET read_at=NOW() WHERE conversation_id=%s AND sender_type='client' AND read_at IS NULL" % conv_id)
+        else:
+            cur.execute("UPDATE chat_messages SET read_at=NOW() WHERE conversation_id=%s AND sender_type IN ('staff','ai') AND read_at IS NULL" % conv_id)
+        conn.commit()
+
+        msgs = query_rows(cur, """
+            SELECT m.id, m.sender_type, m.sender_id, m.body, m.read_at, m.created_at,
+                   COALESCE(u.name, '') as sender_name
+            FROM chat_messages m LEFT JOIN users u ON u.id=m.sender_id
+            WHERE m.conversation_id=%s
+            ORDER BY m.created_at ASC
+        """ % conv_id)
+        return msgs
+
+    elif action == 'send':
+        conv_id = body.get('conversation_id')
+        text = body.get('body', '').strip()
+        if not conv_id or not text:
+            return {'error': 'conversation_id и body обязательны'}
+
+        if is_staff:
+            cur.execute("SELECT id, ai_enabled FROM chat_conversations WHERE id=%s" % conv_id)
+        else:
+            cur.execute("SELECT id, ai_enabled FROM chat_conversations WHERE id=%s AND member_id=%s" % (conv_id, member_id))
+        conv = cur.fetchone()
+        if not conv:
+            return {'_status': 403, 'error': 'Нет доступа к этому чату'}
+
+        sender_type = 'staff' if is_staff else 'client'
+        cur.execute("INSERT INTO chat_messages (conversation_id, sender_type, sender_id, body) VALUES (%s, '%s', %s, '%s') RETURNING id, created_at" % (conv_id, sender_type, user_id, esc(text)))
+        msg = cur.fetchone()
+        cur.execute("UPDATE chat_conversations SET updated_at=NOW() WHERE id=%s" % conv_id)
+        conn.commit()
+
+        result = {'id': msg[0], 'created_at': serialize(msg[1]), 'ai_reply': None}
+
+        ai_enabled = conv[1]
+        if not is_staff and ai_enabled:
+            try:
+                ai_text = _call_ai_agent(conv_id, text, cur)
+                if ai_text:
+                    cur.execute("INSERT INTO chat_messages (conversation_id, sender_type, sender_id, body) VALUES (%s, 'ai', NULL, '%s') RETURNING id, created_at" % (conv_id, esc(ai_text)))
+                    ai_msg = cur.fetchone()
+                    cur.execute("UPDATE chat_conversations SET updated_at=NOW() WHERE id=%s" % conv_id)
+                    conn.commit()
+                    result['ai_reply'] = {'id': ai_msg[0], 'body': ai_text, 'created_at': serialize(ai_msg[1])}
+            except Exception:
+                pass
+
+        return result
+
+    elif action == 'close':
+        conv_id = body.get('conversation_id')
+        if not conv_id:
+            return {'error': 'conversation_id обязателен'}
+        if is_staff:
+            cur.execute("UPDATE chat_conversations SET status='closed', updated_at=NOW() WHERE id=%s" % conv_id)
+        else:
+            cur.execute("UPDATE chat_conversations SET status='closed', updated_at=NOW() WHERE id=%s AND member_id=%s" % (conv_id, member_id))
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'reopen':
+        conv_id = body.get('conversation_id')
+        if not conv_id:
+            return {'error': 'conversation_id обязателен'}
+        if is_staff:
+            cur.execute("UPDATE chat_conversations SET status='open', updated_at=NOW() WHERE id=%s" % conv_id)
+        else:
+            cur.execute("UPDATE chat_conversations SET status='open', updated_at=NOW() WHERE id=%s AND member_id=%s" % (conv_id, member_id))
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'toggle_ai':
+        if not is_staff:
+            return {'_status': 403, 'error': 'Только для сотрудников'}
+        conv_id = body.get('conversation_id')
+        enabled = body.get('enabled', False)
+        if not conv_id:
+            return {'error': 'conversation_id обязателен'}
+        cur.execute("UPDATE chat_conversations SET ai_enabled=%s, updated_at=NOW() WHERE id=%s" % ('true' if enabled else 'false', conv_id))
+        conn.commit()
+        return {'success': True, 'ai_enabled': enabled}
+
+    elif action == 'assign':
+        if not is_staff:
+            return {'_status': 403, 'error': 'Только для сотрудников'}
+        conv_id = body.get('conversation_id')
+        staff_id = body.get('staff_id')
+        if not conv_id:
+            return {'error': 'conversation_id обязателен'}
+        cur.execute("UPDATE chat_conversations SET assigned_staff_id=%s, updated_at=NOW() WHERE id=%s" % (staff_id or 'NULL', conv_id))
+        conn.commit()
+        return {'success': True}
+
+    return {'error': 'Неизвестное действие: %s' % action}
+
+
+def _call_ai_agent(conv_id, last_message, cur):
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return None
+    history = query_rows(cur, "SELECT sender_type, body FROM chat_messages WHERE conversation_id=%s ORDER BY created_at ASC LIMIT 20" % conv_id)
+    messages = []
+    for h in history:
+        role = 'assistant' if h['sender_type'] in ('staff', 'ai') else 'user'
+        messages.append({'role': role, 'content': h['body']})
+    if not messages or messages[-1]['role'] != 'user':
+        messages.append({'role': 'user', 'content': last_message})
+
+    req_body = json.dumps({
+        'model': 'claude-sonnet-4-20250514',
+        'max_tokens': 1024,
+        'system': 'Ты — вежливый помощник кредитного потребительского кооператива. Отвечай кратко и по существу на русском языке. Ты помогаешь пайщикам с вопросами о займах, сбережениях, паевых взносах и работе кооператива. Если вопрос выходит за рамки — предложи связаться с менеджером.',
+        'messages': messages
+    }).encode('utf-8')
+
+    req = urllib.request.Request(
+        'https://api.anthropic.com/v1/messages',
+        data=req_body,
+        headers={
+            'Content-Type': 'application/json',
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01'
+        },
+        method='POST'
+    )
+    resp = urllib.request.urlopen(req, timeout=25)
+    data = json.loads(resp.read().decode('utf-8'))
+    if data.get('content') and len(data['content']) > 0:
+        return data['content'][0].get('text', '')
+    return None
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
 
 def handler(event, context):
@@ -6371,6 +6565,8 @@ def handler(event, context):
             result = handle_telegram_bot(method, body, cur, conn)
         elif entity == 'max_bot':
             result = handle_max_bot(method, body, cur, conn)
+        elif entity == 'chat':
+            result = handle_chat(method, params, body, ev_headers, cur, conn)
         elif entity == 'dadata':
             result = handle_dadata(body)
         elif entity == 'cron':

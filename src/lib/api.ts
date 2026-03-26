@@ -330,6 +330,22 @@ export const api = {
     last: () => request<RfmCheckDetail | { status: string }>("GET", { entity: "podft", action: "last" }),
     run: () => request<RfmRunResult>("POST", undefined, { entity: "podft", action: "run" }),
   },
+
+  chat: {
+    list: (token: string) => request<ChatConversation[]>("GET", { entity: "chat", action: "list", token }),
+    staffList: () => request<ChatConversationStaff[]>("GET", { entity: "chat", action: "list" }),
+    create: (token: string, subject?: string) => request<{ id: number; created_at: string }>("POST", undefined, { entity: "chat", action: "create", token, subject }),
+    messages: (token: string, conversationId: number) => request<ChatMessage[]>("GET", { entity: "chat", action: "messages", token, conversation_id: conversationId }),
+    staffMessages: (conversationId: number) => request<ChatMessage[]>("GET", { entity: "chat", action: "messages", conversation_id: conversationId }),
+    send: (token: string, conversationId: number, body: string) => request<ChatSendResult>("POST", undefined, { entity: "chat", action: "send", token, conversation_id: conversationId, body }),
+    staffSend: (conversationId: number, body: string) => request<ChatSendResult>("POST", undefined, { entity: "chat", action: "send", conversation_id: conversationId, body }),
+    close: (token: string, conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "close", token, conversation_id: conversationId }),
+    staffClose: (conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "close", conversation_id: conversationId }),
+    reopen: (token: string, conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "reopen", token, conversation_id: conversationId }),
+    staffReopen: (conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "reopen", conversation_id: conversationId }),
+    toggleAi: (conversationId: number, enabled: boolean) => request<{ success: boolean; ai_enabled: boolean }>("POST", undefined, { entity: "chat", action: "toggle_ai", conversation_id: conversationId, enabled }),
+    assign: (conversationId: number, staffId: number | null) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "assign", conversation_id: conversationId, staff_id: staffId }),
+  },
 };
 
 export interface RfmCheck {
@@ -1065,6 +1081,41 @@ export interface NotificationStats {
   telegram_messages: number;
   max_messages: number;
   email_messages: number;
+}
+
+export interface ChatConversation {
+  id: number;
+  subject: string;
+  status: string;
+  ai_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+}
+
+export interface ChatConversationStaff extends ChatConversation {
+  member_id: number;
+  member_name: string;
+  member_no: string;
+  assigned_staff_id: number | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  sender_type: "client" | "staff" | "ai";
+  sender_id: number | null;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+  sender_name: string;
+}
+
+export interface ChatSendResult {
+  id: number;
+  created_at: string;
+  ai_reply: { id: number; body: string; created_at: string } | null;
 }
 
 export default api;

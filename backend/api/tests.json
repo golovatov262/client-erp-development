@@ -27,5 +27,8 @@
   {"name": "Passport auto check requires auth", "method": "POST", "path": "/", "body": {"entity": "member_checks", "member_id": 1, "action": "passport_auto"}, "expectedStatus": 401},
   {"name": "PODFT history requires auth", "method": "GET", "path": "/?entity=podft&action=history", "expectedStatus": 401},
   {"name": "PODFT run requires auth", "method": "POST", "path": "/", "body": {"entity": "podft", "action": "run"}, "expectedStatus": 401},
-  {"name": "Member orgs requires auth", "method": "GET", "path": "/?entity=member_orgs&member_id=1", "expectedStatus": 401}
+  {"name": "Member orgs requires auth", "method": "GET", "path": "/?entity=member_orgs&member_id=1", "expectedStatus": 401},
+  {"name": "Chat unauthorized", "method": "GET", "path": "/?entity=chat&action=list&token=invalid", "expectedStatus": 401},
+  {"name": "Chat send unauthorized", "method": "POST", "path": "/", "body": {"entity": "chat", "action": "send", "token": "invalid", "conversation_id": 1, "body": "test"}, "expectedStatus": 401},
+  {"name": "Chat create unauthorized", "method": "POST", "path": "/", "body": {"entity": "chat", "action": "create", "token": "invalid"}, "expectedStatus": 401}
 ]}

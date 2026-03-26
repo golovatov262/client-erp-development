@@ -7,6 +7,7 @@ import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, Pu
 import usePush from "@/hooks/use-push";
 import CabinetHeader from "./CabinetHeader";
 import CabinetDashboard from "./CabinetDashboard";
+import CabinetChat from "./CabinetChat";
 
 import LoanDetailView from "./LoanDetailView";
 import SavingDetailView from "./SavingDetailView";
@@ -33,6 +34,8 @@ const Cabinet = () => {
   const [maxLinked, setMaxLinked] = useState<boolean | null>(null);
   const [maxUsername, setMaxUsername] = useState("");
   const [maxLinking, setMaxLinking] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -67,6 +70,9 @@ const Cabinet = () => {
       setMaxLinked(res.linked);
       if (res.username) setMaxUsername(res.username);
     }).catch(() => setMaxLinked(null));
+    api.chat.list(token).then(convs => {
+      setChatUnread(convs.reduce((s, c) => s + (c.unread_count || 0), 0));
+    }).catch(() => {});
   }, [token]);
 
   const handleTelegramLink = async () => {
@@ -212,7 +218,9 @@ const Cabinet = () => {
         userName={userName}
         memberNo={data.info.member_no}
         unreadCount={unreadCount}
+        chatUnread={chatUnread}
         onOpenMessages={openMessages}
+        onOpenChat={() => setShowChat(true)}
         onOpenMenu={() => setShowMenu(true)}
         showMenu={showMenu}
         onCloseMenu={setShowMenu}
@@ -262,6 +270,8 @@ const Cabinet = () => {
           {savingDetail && <SavingDetailView saving={savingDetail} />}
         </DialogContent>
       </Dialog>
+
+      <CabinetChat open={showChat} onClose={() => { setShowChat(false); api.chat.list(token).then(c => setChatUnread(c.reduce((s, x) => s + (x.unread_count || 0), 0))).catch(() => {}); }} />
     </div>
   );
 };

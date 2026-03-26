@@ -11,6 +11,7 @@ const allMenuItems = [
   { icon: "PiggyBank", label: "Сбережения", path: "/office/savings", roles: ["admin", "manager"] },
   { icon: "Wallet", label: "Паевые счета", path: "/office/shares", roles: ["admin", "manager"] },
   { icon: "BarChart3", label: "Отчётность", path: "/office/reports", roles: ["admin", "manager"] },
+  { icon: "MessageCircle", label: "Чаты", path: "/office/chats", roles: ["admin", "manager"] },
   { icon: "Settings", label: "Администрирование", path: "/office/admin", roles: ["admin"] },
 ];
 

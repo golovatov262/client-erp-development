@@ -11,7 +11,9 @@ interface CabinetHeaderProps {
   userName: string;
   memberNo: string;
   unreadCount: number;
+  chatUnread: number;
   onOpenMessages: () => void;
+  onOpenChat: () => void;
   onOpenMenu: () => void;
   showMenu: boolean;
   onCloseMenu: (open: boolean) => void;
@@ -45,7 +47,9 @@ const CabinetHeader = ({
   userName,
   memberNo,
   unreadCount,
+  chatUnread,
   onOpenMessages,
+  onOpenChat,
   onOpenMenu,
   showMenu,
   onCloseMenu,
@@ -89,6 +93,14 @@ const CabinetHeader = ({
             </div>
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
+            <Button variant="ghost" size="icon" className="h-9 w-9 relative" onClick={onOpenChat}>
+              <Icon name="MessageCircle" size={18} />
+              {chatUnread > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center px-1">
+                  {chatUnread > 9 ? "9+" : chatUnread}
+                </span>
+              )}
+            </Button>
             <Button variant="ghost" size="icon" className="h-9 w-9 relative" onClick={onOpenMessages}>
               <Icon name="Bell" size={18} />
               {unreadCount > 0 && (
