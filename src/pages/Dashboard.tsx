@@ -4,7 +4,7 @@ import StatCard from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Icon from "@/components/ui/icon";
-import api, { DashboardStats, OverdueLoanItem, ExpiringSavingItem } from "@/lib/api";
+import api, { triggerNotify, DashboardStats, OverdueLoanItem, ExpiringSavingItem } from "@/lib/api";
 
 const formatMoney = (val: number) => {
   if (val >= 1000000) return (val / 1000000).toFixed(1) + " млн ₽";
@@ -31,6 +31,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     load(selectedOrg);
+    triggerNotify();
   }, [selectedOrg, load]);
 
   const handleOrgChange = (orgId?: number) => {
