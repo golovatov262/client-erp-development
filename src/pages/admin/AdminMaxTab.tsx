@@ -386,6 +386,11 @@ const AdminMaxTab = () => {
                   </div>
                   <Switch checked={autoSettings.overdue_notify === "true"} onCheckedChange={v => setAutoSettings(prev => ({ ...prev, overdue_notify: v ? "true" : "false" }))} />
                 </div>
+                <div className="space-y-2 pt-2 border-t">
+                  <Label className="text-sm">Время отправки</Label>
+                  <Input type="time" value={autoSettings.remind_time || "09:00"} onChange={e => setAutoSettings(prev => ({ ...prev, remind_time: e.target.value }))} className="w-32" />
+                  <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться автоматические напоминания</p>
+                </div>
               </CardContent>
             </Card>
 
@@ -402,7 +407,7 @@ const AdminMaxTab = () => {
                   </div>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div>
                   <Label className="text-sm">За сколько дней напоминать</Label>
                   <p className="text-xs text-muted-foreground mb-2">Пайщик получит сообщение о приближении даты закрытия сберегательного договора</p>
@@ -416,6 +421,11 @@ const AdminMaxTab = () => {
                       );
                     })}
                   </div>
+                </div>
+                <div className="space-y-2 pt-2 border-t">
+                  <Label className="text-sm">Время отправки</Label>
+                  <Input type="time" value={autoSettings.savings_remind_time || "09:00"} onChange={e => setAutoSettings(prev => ({ ...prev, savings_remind_time: e.target.value }))} className="w-32" />
+                  <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться напоминания о сбережениях</p>
                 </div>
               </CardContent>
             </Card>

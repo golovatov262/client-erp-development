@@ -1,0 +1,4 @@
+{"tests": [
+  {"name": "Send notifications with time check", "method": "POST", "path": "/", "body": {"date": "2026-03-26", "force": true}, "expectedStatus": 200, "expectedBody": {"success": true}, "bodyMatcher": "partial"},
+  {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200}
+]}

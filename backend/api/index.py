@@ -5288,7 +5288,8 @@ def handle_notifications(method, params, body, staff, cur, conn):
 
     if action == 'save_telegram_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days',
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_remind_time',
+                   'savings_enabled', 'savings_reminder_days',
                    'tpl_payment_today', 'tpl_payment_tomorrow', 'tpl_payment_days', 'tpl_overdue',
                    'tpl_savings_today', 'tpl_savings_tomorrow', 'tpl_savings_days'}
         for k, v in settings.items():
@@ -5310,7 +5311,8 @@ def handle_notifications(method, params, body, staff, cur, conn):
 
     if action == 'save_max_settings':
         settings = body.get('settings', {})
-        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days',
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_remind_time',
+                   'savings_enabled', 'savings_reminder_days',
                    'tpl_payment_today', 'tpl_payment_tomorrow', 'tpl_payment_days', 'tpl_overdue',
                    'tpl_savings_today', 'tpl_savings_tomorrow', 'tpl_savings_days'}
         for k, v in settings.items():
