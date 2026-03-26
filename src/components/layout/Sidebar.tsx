@@ -17,7 +17,7 @@ const allMenuItems = [
 
 const roleLabels: Record<string, string> = { admin: "Администратор", manager: "Менеджер" };
 
-const Sidebar = () => {
+const Sidebar = ({ chatUnread = 0 }: { chatUnread?: number }) => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -64,8 +64,24 @@ const Sidebar = () => {
                   : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               )}
             >
-              <Icon name={item.icon} size={20} className="flex-shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              <div className="relative flex-shrink-0">
+                <Icon name={item.icon} size={20} />
+                {item.path === "/office/chats" && chatUnread > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+                    {chatUnread > 9 ? "9+" : chatUnread}
+                  </span>
+                )}
+              </div>
+              {!collapsed && (
+                <span className="flex-1 flex items-center justify-between">
+                  {item.label}
+                  {item.path === "/office/chats" && chatUnread > 0 && (
+                    <span className="min-w-[20px] h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">
+                      {chatUnread > 9 ? "9+" : chatUnread}
+                    </span>
+                  )}
+                </span>
+              )}
             </button>
           );
         })}
