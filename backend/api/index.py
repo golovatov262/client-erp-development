@@ -1991,11 +1991,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if sv[5] != 'active':
                 return {'statusCode': 400, 'headers': cors, 'body': json.dumps({'error': 'Договор уже закрыт'})}
             bal = Decimal(str(sv[3]))
-            accrued = Decimal(str(sv[1]))
+            end_date = str(sv[4]) if sv[4] else date.today().isoformat()
+            cur.execute("SELECT COALESCE(SUM(daily_amount),0) FROM savings_daily_accruals WHERE saving_id=%s AND accrual_date<='%s'" % (sid, end_date))
+            accrued = Decimal(str(cur.fetchone()[0]))
             fa = bal + accrued
             cur.execute("UPDATE savings SET status='closed', current_balance=%s, accrued_interest=0, updated_at=NOW() WHERE id=%s" % (float(fa), sid))
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'closing','Закрытие по окончании срока')" % (sid, date.today().isoformat(), float(fa)))
-            audit_log(cur, staff, 'close_by_term', 'saving', sid, '', 'Возврат: %s (тело + начисленные %%)' % float(fa), ip)
+            audit_log(cur, staff, 'close_by_term', 'saving', sid, '', 'Возврат: %s (тело + %% до %s)' % (float(fa), end_date), ip)
             conn.commit()
             return {'success': True, 'final_amount': float(fa), 'accrued_paid': float(accrued)}
 
