@@ -6382,12 +6382,15 @@ def handle_chat(method, params, body, headers, cur, conn):
             return {'error': 'conversation_id и body обязательны'}
 
         if is_staff:
-            cur.execute("SELECT id, ai_enabled FROM chat_conversations WHERE id=%s" % conv_id)
+            cur.execute("SELECT id, ai_enabled, member_id, assigned_staff_id FROM chat_conversations WHERE id=%s" % conv_id)
         else:
-            cur.execute("SELECT id, ai_enabled FROM chat_conversations WHERE id=%s AND member_id=%s" % (conv_id, member_id))
+            cur.execute("SELECT id, ai_enabled, member_id, assigned_staff_id FROM chat_conversations WHERE id=%s AND member_id=%s" % (conv_id, member_id))
         conv = cur.fetchone()
         if not conv:
             return {'_status': 403, 'error': 'Нет доступа к этому чату'}
+
+        conv_member_id = conv[2]
+        conv_staff_id = conv[3]
 
         sender_type = 'staff' if is_staff else 'client'
         cur.execute("INSERT INTO chat_messages (conversation_id, sender_type, sender_id, body) VALUES (%s, '%s', %s, '%s') RETURNING id, created_at" % (conv_id, sender_type, user_id, esc(text)))
@@ -6396,6 +6399,25 @@ def handle_chat(method, params, body, headers, cur, conn):
         conn.commit()
 
         result = {'id': msg[0], 'created_at': serialize(msg[1]), 'ai_reply': None}
+
+        cur.execute("SELECT name FROM users WHERE id=%s" % user_id)
+        sender_row = cur.fetchone()
+        sender_display = sender_row[0] if sender_row else 'Пользователь'
+
+        if is_staff:
+            cur.execute("SELECT u.id FROM users u WHERE u.member_id=%s LIMIT 1" % conv_member_id)
+            client_user = cur.fetchone()
+            if client_user:
+                try:
+                    _notify_chat_message(cur, conn, client_user[0], sender_display, text, conv_id)
+                except Exception:
+                    pass
+        else:
+            if conv_staff_id:
+                try:
+                    _notify_chat_message(cur, conn, conv_staff_id, sender_display, text, conv_id)
+                except Exception:
+                    pass
 
         ai_enabled = conv[1]
         if not is_staff and ai_enabled:
@@ -6493,6 +6515,68 @@ def _call_ai_agent(conv_id, last_message, cur):
     if data.get('content') and len(data['content']) > 0:
         return data['content'][0].get('text', '')
     return None
+
+
+def _notify_chat_message(cur, conn, recipient_user_id, sender_name, message_text, conv_id):
+    preview = message_text[:100] + ('...' if len(message_text) > 100 else '')
+    title = 'Новое сообщение в чате'
+
+    try:
+        from pywebpush import webpush
+        vapid_private = os.environ.get('VAPID_PRIVATE_KEY', '')
+        vapid_email = os.environ.get('VAPID_EMAIL', 'mailto:admin@example.com')
+        if vapid_private:
+            cur.execute("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=%s AND user_agent NOT IN ('unsubscribed','expired','reset')" % recipient_user_id)
+            for sub in cur.fetchall():
+                try:
+                    payload = json.dumps({'title': title, 'body': '%s: %s' % (sender_name, preview), 'url': '/cabinet', 'conversation_id': conv_id})
+                    webpush(
+                        subscription_info={'endpoint': sub[1], 'keys': {'p256dh': sub[2], 'auth': sub[3]}},
+                        data=payload,
+                        vapid_private_key=vapid_private,
+                        vapid_claims={'sub': vapid_email}
+                    )
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+
+    try:
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+        ch = cur.fetchone()
+        if ch:
+            ch_settings = ch[0] if isinstance(ch[0], dict) else json.loads(ch[0])
+            bot_token = ch_settings.get('bot_token', '')
+            if bot_token:
+                cur.execute("SELECT chat_id FROM telegram_subscribers WHERE user_id=%s AND active=true" % recipient_user_id)
+                for row in cur.fetchall():
+                    try:
+                        tg_text = '<b>%s</b>\n%s: %s' % (title, sender_name, preview)
+                        tg_url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
+                        tg_data = json.dumps({'chat_id': row[0], 'text': tg_text, 'parse_mode': 'HTML'}).encode('utf-8')
+                        tg_req = urllib.request.Request(tg_url, data=tg_data, headers={'Content-Type': 'application/json'})
+                        urllib.request.urlopen(tg_req, timeout=10).read()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    try:
+        max_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if max_token:
+            cur.execute("SELECT chat_id FROM max_subscribers WHERE user_id=%s AND active=true" % recipient_user_id)
+            for row in cur.fetchall():
+                try:
+                    max_text = '<b>%s</b>\n%s: %s' % (title, sender_name, preview)
+                    max_url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(max_token), row[0])
+                    max_data = json.dumps({'text': max_text, 'format': 'html'}).encode('utf-8')
+                    max_req = urllib.request.Request(max_url, data=max_data, headers={'Content-Type': 'application/json'})
+                    urllib.request.urlopen(max_req, timeout=10).read()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
 
