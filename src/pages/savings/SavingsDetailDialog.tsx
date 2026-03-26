@@ -33,7 +33,7 @@ interface SavingsDetailDialogProps {
   onDeposit: () => void;
   onInterest: () => void;
   onWithdrawal: () => void;
-  onEarlyClose: () => void;
+  onClose: () => void;
   onModifyTerm: () => void;
   onBackfill: () => void;
   onRateChange: () => void;
@@ -144,7 +144,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" onClick={props.onModifyTerm}><Icon name="Calendar" size={14} className="mr-1" />Изменить срок</Button>
                 <Button size="sm" onClick={props.onRateChange}><Icon name="Percent" size={14} className="mr-1" />Изменить ставку</Button>
                 <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
-                <Button size="sm" variant="destructive" onClick={props.onEarlyClose}><Icon name="XCircle" size={14} className="mr-1" />Досрочное закрытие</Button>
+                <Button size="sm" variant="destructive" onClick={props.onClose}><Icon name="XCircle" size={14} className="mr-1" />Закрытие договора</Button>
               </>)}
             </div>
             {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}

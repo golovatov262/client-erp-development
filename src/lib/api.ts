@@ -113,6 +113,7 @@ export const api = {
     transaction: (data: { saving_id: number; amount: number; transaction_type: string; transaction_date?: string; is_cash?: boolean; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "transaction", ...data }),
     earlyClose: (savingId: number) => request<{ final_amount: number; early_interest: number }>("POST", undefined, { entity: "savings", action: "early_close", saving_id: savingId }),
+    closeByTerm: (savingId: number) => request<{ final_amount: number; accrued_paid: number }>("POST", undefined, { entity: "savings", action: "close_by_term", saving_id: savingId }),
     deleteContract: (savingId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_contract", saving_id: savingId }),
     deleteAllTransactions: (savingId: number) =>

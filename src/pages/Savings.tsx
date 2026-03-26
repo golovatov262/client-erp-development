@@ -57,7 +57,7 @@ const Savings = () => {
   const [depositForm, setDepositForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), is_cash: false });
   const [showInterest, setShowInterest] = useState(false);
   const [interestForm, setInterestForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
-  const [showEarlyClose, setShowEarlyClose] = useState(false);
+  const [showClose, setShowClose] = useState(false);
   const [showEditTx, setShowEditTx] = useState(false);
   const [editTxForm, setEditTxForm] = useState({ transaction_id: 0, amount: "", transaction_date: "", description: "" });
 
@@ -173,9 +173,24 @@ const Savings = () => {
     if (!detail) return;
     setSaving(true);
     try {
-      await api.savings.earlyClose({ saving_id: detail.id });
+      await api.savings.earlyClose(detail.id);
       toast({ title: "Вклад досрочно закрыт" });
-      setShowEarlyClose(false);
+      setShowClose(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCloseByTerm = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.savings.closeByTerm(detail.id);
+      toast({ title: "Договор закрыт по сроку" });
+      setShowClose(false);
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -474,7 +489,7 @@ const Savings = () => {
         onDeposit={() => setShowDeposit(true)}
         onInterest={() => setShowInterest(true)}
         onWithdrawal={() => setShowWithdrawal(true)}
-        onEarlyClose={() => setShowEarlyClose(true)}
+        onClose={() => setShowClose(true)}
         onModifyTerm={() => setShowModifyTerm(true)}
         onBackfill={() => setShowBackfill(true)}
         onRateChange={() => setShowRateChange(true)}
@@ -515,9 +530,10 @@ const Savings = () => {
         withdrawalForm={withdrawalForm}
         setWithdrawalForm={setWithdrawalForm}
         handleWithdrawal={handleWithdrawal}
-        showEarlyClose={showEarlyClose}
-        setShowEarlyClose={setShowEarlyClose}
+        showClose={showClose}
+        setShowClose={setShowClose}
         handleEarlyClose={handleEarlyClose}
+        handleCloseByTerm={handleCloseByTerm}
         showModifyTerm={showModifyTerm}
         setShowModifyTerm={setShowModifyTerm}
         modifyTermForm={modifyTermForm}

@@ -30,9 +30,10 @@ interface SavingsActionDialogsProps {
   setWithdrawalForm: (v: { amount: string; date: string }) => void;
   handleWithdrawal: () => void;
   
-  showEarlyClose: boolean;
-  setShowEarlyClose: (v: boolean) => void;
+  showClose: boolean;
+  setShowClose: (v: boolean) => void;
   handleEarlyClose: () => void;
+  handleCloseByTerm: () => void;
   
   showModifyTerm: boolean;
   setShowModifyTerm: (v: boolean) => void;
@@ -100,11 +101,25 @@ const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={props.showEarlyClose} onOpenChange={props.setShowEarlyClose}>
+      <Dialog open={props.showClose} onOpenChange={props.setShowClose}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Досрочное закрытие</DialogTitle></DialogHeader>
-          <div className="text-sm text-muted-foreground">Вклад будет закрыт досрочно. Проценты согласно условиям договора.</div>
-          <DialogFooter><Button onClick={props.handleEarlyClose} disabled={saving} variant="destructive">Закрыть досрочно</Button></DialogFooter>
+          <DialogHeader><DialogTitle>Закрытие договора</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">Выберите тип закрытия договора:</div>
+            <div className="grid gap-2">
+              <div className="border rounded-lg p-4 space-y-2">
+                <div className="font-medium text-sm">Закрыть по сроку</div>
+                <div className="text-xs text-muted-foreground">Пайщику выплачивается тело вклада + все начисленные проценты. Без пересчёта.</div>
+                {detail && <div className="text-xs">К выплате: <span className="font-medium">{fmt(detail.current_balance + detail.accrued_interest)}</span></div>}
+                <Button onClick={props.handleCloseByTerm} disabled={saving} size="sm" className="w-full">Закрыть по сроку</Button>
+              </div>
+              <div className="border border-destructive/30 rounded-lg p-4 space-y-2">
+                <div className="font-medium text-sm text-destructive">Досрочно с пересчётом</div>
+                <div className="text-xs text-muted-foreground">Проценты пересчитываются по штрафной ставке (0.1% от суммы). Переплата удерживается из тела вклада.</div>
+                <Button onClick={props.handleEarlyClose} disabled={saving} size="sm" variant="destructive" className="w-full">Закрыть досрочно</Button>
+              </div>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
