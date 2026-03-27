@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { triggerNotify, StaffUser, Member, Organization } from "@/lib/api";
+import api, { StaffUser, Member, Organization } from "@/lib/api";
 import AdminUserManagement from "./admin/AdminUserManagement";
 import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
@@ -31,7 +31,7 @@ const Admin = () => {
     setLoading(true);
     Promise.all([api.users.list(), api.members.list()]).then(([u, m]) => { setUsers(u); setMembers(m); }).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); triggerNotify(); }, []);
+  useEffect(() => { load(); }, []);
 
   const loadOrgs = () => {
     setOrgsLoading(true);

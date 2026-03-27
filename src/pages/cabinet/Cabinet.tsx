@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { triggerNotify, CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage, ChatConversation } from "@/lib/api";
+import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage, ChatConversation } from "@/lib/api";
 import usePush from "@/hooks/use-push";
 import CabinetHeader from "./CabinetHeader";
 import CabinetDashboard from "./CabinetDashboard";
@@ -64,7 +64,6 @@ const Cabinet = () => {
 
   useEffect(() => {
     if (!token) { navigate("/"); return; }
-    triggerNotify();
     const user = localStorage.getItem("cabinet_user");
     if (user) { try { setUserName(JSON.parse(user).name); } catch { /* skip */ } }
     api.cabinet.overview(token).then(setData).catch(() => {

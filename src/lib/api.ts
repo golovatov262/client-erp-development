@@ -1118,19 +1118,4 @@ export interface ChatSendResult {
   ai_reply: { id: number; body: string; created_at: string } | null;
 }
 
-export function triggerNotify(): void {
-  const NOTIFY_URL = funcUrls["cron-notify" as keyof typeof funcUrls];
-  if (!NOTIFY_URL) return;
-  const key = "notify_last_trigger";
-  const last = localStorage.getItem(key);
-  const now = Date.now();
-  if (last && now - Number(last) < 3600000) return;
-  localStorage.setItem(key, String(now));
-  fetch(NOTIFY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  }).catch(() => {});
-}
-
 export default api;
