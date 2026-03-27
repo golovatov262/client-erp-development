@@ -62,9 +62,22 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
   const [form, setForm] = useState({ login: "", name: "", role: "manager", password: "", email: "", phone: "" });
   const [clientForm, setClientForm] = useState({ login: "", name: "", password: "", phone: "", member_id: "" });
   const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "", member_id: "" as string });
+  const [staffSearch, setStaffSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
 
-  const staffUsers = users.filter((u) => u.role === "admin" || u.role === "manager");
-  const clientUsers = users.filter((u) => u.role === "client");
+  const filterUsers = (list: UserRow[], query: string) => {
+    if (!query.trim()) return list;
+    const q = query.toLowerCase();
+    return list.filter((u) =>
+      u.login?.toLowerCase().includes(q) ||
+      u.name?.toLowerCase().includes(q) ||
+      u.email?.toLowerCase().includes(q) ||
+      u.phone?.toLowerCase().includes(q)
+    );
+  };
+
+  const staffUsers = filterUsers(users.filter((u) => u.role === "admin" || u.role === "manager"), staffSearch);
+  const clientUsers = filterUsers(users.filter((u) => u.role === "client"), clientSearch);
 
   const handleCreate = async () => {
     if (!form.login || !form.name || !form.password) return;
@@ -147,16 +160,26 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
         </TabsList>
 
         <TabsContent value="staff">
-          <div className="mb-4"><Button onClick={() => setShowForm(true)}><Icon name="UserPlus" size={16} className="mr-2" />Создать пользователя</Button></div>
+          <div className="mb-4 flex gap-2 flex-wrap items-center">
+            <Button onClick={() => setShowForm(true)}><Icon name="UserPlus" size={16} className="mr-2" />Создать пользователя</Button>
+            <div className="relative ml-auto w-64">
+              <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Поиск по имени, логину, email..." value={staffSearch} onChange={e => setStaffSearch(e.target.value)} className="pl-9" />
+            </div>
+          </div>
           <DataTable columns={columns} data={staffUsers} loading={loading} onRowClick={openEdit} />
         </TabsContent>
 
         <TabsContent value="clients">
-          <div className="mb-4 flex gap-2 flex-wrap">
+          <div className="mb-4 flex gap-2 flex-wrap items-center">
             <Button onClick={() => setShowClientForm(true)}><Icon name="UserPlus" size={16} className="mr-2" />Создать клиента</Button>
             <Button variant="outline" onClick={() => { setBulkResult(null); setBulkPassword("123456"); setShowBulkConfirm(true); }}>
               <Icon name="Users" size={16} className="mr-2" />Создать всем пайщикам
             </Button>
+            <div className="relative ml-auto w-64">
+              <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Поиск по имени, логину, email..." value={clientSearch} onChange={e => setClientSearch(e.target.value)} className="pl-9" />
+            </div>
           </div>
           <DataTable columns={columns} data={clientUsers} loading={loading} onRowClick={openEdit} />
         </TabsContent>
