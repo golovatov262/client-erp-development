@@ -146,12 +146,31 @@ const BankStatements = () => {
     }
   };
 
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'sber_auth_callback') {
+        if (e.data.exchange_result === 'success') {
+          toast({ title: "Авторизация успешна" });
+          setShowAuthDialog(false);
+          loadData();
+        } else if (e.data.code) {
+          setAuthCode(e.data.code);
+        }
+      }
+      if (e.data?.type === 'sber_auth_error') {
+        toast({ title: "Ошибка авторизации", description: e.data.description || e.data.error, variant: "destructive" });
+        setShowAuthDialog(false);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   const openAuthDialog = async (connId: number) => {
     setAuthConnectionId(connId);
     setAuthCode("");
     try {
-      const redirectUri = window.location.origin + "/office/bank";
-      const { auth_url } = await bankApi.authUrl(connId, redirectUri);
+      const { auth_url } = await bankApi.authUrl(connId, "");
       window.open(auth_url, "_blank", "width=600,height=700");
       setShowAuthDialog(true);
     } catch (e) {
@@ -162,8 +181,7 @@ const BankStatements = () => {
   const handleAuthCallback = async () => {
     if (!authCode) return;
     try {
-      const redirectUri = window.location.origin + "/office/bank";
-      await bankApi.authCallback(authConnectionId, authCode, redirectUri);
+      await bankApi.authCallback(authConnectionId, authCode, "");
       toast({ title: "Авторизация успешна" });
       setShowAuthDialog(false);
       loadData();

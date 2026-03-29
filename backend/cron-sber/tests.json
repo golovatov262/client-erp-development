@@ -9,6 +9,28 @@
       "bodyMatcher": "partial"
     },
     {
+      "name": "List connections",
+      "method": "GET",
+      "path": "/?action=connections",
+      "expectedStatus": 200,
+      "bodyMatcher": "array"
+    },
+    {
+      "name": "List statements",
+      "method": "GET",
+      "path": "/?action=statements",
+      "expectedStatus": 200,
+      "expectedBody": {"items": "array"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "List transactions",
+      "method": "GET",
+      "path": "/?action=transactions",
+      "expectedStatus": 200,
+      "bodyMatcher": "array"
+    },
+    {
       "name": "Run cron with no active connections",
       "method": "POST",
       "path": "/",
