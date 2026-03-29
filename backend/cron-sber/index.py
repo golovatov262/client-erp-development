@@ -322,10 +322,19 @@ def handle_test(params):
 
     try:
         s3 = get_s3_client()
-        resp = s3.list_objects_v2(Bucket='files', MaxKeys=100)
-        results['s3_files'] = [{'key': obj['Key'], 'size': obj['Size']} for obj in resp.get('Contents', [])]
+        s3.put_object(Bucket='files', Key='_test_ping.txt', Body=b'hello_sber_test', ContentType='text/plain')
+        obj = s3.get_object(Bucket='files', Key='_test_ping.txt')
+        content = obj['Body'].read().decode('utf-8')
+        results['s3_roundtrip'] = content
+        for oid in [2, 3]:
+            sk = CERT_S3_KEYS.get(oid)
+            try:
+                o2 = s3.get_object(Bucket='files', Key=sk)
+                results['cert_org%s_size' % oid] = len(o2['Body'].read())
+            except Exception as e2:
+                results['cert_org%s_error' % oid] = str(e2)
     except Exception as e:
-        results['s3_files_error'] = str(e)
+        results['s3_error'] = str(e)
 
     org_id = int(params.get('org_id', '2'))
 
@@ -398,6 +407,8 @@ def handle_upload_cert(body):
 
 def handler(event, context):
     """Ежедневная загрузка банковских выписок из Сбер API и автоматическое разнесение платежей"""
+    if event.get('httpMethod') == 'OPTIONS':
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
     params = event.get('queryStringParameters') or {}
     if params.get('action') == 'test':
         result = handle_test(params)
