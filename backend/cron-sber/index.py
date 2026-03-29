@@ -1000,8 +1000,41 @@ def handle_exchange_code(body):
     cert_path, key_path, ca_path = get_ssl_context(org_id)
     cert_pair = (cert_path, key_path) if cert_path else None
     verify_param = ca_path if ca_path else False
+    scope = ORG_SCOPES.get(int(org_id), 'openid')
     attempts_log = []
     methods = [
+        {
+            'name': 'post_with_scope',
+            'data': {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'client_id': cid,
+                'client_secret': csecret,
+                'redirect_uri': REDIRECT_URI,
+                'scope': scope,
+            },
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+        },
+        {
+            'name': 'post_no_redirect',
+            'data': {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'client_id': cid,
+                'client_secret': csecret,
+            },
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+        },
+        {
+            'name': 'mtls_only',
+            'data': {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'client_id': cid,
+                'redirect_uri': REDIRECT_URI,
+            },
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+        },
         {
             'name': 'client_secret_post',
             'data': {
@@ -1034,7 +1067,7 @@ def handle_exchange_code(body):
                 headers=method['headers'],
                 cert=cert_pair,
                 verify=verify_param,
-                timeout=25,
+                timeout=10,
             )
             log_entry = {
                 'method': method['name'],
