@@ -988,13 +988,13 @@ def handle_change_secret(body):
     cert_pair = (cert_path, key_path) if cert_path else None
     verify_param = ca_path if ca_path else False
     change_url = "https://fintech.sberbank.ru:9443/ic/sso/api/v1/change-client-secret"
-    change_data = {
+    change_payload = json.dumps({
         'client_id': cid,
         'client_secret': csecret,
         'new_client_secret': new_secret,
-    }
+    })
     try:
-        resp = requests.post(change_url, data=change_data, cert=cert_pair, verify=verify_param, timeout=25)
+        resp = requests.post(change_url, data=change_payload, headers={'Content-Type': 'application/json'}, cert=cert_pair, verify=verify_param, timeout=25)
         if resp.status_code == 200:
             cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
             conn.commit()
