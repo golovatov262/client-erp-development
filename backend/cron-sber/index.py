@@ -29,8 +29,8 @@ ORG_SCOPES = {
 }
 
 CERT_S3_KEYS = {
-    2: 'sber_cert_org3.pem',
-    3: 'sber_cert_org2.pem',
+    2: 'sber_cert_org2.pem',
+    3: 'sber_cert_org3.pem',
 }
 
 _cert_cache = {}
@@ -73,8 +73,8 @@ def get_s3_client():
     )
 
 SBER_SECRET_MAP = {
-    2: '3',
-    3: '2',
+    2: '2',
+    3: '3',
 }
 
 def get_sber_credentials(org_id, cur=None):
@@ -454,7 +454,16 @@ def handle_test(params):
         results['cert_error'] = str(e)
 
     cid, csecret = get_sber_credentials(org_id)
-    results['api_test'] = {'org_id': org_id, 'client_id_present': bool(cid), 'client_secret_present': bool(csecret)}
+    env_suffix = SBER_SECRET_MAP.get(int(org_id), str(org_id))
+    results['api_test'] = {
+        'org_id': org_id,
+        'client_id_present': bool(cid),
+        'client_secret_present': bool(csecret),
+        'client_id_value': cid,
+        'env_suffix_used': env_suffix,
+        'raw_org2': os.environ.get('SBER_CLIENT_ID_ORG2', '')[:10],
+        'raw_org3': os.environ.get('SBER_CLIENT_ID_ORG3', '')[:10],
+    }
 
     if cid and csecret and results.get('cert_valid'):
         try:
