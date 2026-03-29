@@ -41,6 +41,22 @@ CA_CHAIN_S3_KEY = 'sber_ca_chain.pem'
 _cert_cache = {}
 _CACHE_VER = 4
 
+def sber_post_json(url, json_body, cert_pair, ca_path, timeout=20, retries=3):
+    """POST JSON to Sber API with retry."""
+    import time
+    verify_param = ca_path if ca_path else False
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = requests.post(url, data=json_body, headers={'Content-Type': 'application/json'}, cert=cert_pair, verify=verify_param, timeout=timeout)
+            return resp, None
+        except Exception as e:
+            last_err = str(e)[:200]
+            if attempt < retries - 1:
+                time.sleep(2)
+    return None, last_err
+
+
 def sber_post(url, data, cert_pair, ca_path, timeout=25, retries=2):
     """POST to Sber API with retry logic."""
     import time
@@ -994,14 +1010,17 @@ def handle_change_secret(body):
         'new_client_secret': new_secret,
     })
     try:
-        resp = requests.post(change_url, data=change_payload, headers={'Content-Type': 'application/json'}, cert=cert_pair, verify=verify_param, timeout=25)
+        resp, sber_err = sber_post_json(change_url, change_payload, cert_pair, ca_path, timeout=20, retries=3)
+        if sber_err:
+            conn.close()
+            return {'error': 'Сервер Сбера не отвечает (3 попытки): %s' % sber_err[:150]}
         if resp.status_code == 200:
             cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
             conn.commit()
             conn.close()
-            return {'success': True, 'message': 'Secret changed. Use new secret for auth.', 'response': resp.text[:300]}
+            return {'success': True, 'new_secret': new_secret, 'response': resp.text[:300]}
         conn.close()
-        return {'error': 'HTTP %s — %s' % (resp.status_code, resp.text[:300]), 'request_data': {'client_id': cid, 'old_secret_len': len(csecret), 'new_secret_len': len(new_secret)}}
+        return {'error': 'HTTP %s — %s' % (resp.status_code, resp.text[:300])}
     except Exception as e:
         conn.close()
         return {'error': str(e)[:300]}
