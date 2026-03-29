@@ -13,6 +13,7 @@ from io import BytesIO
 import urllib.request
 import urllib.parse
 import urllib.error
+import boto3
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -6583,26 +6584,48 @@ def _notify_chat_message(cur, conn, recipient_user_id, sender_name, message_text
         pass
 
 
+def _get_s3_client():
+    return boto3.client(
+        's3',
+        endpoint_url='https://bucket.poehali.dev',
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+    )
+
+_CERT_S3_KEYS = {
+    2: 'sber_certs/sber_cert_org2.pem',
+    3: 'sber_certs/sber_cert_org3.pem',
+}
+
+def _download_cert_from_s3(org_id):
+    s3_key = _CERT_S3_KEYS.get(int(org_id))
+    if not s3_key:
+        return None
+    s3 = _get_s3_client()
+    obj = s3.get_object(Bucket='files', Key=s3_key)
+    data = obj['Body'].read()
+    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+    tf.write(data)
+    tf.close()
+    return tf.name
+
 def handle_sber_test(params, body):
     results = {}
     results['secrets'] = {}
-    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_PEM', 'SBER_CERT_KEY']:
+    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_KEY']:
         val = os.environ.get(key, '')
         results['secrets'][key] = {'present': bool(val), 'length': len(val)}
 
-    cert_pem = os.environ.get('SBER_CERT_PEM', '')
+    org_id = int(params.get('org_id', body.get('org_id', 2)))
     cert_key = os.environ.get('SBER_CERT_KEY', '')
     results['cert_valid'] = False
     results['cert_error'] = None
 
     cf_name = None
     kf_name = None
-    if cert_pem and cert_key:
-        try:
-            cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
-            cf.write(cert_pem.replace('\\n', '\n'))
-            cf.close()
-            cf_name = cf.name
+    try:
+        cf_name = _download_cert_from_s3(org_id)
+        if cf_name and cert_key:
             kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
             kf.write(cert_key.replace('\\n', '\n'))
             kf.close()
@@ -6610,13 +6633,13 @@ def handle_sber_test(params, body):
             ctx = ssl.create_default_context()
             ctx.load_cert_chain(cf_name, kf_name)
             results['cert_valid'] = True
-        except Exception as e:
-            results['cert_valid'] = False
-            results['cert_error'] = str(e)
-    else:
-        results['cert_error'] = 'SBER_CERT_PEM or SBER_CERT_KEY empty'
+            results['s3_cert'] = _CERT_S3_KEYS.get(org_id, 'not_configured')
+        else:
+            results['cert_error'] = 'Cert not found in S3 for org%s or SBER_CERT_KEY empty' % org_id
+    except Exception as e:
+        results['cert_valid'] = False
+        results['cert_error'] = str(e)
 
-    org_id = int(params.get('org_id', body.get('org_id', 2)))
     cid_key = 'SBER_CLIENT_ID_ORG%s' % org_id
     csecret_key = 'SBER_CLIENT_SECRET_ORG%s' % org_id
     cid = os.environ.get(cid_key, '')

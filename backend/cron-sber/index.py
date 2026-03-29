@@ -4,6 +4,7 @@ import re
 import ssl
 import tempfile
 import requests
+import boto3
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import psycopg2
@@ -12,6 +13,13 @@ SBER_API_BASE = "https://fintech.sberbank.ru:9443"
 SBER_AUTH_URL = SBER_API_BASE + "/ic/sso/api/v2/oauth/token"
 SBER_STATEMENT_URL = SBER_API_BASE + "/fintech/api/v2/statement/transactions"
 
+CERT_S3_KEYS = {
+    2: 'sber_certs/sber_cert_org2.pem',
+    3: 'sber_certs/sber_cert_org3.pem',
+}
+
+_cert_cache = {}
+
 def esc(s):
     if s is None: return ''
     return str(s).replace("'", "''")
@@ -19,29 +27,51 @@ def esc(s):
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
+def get_s3_client():
+    return boto3.client(
+        's3',
+        endpoint_url='https://bucket.poehali.dev',
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+    )
+
 def get_sber_credentials(org_id):
     cid = os.environ.get('SBER_CLIENT_ID_ORG%s' % org_id, '')
     csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % org_id, '')
     return cid, csecret
 
-def get_ssl_context():
-    cert_pem = os.environ.get('SBER_CERT_PEM', '')
-    cert_key = os.environ.get('SBER_CERT_KEY', '')
-    if not cert_pem or not cert_key:
+def download_cert_from_s3(org_id):
+    s3_key = CERT_S3_KEYS.get(int(org_id))
+    if not s3_key:
         return None
-    cert_file = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
-    cert_file.write(cert_pem.replace('\\n', '\n'))
-    cert_file.close()
+    if s3_key in _cert_cache:
+        path = _cert_cache[s3_key]
+        if os.path.exists(path):
+            return path
+    s3 = get_s3_client()
+    obj = s3.get_object(Bucket='files', Key=s3_key)
+    data = obj['Body'].read()
+    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+    tf.write(data)
+    tf.close()
+    _cert_cache[s3_key] = tf.name
+    return tf.name
+
+def get_ssl_context(org_id=2):
+    cert_path = download_cert_from_s3(org_id)
+    cert_key = os.environ.get('SBER_CERT_KEY', '')
+    if not cert_path or not cert_key:
+        return None
     key_file = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
     key_file.write(cert_key.replace('\\n', '\n'))
     key_file.close()
-    return cert_file.name, key_file.name
+    return cert_path, key_file.name
 
 def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
     cid, csecret = get_sber_credentials(org_id)
     if not cid or not csecret:
         return None, 'client_id/secret не настроены для org %s' % org_id
-    ssl_files = get_ssl_context()
+    ssl_files = get_ssl_context(org_id)
     cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
     resp = requests.post(SBER_AUTH_URL, data={
         'grant_type': 'refresh_token',
@@ -70,8 +100,8 @@ def get_valid_token(cur, conn, c):
         return None, 'Нет refresh_token'
     return refresh_access_token(cur, conn, c['id'], c['org_id'], refresh)
 
-def fetch_statement_page(access_token, account_number, statement_date, page=0):
-    ssl_files = get_ssl_context()
+def fetch_statement_page(access_token, account_number, statement_date, page=0, org_id=2):
+    ssl_files = get_ssl_context(org_id)
     cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
     resp = requests.get(SBER_STATEMENT_URL, params={
         'accountNumber': account_number,
@@ -196,14 +226,14 @@ def load_statement(cur, conn, c, target_date):
     page = 0
     data = None
     while True:
-        data, err = fetch_statement_page(token, c['account_number'], date_str, page)
+        data, err = fetch_statement_page(token, c['account_number'], date_str, page, org_id=c['org_id'])
         if err == 'token_expired':
             token, re_err = refresh_access_token(cur, conn, cid, c['org_id'], c['refresh_token'])
             if re_err:
                 cur.execute("UPDATE bank_connections SET last_sync_status='error', last_sync_error='%s', last_sync_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(re_err), cid))
                 conn.commit()
                 return {'error': re_err}
-            data, err = fetch_statement_page(token, c['account_number'], date_str, page)
+            data, err = fetch_statement_page(token, c['account_number'], date_str, page, org_id=c['org_id'])
         if err:
             cur.execute("UPDATE bank_connections SET last_sync_status='error', last_sync_error='%s', last_sync_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(err), cid))
             conn.commit()
@@ -286,40 +316,38 @@ def load_statement(cur, conn, c, target_date):
 def handle_test(params):
     results = {}
     results['secrets'] = {}
-    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_PEM', 'SBER_CERT_KEY']:
+    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_KEY']:
         val = os.environ.get(key, '')
         results['secrets'][key] = {'present': bool(val), 'length': len(val)}
 
-    cert_pem = os.environ.get('SBER_CERT_PEM', '')
-    cert_key = os.environ.get('SBER_CERT_KEY', '')
+    org_id = int(params.get('org_id', '2'))
+
     results['cert_valid'] = False
     results['cert_error'] = None
+    cert_key = os.environ.get('SBER_CERT_KEY', '')
 
-    if cert_pem and cert_key:
-        try:
-            cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
-            cf.write(cert_pem.replace('\\n', '\n'))
-            cf.close()
+    try:
+        cert_path = download_cert_from_s3(org_id)
+        if cert_path and cert_key:
             kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
             kf.write(cert_key.replace('\\n', '\n'))
             kf.close()
             ctx = ssl.create_default_context()
-            ctx.load_cert_chain(cf.name, kf.name)
+            ctx.load_cert_chain(cert_path, kf.name)
             results['cert_valid'] = True
-            os.unlink(cf.name)
+            results['s3_cert'] = CERT_S3_KEYS.get(org_id, 'not_configured')
             os.unlink(kf.name)
-        except Exception as e:
-            results['cert_error'] = str(e)
-    else:
-        results['cert_error'] = 'SBER_CERT_PEM or SBER_CERT_KEY empty'
+        else:
+            results['cert_error'] = 'Cert not found in S3 for org%s or SBER_CERT_KEY empty' % org_id
+    except Exception as e:
+        results['cert_error'] = str(e)
 
-    org_id = int(params.get('org_id', '2'))
     cid, csecret = get_sber_credentials(org_id)
     results['api_test'] = {'org_id': org_id, 'client_id_present': bool(cid), 'client_secret_present': bool(csecret)}
 
     if cid and csecret and results.get('cert_valid'):
         try:
-            ssl_files = get_ssl_context()
+            ssl_files = get_ssl_context(org_id)
             cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
             resp = requests.post(SBER_AUTH_URL, data={
                 'grant_type': 'client_credentials',
