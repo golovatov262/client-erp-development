@@ -6593,8 +6593,8 @@ def _get_s3_client():
     )
 
 _CERT_S3_KEYS = {
-    2: 'sber_certs/sber_cert_org2.pem',
-    3: 'sber_certs/sber_cert_org3.pem',
+    2: 'sber_cert_org2.pem',
+    3: 'sber_cert_org3.pem',
 }
 
 def _download_cert_from_s3(org_id):

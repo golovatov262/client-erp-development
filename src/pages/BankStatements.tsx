@@ -13,6 +13,7 @@ import Icon from "@/components/ui/icon";
 import PageHeader from "@/components/ui/page-header";
 import { useToast } from "@/hooks/use-toast";
 import api, { bankApi, BankConnection, BankStatement, BankTransaction, Organization } from "@/lib/api";
+import funcUrls from "../../backend/func2url.json";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -179,6 +180,35 @@ const BankStatements = () => {
     setShowAddConn(true);
   };
 
+  const uploadCert = async (orgId: number) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pem";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(",")[1];
+        const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
+        if (!cronSberUrl) { toast({ title: "Ошибка", description: "URL cron-sber не найден", variant: "destructive" }); return; }
+        const res = await fetch(cronSberUrl + "?action=upload_cert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ org_id: orgId, cert_data: base64 }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          toast({ title: "Ошибка загрузки", description: data.error, variant: "destructive" });
+        } else {
+          toast({ title: "Сертификат загружен", description: `${data.uploaded} (${data.size} байт)` });
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
   const totalMatched = statements.reduce((s, st) => s + st.matched_count, 0);
   const totalUnmatched = statements.reduce((s, st) => s + st.unmatched_count, 0);
 
@@ -250,6 +280,12 @@ const BankStatements = () => {
           <div className="flex items-center gap-2 flex-wrap">
             <Button onClick={openAddConnection}>
               <Icon name="Plus" size={16} className="mr-2" />Добавить подключение
+            </Button>
+            <Button variant="outline" onClick={() => uploadCert(2)}>
+              <Icon name="Shield" size={16} className="mr-2" />Сертификат org2
+            </Button>
+            <Button variant="outline" onClick={() => uploadCert(3)}>
+              <Icon name="Shield" size={16} className="mr-2" />Сертификат org3
             </Button>
             <div className="ml-auto flex items-center gap-2">
               <Input type="date" value={fetchDate} onChange={e => setFetchDate(e.target.value)} className="w-44" />

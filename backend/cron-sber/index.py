@@ -14,8 +14,8 @@ SBER_AUTH_URL = SBER_API_BASE + "/ic/sso/api/v2/oauth/token"
 SBER_STATEMENT_URL = SBER_API_BASE + "/fintech/api/v2/statement/transactions"
 
 CERT_S3_KEYS = {
-    2: 'sber_certs/sber_cert_org2.pem',
-    3: 'sber_certs/sber_cert_org3.pem',
+    2: 'sber_cert_org2.pem',
+    3: 'sber_cert_org3.pem',
 }
 
 _cert_cache = {}
@@ -320,6 +320,13 @@ def handle_test(params):
         val = os.environ.get(key, '')
         results['secrets'][key] = {'present': bool(val), 'length': len(val)}
 
+    try:
+        s3 = get_s3_client()
+        resp = s3.list_objects_v2(Bucket='files', MaxKeys=100)
+        results['s3_files'] = [{'key': obj['Key'], 'size': obj['Size']} for obj in resp.get('Contents', [])]
+    except Exception as e:
+        results['s3_files_error'] = str(e)
+
     org_id = int(params.get('org_id', '2'))
 
     results['cert_valid'] = False
@@ -368,11 +375,40 @@ def handle_test(params):
     return results
 
 
+def handle_upload_cert(body):
+    import base64
+    org_id = int(body.get('org_id', 0))
+    cert_data_b64 = body.get('cert_data', '')
+    cert_url = body.get('cert_url', '')
+    if not org_id or (not cert_data_b64 and not cert_url):
+        return {'error': 'org_id and cert_data (base64) or cert_url required'}
+    s3_key = CERT_S3_KEYS.get(org_id)
+    if not s3_key:
+        return {'error': 'Unknown org_id: %s' % org_id}
+    if cert_url:
+        resp = requests.get(cert_url, timeout=30)
+        if resp.status_code != 200:
+            return {'error': 'Failed to download cert from URL: HTTP %s' % resp.status_code}
+        cert_data = resp.content
+    else:
+        cert_data = base64.b64decode(cert_data_b64)
+    s3 = get_s3_client()
+    s3.put_object(Bucket='files', Key=s3_key, Body=cert_data, ContentType='application/x-pem-file')
+    return {'uploaded': s3_key, 'size': len(cert_data)}
+
 def handler(event, context):
     """Ежедневная загрузка банковских выписок из Сбер API и автоматическое разнесение платежей"""
     params = event.get('queryStringParameters') or {}
     if params.get('action') == 'test':
         result = handle_test(params)
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps(result, default=str)
+        }
+    if params.get('action') == 'upload_cert':
+        body = json.loads(event['body']) if event.get('body') else {}
+        result = handle_upload_cert(body)
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
