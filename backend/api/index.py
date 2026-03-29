@@ -7,9 +7,12 @@ import calendar
 import base64
 import hashlib
 import secrets
+import ssl
+import tempfile
 from io import BytesIO
 import urllib.request
 import urllib.parse
+import urllib.error
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -6580,10 +6583,94 @@ def _notify_chat_message(cur, conn, recipient_user_id, sender_name, message_text
         pass
 
 
+def handle_sber_test(params, body):
+    results = {}
+    results['secrets'] = {}
+    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_PEM', 'SBER_CERT_KEY']:
+        val = os.environ.get(key, '')
+        results['secrets'][key] = {'present': bool(val), 'length': len(val)}
+
+    cert_pem = os.environ.get('SBER_CERT_PEM', '')
+    cert_key = os.environ.get('SBER_CERT_KEY', '')
+    results['cert_valid'] = False
+    results['cert_error'] = None
+
+    cf_name = None
+    kf_name = None
+    if cert_pem and cert_key:
+        try:
+            cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+            cf.write(cert_pem.replace('\\n', '\n'))
+            cf.close()
+            cf_name = cf.name
+            kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+            kf.write(cert_key.replace('\\n', '\n'))
+            kf.close()
+            kf_name = kf.name
+            ctx = ssl.create_default_context()
+            ctx.load_cert_chain(cf_name, kf_name)
+            results['cert_valid'] = True
+        except Exception as e:
+            results['cert_valid'] = False
+            results['cert_error'] = str(e)
+    else:
+        results['cert_error'] = 'SBER_CERT_PEM or SBER_CERT_KEY empty'
+
+    org_id = int(params.get('org_id', body.get('org_id', 2)))
+    cid_key = 'SBER_CLIENT_ID_ORG%s' % org_id
+    csecret_key = 'SBER_CLIENT_SECRET_ORG%s' % org_id
+    cid = os.environ.get(cid_key, '')
+    csecret = os.environ.get(csecret_key, '')
+    results['api_test'] = {'org_id': org_id, 'client_id_present': bool(cid), 'client_secret_present': bool(csecret)}
+
+    if cid and csecret and results.get('cert_valid') and cf_name and kf_name:
+        try:
+            ctx2 = ssl.create_default_context()
+            ctx2.load_cert_chain(cf_name, kf_name)
+            post_data = urllib.parse.urlencode({
+                'grant_type': 'client_credentials',
+                'client_id': cid,
+                'client_secret': csecret,
+                'scope': 'openid',
+            }).encode('utf-8')
+            handler_ctx = urllib.request.HTTPSHandler(context=ctx2)
+            opener = urllib.request.build_opener(handler_ctx)
+            req = urllib.request.Request(
+                'https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token',
+                data=post_data,
+                method='POST'
+            )
+            req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+            resp = opener.open(req, timeout=15)
+            resp_body = resp.read().decode('utf-8')
+            results['api_test']['status_code'] = resp.status
+            results['api_test']['response'] = resp_body[:500]
+            results['api_test']['success'] = resp.status == 200
+        except urllib.error.HTTPError as e:
+            results['api_test']['status_code'] = e.code
+            results['api_test']['response'] = e.read().decode('utf-8', errors='replace')[:500]
+            results['api_test']['success'] = False
+        except Exception as e:
+            results['api_test']['error'] = str(e)
+            results['api_test']['success'] = False
+    else:
+        results['api_test']['skipped'] = True
+        results['api_test']['reason'] = 'Missing credentials or invalid cert'
+
+    if cf_name:
+        try: os.unlink(cf_name)
+        except: pass
+    if kf_name:
+        try: os.unlink(kf_name)
+        except: pass
+
+    return results
+
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
 
 def handler(event, context):
-    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
+    """API ERP кредитного кооператива: пайщики, займы, сбережения, паи, ЛК, авторизация, банк"""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
@@ -6661,6 +6748,8 @@ def handler(event, context):
                 result = handle_savings('POST', params, {'action': 'daily_accrue', 'date': body.get('date', date.today().isoformat())}, cur, conn, None, src_ip)
             else:
                 result = {'error': 'Неизвестное cron действие'}
+        elif entity == 'sber_test':
+            result = handle_sber_test(params, body)
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 

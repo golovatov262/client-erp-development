@@ -407,7 +407,7 @@ def load_and_process_statement(cur, conn, connection, target_date):
 
 
 def handler(event, context):
-    """Загрузка банковских выписок из Сбер API и автоматическое разнесение платежей"""
+    """Загрузка банковских выписок из Сбер API, автоматическое разнесение платежей v3"""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
@@ -656,5 +656,68 @@ def handler(event, context):
                 'total_matched': int(r[7] or 0),
             })
         return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(items)}
+
+    elif action == 'test_connection':
+        results = {}
+        results['secrets'] = {}
+        for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_PEM', 'SBER_CERT_KEY']:
+            val = os.environ.get(key, '')
+            results['secrets'][key] = {
+                'present': bool(val),
+                'length': len(val),
+                'preview': val[:20] + '...' if len(val) > 20 else '(empty)'
+            }
+
+        cert_pem = os.environ.get('SBER_CERT_PEM', '')
+        cert_key = os.environ.get('SBER_CERT_KEY', '')
+        results['cert_valid'] = False
+        results['cert_error'] = None
+
+        if cert_pem and cert_key:
+            try:
+                cert_file = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+                cert_file.write(cert_pem.replace('\\n', '\n'))
+                cert_file.close()
+                key_file = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+                key_file.write(cert_key.replace('\\n', '\n'))
+                key_file.close()
+
+                ctx = ssl.create_default_context()
+                ctx.load_cert_chain(cert_file.name, key_file.name)
+                results['cert_valid'] = True
+
+                os.unlink(cert_file.name)
+                os.unlink(key_file.name)
+            except Exception as e:
+                results['cert_valid'] = False
+                results['cert_error'] = str(e)
+        else:
+            results['cert_error'] = 'SBER_CERT_PEM или SBER_CERT_KEY не заполнены'
+
+        org_id = int(params.get('org_id', body.get('org_id', 2)))
+        cid, csecret = get_sber_credentials(org_id)
+        results['api_test'] = {'org_id': org_id, 'client_id_present': bool(cid), 'client_secret_present': bool(csecret)}
+
+        if cid and csecret and results['cert_valid']:
+            try:
+                ssl_files = get_ssl_context()
+                cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+                resp = requests.post(SBER_AUTH_URL, data={
+                    'grant_type': 'client_credentials',
+                    'client_id': cid,
+                    'client_secret': csecret,
+                    'scope': 'openid',
+                }, cert=cert_pair, timeout=15)
+                results['api_test']['status_code'] = resp.status_code
+                results['api_test']['response'] = resp.text[:500]
+                results['api_test']['success'] = resp.status_code == 200
+            except Exception as e:
+                results['api_test']['error'] = str(e)
+                results['api_test']['success'] = False
+        else:
+            results['api_test']['skipped'] = True
+            results['api_test']['reason'] = 'Нет credentials или невалидный сертификат'
+
+        return {'statusCode': 200, 'headers': CORS, 'body': json.dumps(results, default=str)}
 
     return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Unknown action: %s' % action})}
