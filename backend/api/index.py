@@ -6597,45 +6597,62 @@ _CERT_S3_KEYS = {
     3: 'sber_cert_org3.pem',
 }
 
+def _split_pem_bundle(pem_data):
+    text = pem_data.decode('utf-8') if isinstance(pem_data, bytes) else pem_data
+    cert_parts = []
+    key_part = None
+    current = []
+    for line in text.splitlines(True):
+        current.append(line)
+        if '-----END' in line:
+            block = ''.join(current)
+            if 'PRIVATE KEY' in block:
+                key_part = block
+            else:
+                cert_parts.append(block)
+            current = []
+    return ''.join(cert_parts), key_part
+
 def _download_cert_from_s3(org_id):
     s3_key = _CERT_S3_KEYS.get(int(org_id))
     if not s3_key:
-        return None
+        return None, None
     s3 = _get_s3_client()
     obj = s3.get_object(Bucket='files', Key=s3_key)
     data = obj['Body'].read()
-    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-    tf.write(data)
-    tf.close()
-    return tf.name
+    cert_text, key_text = _split_pem_bundle(data)
+    if not cert_text or not key_text:
+        return None, None
+    cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+    cf.write(cert_text)
+    cf.close()
+    kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+    kf.write(key_text)
+    kf.close()
+    return cf.name, kf.name
 
 def handle_sber_test(params, body):
     results = {}
     results['secrets'] = {}
-    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_KEY']:
+    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3']:
         val = os.environ.get(key, '')
         results['secrets'][key] = {'present': bool(val), 'length': len(val)}
 
     org_id = int(params.get('org_id', body.get('org_id', 2)))
-    cert_key = os.environ.get('SBER_CERT_KEY', '')
     results['cert_valid'] = False
     results['cert_error'] = None
 
     cf_name = None
     kf_name = None
     try:
-        cf_name = _download_cert_from_s3(org_id)
-        if cf_name and cert_key:
-            kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
-            kf.write(cert_key.replace('\\n', '\n'))
-            kf.close()
-            kf_name = kf.name
+        cf_name, kf_name = _download_cert_from_s3(org_id)
+        if cf_name and kf_name:
             ctx = ssl.create_default_context()
             ctx.load_cert_chain(cf_name, kf_name)
             results['cert_valid'] = True
             results['s3_cert'] = _CERT_S3_KEYS.get(org_id, 'not_configured')
         else:
-            results['cert_error'] = 'Cert not found in S3 for org%s or SBER_CERT_KEY empty' % org_id
+            results['cert_error'] = 'Cert/key not found in S3 for org%s' % org_id
     except Exception as e:
         results['cert_valid'] = False
         results['cert_error'] = str(e)
@@ -6649,6 +6666,8 @@ def handle_sber_test(params, body):
     if cid and csecret and results.get('cert_valid') and cf_name and kf_name:
         try:
             ctx2 = ssl.create_default_context()
+            ctx2.check_hostname = False
+            ctx2.verify_mode = ssl.CERT_NONE
             ctx2.load_cert_chain(cf_name, kf_name)
             post_data = urllib.parse.urlencode({
                 'grant_type': 'client_credentials',

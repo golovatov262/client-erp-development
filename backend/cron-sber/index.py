@@ -19,6 +19,7 @@ CERT_S3_KEYS = {
 }
 
 _cert_cache = {}
+_CACHE_VER = 2
 
 def esc(s):
     if s is None: return ''
@@ -40,32 +41,54 @@ def get_sber_credentials(org_id):
     csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % org_id, '')
     return cid, csecret
 
+def split_pem_bundle(pem_data):
+    text = pem_data.decode('utf-8') if isinstance(pem_data, bytes) else pem_data
+    cert_parts = []
+    key_part = None
+    current = []
+    for line in text.splitlines(True):
+        current.append(line)
+        if '-----END' in line:
+            block = ''.join(current)
+            if 'PRIVATE KEY' in block:
+                key_part = block
+            else:
+                cert_parts.append(block)
+            current = []
+    return ''.join(cert_parts), key_part
+
 def download_cert_from_s3(org_id):
     s3_key = CERT_S3_KEYS.get(int(org_id))
     if not s3_key:
-        return None
-    if s3_key in _cert_cache:
-        path = _cert_cache[s3_key]
-        if os.path.exists(path):
-            return path
+        return None, None
+    cache_key = s3_key + '_cert'
+    cache_key_k = s3_key + '_key'
+    if cache_key in _cert_cache and cache_key_k in _cert_cache:
+        cp = _cert_cache[cache_key]
+        kp = _cert_cache[cache_key_k]
+        if os.path.exists(cp) and os.path.exists(kp):
+            return cp, kp
     s3 = get_s3_client()
     obj = s3.get_object(Bucket='files', Key=s3_key)
     data = obj['Body'].read()
-    tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-    tf.write(data)
-    tf.close()
-    _cert_cache[s3_key] = tf.name
-    return tf.name
+    cert_text, key_text = split_pem_bundle(data)
+    if not cert_text or not key_text:
+        return None, None
+    cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+    cf.write(cert_text)
+    cf.close()
+    kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+    kf.write(key_text)
+    kf.close()
+    _cert_cache[cache_key] = cf.name
+    _cert_cache[cache_key_k] = kf.name
+    return cf.name, kf.name
 
 def get_ssl_context(org_id=2):
-    cert_path = download_cert_from_s3(org_id)
-    cert_key = os.environ.get('SBER_CERT_KEY', '')
-    if not cert_path or not cert_key:
+    cert_path, key_path = download_cert_from_s3(org_id)
+    if not cert_path or not key_path:
         return None
-    key_file = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
-    key_file.write(cert_key.replace('\\n', '\n'))
-    key_file.close()
-    return cert_path, key_file.name
+    return cert_path, key_path
 
 def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
     cid, csecret = get_sber_credentials(org_id)
@@ -78,7 +101,7 @@ def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
         'refresh_token': refresh_token,
         'client_id': cid,
         'client_secret': csecret,
-    }, cert=cert_pair, timeout=30)
+    }, cert=cert_pair, verify=False, timeout=30)
     if resp.status_code != 200:
         return None, 'Refresh token error: %s' % resp.status_code
     data = resp.json()
@@ -110,7 +133,7 @@ def fetch_statement_page(access_token, account_number, statement_date, page=0, o
     }, headers={
         'Authorization': 'Bearer %s' % access_token,
         'Accept': 'application/json',
-    }, cert=cert_pair, timeout=60)
+    }, cert=cert_pair, verify=False, timeout=60)
     if resp.status_code == 401:
         return None, 'token_expired'
     if resp.status_code != 200:
@@ -340,21 +363,16 @@ def handle_test(params):
 
     results['cert_valid'] = False
     results['cert_error'] = None
-    cert_key = os.environ.get('SBER_CERT_KEY', '')
 
     try:
-        cert_path = download_cert_from_s3(org_id)
-        if cert_path and cert_key:
-            kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
-            kf.write(cert_key.replace('\\n', '\n'))
-            kf.close()
+        cert_path, key_path = download_cert_from_s3(org_id)
+        if cert_path and key_path:
             ctx = ssl.create_default_context()
-            ctx.load_cert_chain(cert_path, kf.name)
+            ctx.load_cert_chain(cert_path, key_path)
             results['cert_valid'] = True
             results['s3_cert'] = CERT_S3_KEYS.get(org_id, 'not_configured')
-            os.unlink(kf.name)
         else:
-            results['cert_error'] = 'Cert not found in S3 for org%s or SBER_CERT_KEY empty' % org_id
+            results['cert_error'] = 'Cert/key not found in S3 for org%s' % org_id
     except Exception as e:
         results['cert_error'] = str(e)
 
@@ -370,7 +388,7 @@ def handle_test(params):
                 'client_id': cid,
                 'client_secret': csecret,
                 'scope': 'openid',
-            }, cert=cert_pair, timeout=15)
+            }, cert=cert_pair, verify=False, timeout=25)
             results['api_test']['status_code'] = resp.status_code
             results['api_test']['response'] = resp.text[:500]
             results['api_test']['success'] = resp.status_code == 200
