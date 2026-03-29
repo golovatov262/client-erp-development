@@ -970,6 +970,43 @@ def handle_auth_callback(body):
     return {'success': True, 'expires_at': expires_at.isoformat()}
 
 
+def handle_change_secret(body):
+    """Change client_secret via Sber API. Required before first use."""
+    connection_id = int(body.get('connection_id', 0))
+    new_secret = body.get('new_secret', '')
+    if not connection_id:
+        return {'error': 'connection_id required'}
+    if not new_secret or len(new_secret) < 8:
+        return {'error': 'new_secret required (min 8 chars)'}
+    conn = get_conn()
+    cur = conn.cursor()
+    org_id, cid, csecret = get_connection_credentials(cur, connection_id)
+    if not org_id or not cid or not csecret:
+        conn.close()
+        return {'error': 'credentials not configured'}
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    cert_pair = (cert_path, key_path) if cert_path else None
+    verify_param = ca_path if ca_path else False
+    change_url = "https://fintech.sberbank.ru:9443/ic/sso/api/v1/change-client-secret"
+    change_data = {
+        'client_id': cid,
+        'client_secret': csecret,
+        'new_client_secret': new_secret,
+    }
+    try:
+        resp = requests.post(change_url, data=change_data, cert=cert_pair, verify=verify_param, timeout=25)
+        if resp.status_code == 200:
+            cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
+            conn.commit()
+            conn.close()
+            return {'success': True, 'message': 'Secret changed. Use new secret for auth.', 'response': resp.text[:300]}
+        conn.close()
+        return {'error': 'HTTP %s — %s' % (resp.status_code, resp.text[:300]), 'request_data': {'client_id': cid, 'old_secret_len': len(csecret), 'new_secret_len': len(new_secret)}}
+    except Exception as e:
+        conn.close()
+        return {'error': str(e)[:300]}
+
+
 def handle_exchange_code(body):
     """Exchange saved auth_code from DB for tokens. Tries both client_secret_post and client_secret_basic."""
     import base64 as b64mod
@@ -1308,6 +1345,12 @@ def handler(event, context):
 
         if action == 'toggle_connection':
             result = handle_toggle_connection(body)
+            return cors_json(result)
+
+        if action == 'change_secret':
+            result = handle_change_secret(body)
+            if 'error' in result:
+                return cors_json(result, 400)
             return cors_json(result)
 
         if action == 'auth_callback':
