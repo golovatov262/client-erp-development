@@ -283,8 +283,74 @@ def load_statement(cur, conn, c, target_date):
     return {'total': len(all_txns), 'matched': matched, 'unmatched': unmatched}
 
 
+def handle_test(params):
+    results = {}
+    results['secrets'] = {}
+    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_PEM', 'SBER_CERT_KEY']:
+        val = os.environ.get(key, '')
+        results['secrets'][key] = {'present': bool(val), 'length': len(val)}
+
+    cert_pem = os.environ.get('SBER_CERT_PEM', '')
+    cert_key = os.environ.get('SBER_CERT_KEY', '')
+    results['cert_valid'] = False
+    results['cert_error'] = None
+
+    if cert_pem and cert_key:
+        try:
+            cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
+            cf.write(cert_pem.replace('\\n', '\n'))
+            cf.close()
+            kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
+            kf.write(cert_key.replace('\\n', '\n'))
+            kf.close()
+            ctx = ssl.create_default_context()
+            ctx.load_cert_chain(cf.name, kf.name)
+            results['cert_valid'] = True
+            os.unlink(cf.name)
+            os.unlink(kf.name)
+        except Exception as e:
+            results['cert_error'] = str(e)
+    else:
+        results['cert_error'] = 'SBER_CERT_PEM or SBER_CERT_KEY empty'
+
+    org_id = int(params.get('org_id', '2'))
+    cid, csecret = get_sber_credentials(org_id)
+    results['api_test'] = {'org_id': org_id, 'client_id_present': bool(cid), 'client_secret_present': bool(csecret)}
+
+    if cid and csecret and results.get('cert_valid'):
+        try:
+            ssl_files = get_ssl_context()
+            cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+            resp = requests.post(SBER_AUTH_URL, data={
+                'grant_type': 'client_credentials',
+                'client_id': cid,
+                'client_secret': csecret,
+                'scope': 'openid',
+            }, cert=cert_pair, timeout=15)
+            results['api_test']['status_code'] = resp.status_code
+            results['api_test']['response'] = resp.text[:500]
+            results['api_test']['success'] = resp.status_code == 200
+        except Exception as e:
+            results['api_test']['error'] = str(e)
+            results['api_test']['success'] = False
+    else:
+        results['api_test']['skipped'] = True
+        results['api_test']['reason'] = 'Missing credentials or invalid cert'
+
+    return results
+
+
 def handler(event, context):
-    """Ежедневная загрузка банковских выписок из Сбер API и автоматическое разнесение платежей по займам и сбережениям"""
+    """Ежедневная загрузка банковских выписок из Сбер API и автоматическое разнесение платежей"""
+    params = event.get('queryStringParameters') or {}
+    if params.get('action') == 'test':
+        result = handle_test(params)
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps(result, default=str)
+        }
+
     body = json.loads(event['body']) if event.get('body') else {}
     target_date = body.get('date', (date.today() - timedelta(days=1)).isoformat())
 

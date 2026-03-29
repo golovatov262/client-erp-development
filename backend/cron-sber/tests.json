@@ -1,6 +1,14 @@
 {
   "tests": [
     {
+      "name": "Test Sber connection",
+      "method": "GET",
+      "path": "/?action=test&org_id=2",
+      "expectedStatus": 200,
+      "expectedBody": {"secrets": "object"},
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "Run cron with no active connections",
       "method": "POST",
       "path": "/",
