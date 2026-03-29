@@ -159,7 +159,8 @@ const BankStatements = () => {
       });
       const data = await res.json();
       if (data.success) return { success: true };
-      if (data.error && !data.error.includes("не отвечает")) return { success: false, error: data.error, stop: true };
+      const debugInfo = data.debug ? "\n\nDebug: " + JSON.stringify(data.debug, null, 2) : "";
+      if (data.error && !data.error.includes("не отвечает")) return { success: false, error: data.error + debugInfo, stop: true };
       return { success: false, error: data.error };
     } catch (e) {
       return { success: false, error: String(e) };

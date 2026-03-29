@@ -971,7 +971,8 @@ def handle_auth_callback(body):
 
 
 def handle_exchange_code(body):
-    """Exchange saved auth_code from DB for tokens. Used when auto-exchange fails due to timeout."""
+    """Exchange saved auth_code from DB for tokens. Tries both client_secret_post and client_secret_basic."""
+    import base64 as b64mod
     connection_id = int(body.get('connection_id', 0))
     code_override = body.get('code', '')
     if not connection_id:
@@ -998,37 +999,73 @@ def handle_exchange_code(body):
         return {'error': 'client_id/client_secret not configured'}
     cert_path, key_path, ca_path = get_ssl_context(org_id)
     cert_pair = (cert_path, key_path) if cert_path else None
-    token_data_form = {
-        'grant_type': 'authorization_code',
-        'code': code,
-        'client_id': cid,
-        'client_secret': csecret,
-        'redirect_uri': REDIRECT_URI,
-    }
-    resp, sber_err = sber_post(SBER_TOKEN_URL, token_data_form, cert_pair, ca_path, timeout=25, retries=2)
-    if sber_err:
-        conn.close()
-        return {'error': 'Сервер Сбера не отвечает: %s. Попробуйте ещё раз.' % sber_err[:150]}
-    if resp.status_code != 200:
-        err_detail = resp.text[:300].strip()
-        conn.close()
-        if 'certificateNotFound' in err_detail:
-            return {'error': 'Сертификат не привязан к client_id в ЛК Сбера'}
-        if 'invalid_grant' in err_detail.lower():
-            return {'error': 'Код авторизации уже использован или истёк. Пройдите авторизацию заново.'}
-        return {'error': 'HTTP %s — %s' % (resp.status_code, err_detail)}
-    token_data = resp.json()
-    access_token = token_data.get('access_token', '')
-    refresh_token_val = token_data.get('refresh_token', '')
-    expires_in = int(token_data.get('expires_in', 3600))
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-    cur.execute(
-        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
-        % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
-    )
-    conn.commit()
+    verify_param = ca_path if ca_path else False
+    attempts_log = []
+    methods = [
+        {
+            'name': 'client_secret_post',
+            'data': {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'client_id': cid,
+                'client_secret': csecret,
+                'redirect_uri': REDIRECT_URI,
+            },
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+        },
+        {
+            'name': 'client_secret_basic',
+            'data': {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': REDIRECT_URI,
+            },
+            'headers': {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': 'Basic ' + b64mod.b64encode(('%s:%s' % (cid, csecret)).encode()).decode(),
+            },
+        },
+    ]
+    for method in methods:
+        try:
+            resp = requests.post(
+                SBER_TOKEN_URL,
+                data=method['data'],
+                headers=method['headers'],
+                cert=cert_pair,
+                verify=verify_param,
+                timeout=25,
+            )
+            log_entry = {
+                'method': method['name'],
+                'status': resp.status_code,
+                'response': resp.text[:300],
+                'client_id': cid,
+                'client_id_len': len(cid),
+                'secret_len': len(csecret),
+                'code_len': len(code),
+            }
+            attempts_log.append(log_entry)
+            if resp.status_code == 200:
+                token_data = resp.json()
+                access_token = token_data.get('access_token', '')
+                refresh_token_val = token_data.get('refresh_token', '')
+                expires_in = int(token_data.get('expires_in', 3600))
+                expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                cur.execute(
+                    "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
+                    % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
+                )
+                conn.commit()
+                conn.close()
+                return {'success': True, 'expires_at': expires_at.isoformat(), 'method': method['name']}
+        except Exception as e:
+            attempts_log.append({'method': method['name'], 'error': str(e)[:200]})
     conn.close()
-    return {'success': True, 'expires_at': expires_at.isoformat()}
+    last = attempts_log[-1] if attempts_log else {}
+    if any('timeout' in str(a.get('error', '')).lower() or 'timed out' in str(a.get('error', '')).lower() for a in attempts_log):
+        return {'error': 'Сервер Сбера не отвечает. Попробуйте ещё раз.', 'debug': attempts_log}
+    return {'error': 'HTTP %s — %s' % (last.get('status', '?'), last.get('response', 'no response')[:200]), 'debug': attempts_log}
 
 
 def handle_fetch(body):
