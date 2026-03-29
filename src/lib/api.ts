@@ -1118,7 +1118,7 @@ export interface ChatSendResult {
   ai_reply: { id: number; body: string; created_at: string } | null;
 }
 
-const SBER_URL = (funcUrls as Record<string, string>)["sber-statements"] || "";
+const SBER_URL = (funcUrls as Record<string, string>)["sber-statements"] || (funcUrls as Record<string, string>)["cron-sber"] || "";
 
 function sberRequest<T>(method: string, params?: Params, body?: unknown): Promise<T> {
   if (!SBER_URL) return Promise.reject(new Error("Функция sber-statements ещё не настроена"));
