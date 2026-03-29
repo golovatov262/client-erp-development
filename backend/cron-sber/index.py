@@ -1043,7 +1043,12 @@ def handle_exchange_code(body):
                 'client_id': cid,
                 'client_id_len': len(cid),
                 'secret_len': len(csecret),
+                'secret_prefix': csecret[:3] + '...' if len(csecret) > 3 else csecret,
+                'secret_suffix': '...' + csecret[-3:] if len(csecret) > 3 else '',
                 'code_len': len(code),
+                'redirect_uri': REDIRECT_URI,
+                'org_id': org_id,
+                'env_key': 'SBER_CLIENT_SECRET_ORG%s' % SBER_SECRET_MAP.get(int(org_id), str(org_id)),
             }
             attempts_log.append(log_entry)
             if resp.status_code == 200:
