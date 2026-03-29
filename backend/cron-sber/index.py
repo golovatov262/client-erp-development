@@ -15,6 +15,10 @@ from urllib.parse import urlencode, quote
 SBER_OAUTH_AUTHORIZE_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize"
 SBER_TOKEN_URLS = [
     "https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
+    "https://fintech.sberbank.ru/ic/sso/api/v2/oauth/token",
+    "https://efs.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
+    "https://efs.sberbank.ru/ic/sso/api/v2/oauth/token",
+    "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
 ]
 SBER_TOKEN_URL = SBER_TOKEN_URLS[0]
 SBER_STATEMENT_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/transactions"
@@ -166,8 +170,42 @@ def download_cert_from_s3(org_id):
     _cert_cache[cache_key_k] = kf.name
     return cf.name, kf.name
 
+def extract_pem_from_data(raw_data):
+    """If data is a ZIP archive, extract all .pem/.crt/.cer files and concatenate them.
+    Skips __MACOSX and .DS_Store junk. If already PEM, returns as-is."""
+    import zipfile
+    import io
+    if raw_data[:2] == b'PK':
+        pem_parts = []
+        file_list = []
+        with zipfile.ZipFile(io.BytesIO(raw_data)) as zf:
+            for name in sorted(zf.namelist()):
+                if name.endswith('/'):
+                    continue
+                if '__MACOSX' in name or '.DS_Store' in name:
+                    continue
+                file_list.append(name)
+                lower = name.lower()
+                if lower.endswith(('.pem', '.crt', '.cer', '.cert')):
+                    content = zf.read(name)
+                    if content and b'-----BEGIN' in content:
+                        pem_parts.append(content)
+            if not pem_parts:
+                for name in file_list:
+                    content = zf.read(name)
+                    if content and b'-----BEGIN' in content:
+                        pem_parts.append(content)
+        if not pem_parts:
+            return None, 'ZIP does not contain PEM certificates (files: %s)' % ', '.join(file_list)
+        combined = b'\n'.join(pem_parts)
+        return combined, None
+    if b'-----BEGIN' in raw_data:
+        return raw_data, None
+    return None, 'Data is not PEM format and not a ZIP archive'
+
+
 def download_ca_chain():
-    cache_key = 'ca_chain_path'
+    cache_key = 'ca_chain_path_v2'
     if cache_key in _cert_cache:
         p = _cert_cache[cache_key]
         if os.path.exists(p):
@@ -175,11 +213,16 @@ def download_ca_chain():
     try:
         s3 = get_s3_client()
         obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
-        data = obj['Body'].read()
-        if not data:
+        raw_data = obj['Body'].read()
+        if not raw_data:
             return None
+        pem_data, err = extract_pem_from_data(raw_data)
+        if err or not pem_data:
+            return None
+        if isinstance(pem_data, str):
+            pem_data = pem_data.encode('utf-8')
         cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-        cf.write(data)
+        cf.write(pem_data)
         cf.close()
         _cert_cache[cache_key] = cf.name
         return cf.name
@@ -474,9 +517,16 @@ def handle_test(params):
                 results['cert_org%s_error' % oid] = str(e2)
         try:
             ca_obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
-            ca_data = ca_obj['Body'].read()
-            results['ca_chain_size'] = len(ca_data)
-            results['ca_chain_preview'] = ca_data[:100].decode('utf-8', errors='replace')
+            ca_raw = ca_obj['Body'].read()
+            results['ca_chain_raw_size'] = len(ca_raw)
+            results['ca_chain_is_zip'] = ca_raw[:2] == b'PK'
+            ca_pem, ca_err = extract_pem_from_data(ca_raw)
+            if ca_err:
+                results['ca_chain_error'] = ca_err
+            else:
+                results['ca_chain_pem_size'] = len(ca_pem)
+                preview = ca_pem[:200].decode('utf-8', errors='replace') if isinstance(ca_pem, bytes) else ca_pem[:200]
+                results['ca_chain_preview'] = preview
         except Exception as e3:
             results['ca_chain_error'] = 'Not uploaded yet'
     except Exception as e:
@@ -525,7 +575,7 @@ def handle_test(params):
                     'client_id': cid,
                     'client_secret': csecret,
                     'scope': 'openid',
-                }, cert=cert_pair, verify=verify_param, timeout=15)
+                }, cert=cert_pair, verify=verify_param, timeout=8)
                 url_result['status_code'] = resp.status_code
                 url_result['response'] = resp.text[:300]
             except Exception as e:
@@ -572,13 +622,16 @@ def handle_upload_ca_chain(body):
         resp = requests.get(cert_url, timeout=30, verify=False)
         if resp.status_code != 200:
             return {'error': 'Failed to download CA chain: HTTP %s' % resp.status_code}
-        cert_data = resp.content
+        raw_data = resp.content
     else:
-        cert_data = base64.b64decode(cert_data_b64)
+        raw_data = base64.b64decode(cert_data_b64)
+    cert_data, err = extract_pem_from_data(raw_data)
+    if err:
+        return {'error': err}
     s3 = get_s3_client()
     s3.put_object(Bucket='files', Key=CA_CHAIN_S3_KEY, Body=cert_data, ContentType='application/x-pem-file')
     _cert_cache.clear()
-    return {'uploaded': CA_CHAIN_S3_KEY, 'size': len(cert_data)}
+    return {'uploaded': CA_CHAIN_S3_KEY, 'size': len(cert_data), 'format': 'extracted_from_zip' if raw_data[:2] == b'PK' else 'pem'}
 
 
 # ─── New action handlers ─────────────────────────────────────────────────────
