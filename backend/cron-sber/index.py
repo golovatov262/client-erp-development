@@ -15,10 +15,6 @@ from urllib.parse import urlencode, quote
 SBER_OAUTH_AUTHORIZE_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize"
 SBER_TOKEN_URLS = [
     "https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
-    "https://fintech.sberbank.ru/ic/sso/api/v2/oauth/token",
-    "https://efs.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
-    "https://efs.sberbank.ru/ic/sso/api/v2/oauth/token",
-    "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
 ]
 SBER_TOKEN_URL = SBER_TOKEN_URLS[0]
 SBER_STATEMENT_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/transactions"
@@ -44,6 +40,22 @@ CA_CHAIN_S3_KEY = 'sber_ca_chain.pem'
 
 _cert_cache = {}
 _CACHE_VER = 4
+
+def sber_post(url, data, cert_pair, ca_path, timeout=25, retries=2):
+    """POST to Sber API with retry logic."""
+    import time
+    verify_param = ca_path if ca_path else False
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = requests.post(url, data=data, cert=cert_pair, verify=verify_param, timeout=timeout)
+            return resp, None
+        except Exception as e:
+            last_err = str(e)[:200]
+            if attempt < retries - 1:
+                time.sleep(1)
+    return None, last_err
+
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -287,26 +299,17 @@ def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
         return None, 'client_id/secret not configured for org %s' % org_id
     cert_path, key_path, ca_path = get_ssl_context(org_id)
     cert_pair = (cert_path, key_path) if cert_path else None
-    verify_param = ca_path if ca_path else False
     refresh_data = {
         'grant_type': 'refresh_token',
         'refresh_token': refresh_token,
         'client_id': cid,
         'client_secret': csecret,
     }
-    resp = None
-    refresh_errors = []
-    for turl in SBER_TOKEN_URLS:
-        try:
-            resp = requests.post(turl, data=refresh_data, cert=cert_pair, verify=verify_param, timeout=20)
-            if resp.status_code == 200:
-                break
-            refresh_errors.append('%s → HTTP %s' % (turl, resp.status_code))
-        except Exception as re_ex:
-            refresh_errors.append('%s → %s' % (turl, str(re_ex)[:100]))
-            resp = None
-    if not resp or resp.status_code != 200:
-        return None, 'Refresh token error: %s' % '; '.join(refresh_errors)
+    resp, sber_err = sber_post(SBER_TOKEN_URL, refresh_data, cert_pair, ca_path, timeout=25, retries=2)
+    if sber_err:
+        return None, 'Refresh token error: %s' % sber_err
+    if resp.status_code != 200:
+        return None, 'Refresh token error: HTTP %s' % resp.status_code
     data = resp.json()
     new_access = data.get('access_token', '')
     new_refresh = data.get('refresh_token', refresh_token)
@@ -839,21 +842,16 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
                     'client_secret': csecret,
                     'redirect_uri': REDIRECT_URI,
                 }
-                resp = None
+                resp, sber_err = sber_post(SBER_TOKEN_URL, token_form, cert_pair, ca_path, timeout=25, retries=2)
                 cb_errors = []
-                for turl in SBER_TOKEN_URLS:
-                    try:
-                        resp = requests.post(turl, data=token_form, cert=cert_pair, verify=verify_param, timeout=20)
-                        if resp.status_code == 200:
-                            break
-                        err_d = resp.text[:200].strip()
-                        if 'certificateNotFound' in err_d:
-                            cb_errors.append('Сертификат не привязан к client_id в ЛК Сбера')
-                        else:
-                            cb_errors.append('%s → HTTP %s %s' % (turl, resp.status_code, err_d))
-                    except Exception as te:
-                        cb_errors.append('%s → %s' % (turl, str(te)[:120]))
-                        resp = None
+                if sber_err:
+                    cb_errors.append(sber_err)
+                elif resp and resp.status_code != 200:
+                    err_d = resp.text[:200].strip()
+                    if 'certificateNotFound' in err_d:
+                        cb_errors.append('Сертификат не привязан к client_id в ЛК Сбера')
+                    else:
+                        cb_errors.append('HTTP %s %s' % (resp.status_code, err_d))
                 if resp and resp.status_code == 200:
                     token_data = resp.json()
                     access_token = token_data.get('access_token', '')
@@ -936,7 +934,6 @@ def handle_auth_callback(body):
         return {'error': 'client_id/client_secret not configured for org %s' % org_id}
     cert_path, key_path, ca_path = get_ssl_context(org_id)
     cert_pair = (cert_path, key_path) if cert_path else None
-    verify_param = ca_path if ca_path else False
     token_data_form = {
         'grant_type': 'authorization_code',
         'code': code,
@@ -944,24 +941,16 @@ def handle_auth_callback(body):
         'client_secret': csecret,
         'redirect_uri': REDIRECT_URI,
     }
-    resp = None
-    errors = []
-    for url in SBER_TOKEN_URLS:
-        try:
-            resp = requests.post(url, data=token_data_form, cert=cert_pair, verify=verify_param, timeout=20)
-            if resp.status_code == 200:
-                break
-            err_detail = resp.text[:200].strip()
-            if 'certificateNotFound' in err_detail:
-                errors.append('Сертификат не привязан к client_id в личном кабинете Сбера (certificateNotFound)')
-            else:
-                errors.append('%s → HTTP %s %s' % (url, resp.status_code, err_detail))
-        except Exception as e:
-            errors.append('%s → %s' % (url, str(e)[:120]))
-            resp = None
-    if not resp or resp.status_code != 200:
+    resp, sber_err = sber_post(SBER_TOKEN_URL, token_data_form, cert_pair, ca_path, timeout=25, retries=2)
+    if sber_err:
         conn.close()
-        return {'error': 'Token exchange failed on all URLs: %s' % '; '.join(errors)}
+        return {'error': 'Token exchange failed: %s' % sber_err}
+    if resp.status_code != 200:
+        err_detail = resp.text[:300].strip()
+        conn.close()
+        if 'certificateNotFound' in err_detail:
+            return {'error': 'Сертификат не привязан к client_id в личном кабинете Сбера'}
+        return {'error': 'Token exchange failed: HTTP %s — %s' % (resp.status_code, err_detail)}
     token_data = resp.json()
     access_token = token_data.get('access_token', '')
     refresh_token = token_data.get('refresh_token', '')
