@@ -6670,7 +6670,7 @@ def handle_sber_test(params, body):
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
 
 def handler(event, context):
-    """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v3"""
+    """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
