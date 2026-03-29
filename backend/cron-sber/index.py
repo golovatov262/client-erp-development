@@ -13,7 +13,7 @@ from urllib.parse import urlencode, quote
 
 # ─── Sber API URLs ───────────────────────────────────────────────────────────
 SBER_OAUTH_AUTHORIZE_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize"
-SBER_TOKEN_URL = "https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token"
+SBER_TOKEN_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/token"
 SBER_STATEMENT_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/transactions"
 SBER_STATEMENT_SUMMARY_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/summary"
 
