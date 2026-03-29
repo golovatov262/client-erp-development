@@ -147,26 +147,54 @@ const BankStatements = () => {
   };
 
   const [exchanging, setExchanging] = useState(false);
-  const handleExchangeCode = async (connId: number) => {
-    setExchanging(true);
+  const [exchangeAttempt, setExchangeAttempt] = useState(0);
+  const [exchangeMax, setExchangeMax] = useState(0);
+
+  const doExchangeOnce = async (cronSberUrl: string, connId: number): Promise<{success: boolean; error?: string; stop?: boolean}> => {
     try {
-      const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
       const res = await fetch(cronSberUrl + "?action=exchange_code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connection_id: connId }),
       });
       const data = await res.json();
-      if (data.error) {
-        toast({ title: "Ошибка обмена", description: data.error, variant: "destructive" });
-      } else {
+      if (data.success) return { success: true };
+      if (data.error && !data.error.includes("не отвечает")) return { success: false, error: data.error, stop: true };
+      return { success: false, error: data.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  };
+
+  const handleExchangeCode = async (connId: number) => {
+    const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
+    if (!cronSberUrl) return;
+    setExchanging(true);
+    const maxAttempts = 6;
+    setExchangeMax(maxAttempts);
+    for (let i = 1; i <= maxAttempts; i++) {
+      setExchangeAttempt(i);
+      const result = await doExchangeOnce(cronSberUrl, connId);
+      if (result.success) {
         toast({ title: "Токен получен!" });
         loadData();
+        setExchanging(false);
+        setExchangeAttempt(0);
+        return;
       }
-    } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      if (result.stop) {
+        toast({ title: "Ошибка обмена", description: result.error, variant: "destructive" });
+        setExchanging(false);
+        setExchangeAttempt(0);
+        return;
+      }
+      if (i < maxAttempts) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
     }
+    toast({ title: "Сбер не ответил", description: "Сервер Сбера не отвечает после 6 попыток. Попробуйте позже.", variant: "destructive" });
     setExchanging(false);
+    setExchangeAttempt(0);
   };
 
   useEffect(() => {
@@ -423,7 +451,7 @@ const BankStatements = () => {
                           {!conn.has_token && conn.has_code && (
                             <Button size="sm" onClick={() => handleExchangeCode(conn.id)} disabled={exchanging}>
                               {exchanging ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : <Icon name="RefreshCw" size={14} className="mr-1" />}
-                              Обменять код
+                              {exchanging && exchangeAttempt > 0 ? `Попытка ${exchangeAttempt}/${exchangeMax}...` : "Обменять код"}
                             </Button>
                           )}
                           {!conn.has_token && (
