@@ -1118,4 +1118,109 @@ export interface ChatSendResult {
   ai_reply: { id: number; body: string; created_at: string } | null;
 }
 
+const SBER_URL = funcUrls["sber-statements"];
+
+function sberRequest<T>(method: string, params?: Params, body?: unknown): Promise<T> {
+  const url = new URL(SBER_URL);
+  if (params) {
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined) url.searchParams.set(key, String(val));
+    });
+  }
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getStaffToken();
+  if (token) hdrs["X-Auth-Token"] = token;
+  const options: RequestInit = { method, headers: hdrs };
+  if (body) options.body = JSON.stringify(body);
+  return fetch(url.toString(), options).then(async (res) => {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Ошибка сервера");
+    return data;
+  });
+}
+
+export const bankApi = {
+  connections: () => sberRequest<BankConnection[]>("GET", { action: "connections" }),
+  saveConnection: (data: { org_id: number; account_number: string }) =>
+    sberRequest<{ success: boolean }>("POST", undefined, { action: "save_connection", ...data }),
+  toggleConnection: (connectionId: number, isActive: boolean) =>
+    sberRequest<{ success: boolean }>("POST", undefined, { action: "toggle_connection", connection_id: connectionId, is_active: isActive }),
+  authUrl: (connectionId: number, redirectUri: string) =>
+    sberRequest<{ auth_url: string }>("GET", { action: "auth_url", connection_id: connectionId, redirect_uri: redirectUri }),
+  authCallback: (connectionId: number, code: string, redirectUri: string) =>
+    sberRequest<{ success: boolean; expires_at: string }>("POST", undefined, { action: "auth_callback", connection_id: connectionId, code, redirect_uri: redirectUri }),
+  fetch: (connectionId: number, date: string) =>
+    sberRequest<BankFetchResult>("POST", undefined, { action: "fetch", connection_id: connectionId, date }),
+  fetchAll: (date: string) =>
+    sberRequest<BankFetchResult[]>("POST", undefined, { action: "fetch_all", date }),
+  statements: (connectionId?: number, limit?: number, offset?: number) =>
+    sberRequest<{ items: BankStatement[]; total: number }>("GET", { action: "statements", connection_id: connectionId, limit, offset }),
+  transactions: (statementId?: number, matchStatus?: string) =>
+    sberRequest<BankTransaction[]>("GET", { action: "transactions", statement_id: statementId, match_status: matchStatus }),
+};
+
+export interface BankConnection {
+  id: number;
+  org_id: number;
+  org_name: string;
+  account_number: string;
+  is_active: boolean;
+  last_sync_at: string | null;
+  last_sync_status: string;
+  last_sync_error: string;
+  token_expires_at: string | null;
+  created_at: string;
+  has_token: boolean;
+}
+
+export interface BankStatement {
+  id: number;
+  connection_id: number;
+  org_name: string;
+  statement_date: string;
+  opening_balance: number;
+  closing_balance: number;
+  debit_turnover: number;
+  credit_turnover: number;
+  transaction_count: number;
+  matched_count: number;
+  unmatched_count: number;
+  status: string;
+  created_at: string;
+}
+
+export interface BankTransaction {
+  id: number;
+  statement_id: number;
+  sber_uuid: string;
+  operation_date: string;
+  document_date: string;
+  document_number: string;
+  amount: number;
+  direction: string;
+  payment_purpose: string;
+  payer_name: string;
+  payer_inn: string;
+  payee_name: string;
+  payee_inn: string;
+  matched_contract_no: string | null;
+  matched_entity: string | null;
+  matched_entity_id: number | null;
+  match_status: string;
+  payment_id: number | null;
+  created_at: string;
+}
+
+export interface BankFetchResult {
+  connection_id?: number;
+  org_id?: number;
+  statement_id?: number;
+  total?: number;
+  matched?: number;
+  unmatched?: number;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+}
+
 export default api;

@@ -12,6 +12,7 @@ const allMenuItems = [
   { icon: "Wallet", label: "Паевые счета", path: "/office/shares", roles: ["admin", "manager"] },
   { icon: "BarChart3", label: "Отчётность", path: "/office/reports", roles: ["admin", "manager"] },
   { icon: "MessageCircle", label: "Чаты", path: "/office/chats", roles: ["admin", "manager"] },
+  { icon: "Building2", label: "Банк", path: "/office/bank", roles: ["admin", "manager"] },
   { icon: "Settings", label: "Администрирование", path: "/office/admin", roles: ["admin"] },
 ];
 

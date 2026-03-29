@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Run cron with no active connections",
+      "method": "POST",
+      "path": "/",
+      "body": {"date": "2025-01-01"},
+      "expectedStatus": 200,
+      "expectedBody": {"date": "2025-01-01"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
