@@ -329,10 +329,10 @@ const BankStatements = () => {
               <Icon name="Plus" size={16} className="mr-2" />Добавить подключение
             </Button>
             <Button variant="outline" onClick={() => uploadCert(2)}>
-              <Icon name="Shield" size={16} className="mr-2" />Сертификат org2
+              <Icon name="Shield" size={16} className="mr-2" />Сертификат Эксперт Финанс
             </Button>
             <Button variant="outline" onClick={() => uploadCert(3)}>
-              <Icon name="Shield" size={16} className="mr-2" />Сертификат org3
+              <Icon name="Shield" size={16} className="mr-2" />Сертификат Фин Формула
             </Button>
             <Button variant="outline" onClick={uploadCaChain}>
               <Icon name="Link" size={16} className="mr-2" />CA-цепочка Сбера
