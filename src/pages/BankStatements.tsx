@@ -201,10 +201,16 @@ const BankStatements = () => {
   const uploadCert = async (orgId: number) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".pem";
+    input.accept = ".pem,.p12,.pfx";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      let password = "";
+      if (file.name.endsWith(".p12") || file.name.endsWith(".pfx")) {
+        const pwd = prompt("Введите пароль от сертификата (.p12):");
+        if (pwd === null) return;
+        password = pwd;
+      }
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = (reader.result as string).split(",")[1];
@@ -213,13 +219,14 @@ const BankStatements = () => {
         const res = await fetch(cronSberUrl + "?action=upload_cert", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ org_id: orgId, cert_data: base64 }),
+          body: JSON.stringify({ org_id: orgId, cert_data: base64, password }),
         });
         const data = await res.json();
         if (data.error) {
           toast({ title: "Ошибка загрузки", description: data.error, variant: "destructive" });
         } else {
-          toast({ title: "Сертификат загружен", description: `${data.uploaded} (${data.size} байт)` });
+          const fmt = data.format === "converted_from_p12" ? " (сконвертирован из .p12)" : "";
+          toast({ title: "Сертификат загружен", description: `${data.uploaded} (${data.size} байт)${fmt}` });
         }
       };
       reader.readAsDataURL(file);

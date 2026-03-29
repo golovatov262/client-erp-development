@@ -127,6 +127,46 @@ def get_connection_credentials(cur, connection_id):
         csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % org_id, '')
     return org_id, cid, csecret
 
+def convert_p12_to_pem(p12_data, password=None):
+    """Convert PKCS12 (.p12) binary data to PEM format (cert + key)."""
+    from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
+    pwd = password.encode('utf-8') if isinstance(password, str) else password
+    private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(p12_data, pwd)
+    parts = []
+    if certificate:
+        parts.append(certificate.public_bytes(Encoding.PEM).decode('utf-8'))
+    if additional_certs:
+        for c in additional_certs:
+            parts.append(c.public_bytes(Encoding.PEM).decode('utf-8'))
+    key_pem = ''
+    if private_key:
+        key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()).decode('utf-8')
+    return ''.join(parts), key_pem
+
+
+def is_p12_data(data):
+    return isinstance(data, bytes) and len(data) > 2 and data[0:1] == b'\x30'
+
+
+def auto_convert_cert(data, password=None):
+    """Auto-detect format: if PEM return as-is, if P12 convert to PEM."""
+    if isinstance(data, bytes):
+        try:
+            text = data.decode('utf-8')
+            if '-----BEGIN' in text:
+                return data, None
+        except UnicodeDecodeError:
+            pass
+        try:
+            cert_pem, key_pem = convert_p12_to_pem(data, password)
+            if cert_pem or key_pem:
+                combined = cert_pem + key_pem
+                return combined.encode('utf-8'), 'converted_from_p12'
+        except Exception as e:
+            return None, 'Failed to convert P12: %s' % str(e)[:200]
+    return data, None
+
+
 def split_pem_bundle(pem_data):
     text = pem_data.decode('utf-8') if isinstance(pem_data, bytes) else pem_data
     cert_parts = []
@@ -147,8 +187,8 @@ def download_cert_from_s3(org_id):
     s3_key = CERT_S3_KEYS.get(int(org_id))
     if not s3_key:
         return None, None
-    cache_key = s3_key + '_cert'
-    cache_key_k = s3_key + '_key'
+    cache_key = s3_key + '_cert_v2'
+    cache_key_k = s3_key + '_key_v2'
     if cache_key in _cert_cache and cache_key_k in _cert_cache:
         cp = _cert_cache[cache_key]
         kp = _cert_cache[cache_key_k]
@@ -157,7 +197,12 @@ def download_cert_from_s3(org_id):
     s3 = get_s3_client()
     obj = s3.get_object(Bucket='files', Key=s3_key)
     data = obj['Body'].read()
-    cert_text, key_text = split_pem_bundle(data)
+    converted, conv_info = auto_convert_cert(data)
+    if converted is None:
+        return None, None
+    if isinstance(converted, str):
+        converted = converted.encode('utf-8')
+    cert_text, key_text = split_pem_bundle(converted)
     if not cert_text or not key_text:
         return None, None
     cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
@@ -593,6 +638,7 @@ def handle_upload_cert(body):
     org_id = int(body.get('org_id', 0))
     cert_data_b64 = body.get('cert_data', '')
     cert_url = body.get('cert_url', '')
+    password = body.get('password', '')
     if not org_id or (not cert_data_b64 and not cert_url):
         return {'error': 'org_id and cert_data (base64) or cert_url required'}
     s3_key = CERT_S3_KEYS.get(org_id)
@@ -602,13 +648,21 @@ def handle_upload_cert(body):
         resp = requests.get(cert_url, timeout=30)
         if resp.status_code != 200:
             return {'error': 'Failed to download cert from URL: HTTP %s' % resp.status_code}
-        cert_data = resp.content
+        raw_data = resp.content
     else:
-        cert_data = base64.b64decode(cert_data_b64)
+        raw_data = base64.b64decode(cert_data_b64)
+    converted, conv_info = auto_convert_cert(raw_data, password or None)
+    if converted is None:
+        return {'error': 'Не удалось обработать сертификат: %s. Для .p12 файлов укажите пароль.' % (conv_info or 'unknown')}
+    if isinstance(converted, str):
+        converted = converted.encode('utf-8')
     s3 = get_s3_client()
-    s3.put_object(Bucket='files', Key=s3_key, Body=cert_data, ContentType='application/x-pem-file')
+    s3.put_object(Bucket='files', Key=s3_key, Body=converted, ContentType='application/x-pem-file')
     _cert_cache.clear()
-    return {'uploaded': s3_key, 'size': len(cert_data)}
+    result = {'uploaded': s3_key, 'size': len(converted)}
+    if conv_info:
+        result['format'] = conv_info
+    return result
 
 
 def handle_upload_ca_chain(body):
