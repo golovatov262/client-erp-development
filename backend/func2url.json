@@ -1,6 +1,5 @@
 {
   "cron-sber": "https://functions.poehali.dev/1f3896d2-7604-47b6-b33d-c1ce55e29925",
-  "sber-statements": "https://functions.poehali.dev/1f3896d2-7604-47b6-b33d-c1ce55e29925",
   "cron-notify": "https://functions.poehali.dev/91b29bc5-8da9-4e79-9042-cb0fcb16b4f8",
   "cron-accrue": "https://functions.poehali.dev/aa0d7089-a856-4384-abbb-1651e214b2af",
   "api": "https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450"

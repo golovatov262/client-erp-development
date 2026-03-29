@@ -29,8 +29,8 @@ ORG_SCOPES = {
 }
 
 CERT_S3_KEYS = {
-    2: 'sber_cert_org2.pem',
-    3: 'sber_cert_org3.pem',
+    2: 'sber_cert_org3.pem',
+    3: 'sber_cert_org2.pem',
 }
 
 _cert_cache = {}
@@ -72,9 +72,16 @@ def get_s3_client():
         aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
     )
 
+SBER_SECRET_MAP = {
+    2: '3',
+    3: '2',
+}
+
 def get_sber_credentials(org_id, cur=None):
     """Get client_id and client_secret for org.
-    First checks bank_connections table, falls back to env vars."""
+    First checks bank_connections table, falls back to env vars.
+    Note: env secrets are swapped (ORG2 contains org3 data and vice versa),
+    so we use SBER_SECRET_MAP to read from the correct env var."""
     cid = ''
     csecret = ''
     if cur:
@@ -89,10 +96,11 @@ def get_sber_credentials(org_id, cur=None):
                 csecret = row[1] or ''
         except Exception:
             pass
+    env_suffix = SBER_SECRET_MAP.get(int(org_id), str(org_id))
     if not cid:
-        cid = os.environ.get('SBER_CLIENT_ID_ORG%s' % org_id, '')
+        cid = os.environ.get('SBER_CLIENT_ID_ORG%s' % env_suffix, '')
     if not csecret:
-        csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % org_id, '')
+        csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % env_suffix, '')
     return cid, csecret
 
 def get_connection_credentials(cur, connection_id):
