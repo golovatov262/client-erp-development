@@ -13,11 +13,18 @@ from urllib.parse import urlencode, quote
 
 # ─── Sber API URLs ───────────────────────────────────────────────────────────
 SBER_OAUTH_AUTHORIZE_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize"
-SBER_TOKEN_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/token"
+SBER_TOKEN_URLS = [
+    "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
+    "https://sbi.sberbank.ru:9443/ic/sso/api/v1/oauth/token",
+    "https://sbi.sberbank.ru:9443/v2/oauth/token",
+    "https://sbi.sberbank.ru:9443/oauth/token",
+    "https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
+]
+SBER_TOKEN_URL = SBER_TOKEN_URLS[0]
 SBER_STATEMENT_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/transactions"
 SBER_STATEMENT_SUMMARY_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/summary"
 
-# Legacy alias used by existing code (refresh_access_token, handle_test, etc.)
+# Legacy alias
 SBER_AUTH_URL = SBER_TOKEN_URL
 
 REDIRECT_URI = 'https://functions.poehali.dev/1f3896d2-7604-47b6-b33d-c1ce55e29925/?action=callback'
@@ -653,14 +660,22 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
             if org_id and cid and csecret:
                 ssl_files = get_ssl_context(org_id)
                 cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
-                resp = requests.post(SBER_TOKEN_URL, data={
+                token_form = {
                     'grant_type': 'authorization_code',
                     'code': code,
                     'client_id': cid,
                     'client_secret': csecret,
                     'redirect_uri': REDIRECT_URI,
-                }, cert=cert_pair, verify=False, timeout=30)
-                if resp.status_code == 200:
+                }
+                resp = None
+                for turl in SBER_TOKEN_URLS:
+                    try:
+                        resp = requests.post(turl, data=token_form, cert=cert_pair, verify=False, timeout=15)
+                        if resp.status_code == 200:
+                            break
+                    except Exception:
+                        resp = None
+                if resp and resp.status_code == 200:
                     token_data = resp.json()
                     access_token = token_data.get('access_token', '')
                     refresh_token = token_data.get('refresh_token', '')
@@ -742,20 +757,27 @@ def handle_auth_callback(body):
         return {'error': 'client_id/client_secret not configured for org %s' % org_id}
     ssl_files = get_ssl_context(org_id)
     cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
-    try:
-        resp = requests.post(SBER_TOKEN_URL, data={
-            'grant_type': 'authorization_code',
-            'code': code,
-            'client_id': cid,
-            'client_secret': csecret,
-            'redirect_uri': REDIRECT_URI,
-        }, cert=cert_pair, verify=False, timeout=30)
-    except Exception as e:
+    token_data_form = {
+        'grant_type': 'authorization_code',
+        'code': code,
+        'client_id': cid,
+        'client_secret': csecret,
+        'redirect_uri': REDIRECT_URI,
+    }
+    resp = None
+    errors = []
+    for url in SBER_TOKEN_URLS:
+        try:
+            resp = requests.post(url, data=token_data_form, cert=cert_pair, verify=False, timeout=15)
+            if resp.status_code == 200:
+                break
+            errors.append('%s -> HTTP %s %s' % (url.split('/')[-3], resp.status_code, resp.text[:100].strip()))
+        except Exception as e:
+            errors.append('%s -> %s' % (url.split('/')[-3], str(e)[:100]))
+            resp = None
+    if not resp or resp.status_code != 200:
         conn.close()
-        return {'error': 'Request failed: %s' % str(e)}
-    if resp.status_code != 200:
-        conn.close()
-        return {'error': 'Token exchange failed: HTTP %s - %s' % (resp.status_code, resp.text[:300])}
+        return {'error': 'Token exchange failed on all URLs: %s' % '; '.join(errors)}
     token_data = resp.json()
     access_token = token_data.get('access_token', '')
     refresh_token = token_data.get('refresh_token', '')
