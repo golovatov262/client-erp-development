@@ -36,8 +36,10 @@ CERT_S3_KEYS = {
     3: 'sber_cert_org3.pem',
 }
 
+CA_CHAIN_S3_KEY = 'sber_ca_chain.pem'
+
 _cert_cache = {}
-_CACHE_VER = 3
+_CACHE_VER = 4
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -164,18 +166,40 @@ def download_cert_from_s3(org_id):
     _cert_cache[cache_key_k] = kf.name
     return cf.name, kf.name
 
+def download_ca_chain():
+    cache_key = 'ca_chain_path'
+    if cache_key in _cert_cache:
+        p = _cert_cache[cache_key]
+        if os.path.exists(p):
+            return p
+    try:
+        s3 = get_s3_client()
+        obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
+        data = obj['Body'].read()
+        if not data:
+            return None
+        cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+        cf.write(data)
+        cf.close()
+        _cert_cache[cache_key] = cf.name
+        return cf.name
+    except Exception:
+        return None
+
 def get_ssl_context(org_id=2):
     cert_path, key_path = download_cert_from_s3(org_id)
     if not cert_path or not key_path:
-        return None
-    return cert_path, key_path
+        return None, None, None
+    ca_path = download_ca_chain()
+    return cert_path, key_path, ca_path
 
 def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
     cid, csecret = get_sber_credentials(org_id, cur)
     if not cid or not csecret:
         return None, 'client_id/secret not configured for org %s' % org_id
-    ssl_files = get_ssl_context(org_id)
-    cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    cert_pair = (cert_path, key_path) if cert_path else None
+    verify_param = ca_path if ca_path else False
     refresh_data = {
         'grant_type': 'refresh_token',
         'refresh_token': refresh_token,
@@ -186,7 +210,7 @@ def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
     refresh_errors = []
     for turl in SBER_TOKEN_URLS:
         try:
-            resp = requests.post(turl, data=refresh_data, cert=cert_pair, verify=False, timeout=20)
+            resp = requests.post(turl, data=refresh_data, cert=cert_pair, verify=verify_param, timeout=20)
             if resp.status_code == 200:
                 break
             refresh_errors.append('%s → HTTP %s' % (turl, resp.status_code))
@@ -215,8 +239,9 @@ def get_valid_token(cur, conn, c):
     return refresh_access_token(cur, conn, c['id'], c['org_id'], refresh)
 
 def fetch_statement_page(access_token, account_number, statement_date, page=0, org_id=2):
-    ssl_files = get_ssl_context(org_id)
-    cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    cert_pair = (cert_path, key_path) if cert_path else None
+    verify_param = ca_path if ca_path else False
     resp = requests.get(SBER_STATEMENT_URL, params={
         'accountNumber': account_number,
         'statementDate': statement_date,
@@ -224,7 +249,7 @@ def fetch_statement_page(access_token, account_number, statement_date, page=0, o
     }, headers={
         'Authorization': 'Bearer %s' % access_token,
         'Accept': 'application/json',
-    }, cert=cert_pair, verify=False, timeout=60)
+    }, cert=cert_pair, verify=verify_param, timeout=60)
     if resp.status_code == 401:
         return None, 'token_expired'
     if resp.status_code != 200:
@@ -447,6 +472,13 @@ def handle_test(params):
                 results['cert_org%s_size' % oid] = len(o2['Body'].read())
             except Exception as e2:
                 results['cert_org%s_error' % oid] = str(e2)
+        try:
+            ca_obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
+            ca_data = ca_obj['Body'].read()
+            results['ca_chain_size'] = len(ca_data)
+            results['ca_chain_preview'] = ca_data[:100].decode('utf-8', errors='replace')
+        except Exception as e3:
+            results['ca_chain_error'] = 'Not uploaded yet'
     except Exception as e:
         results['s3_error'] = str(e)
 
@@ -481,8 +513,10 @@ def handle_test(params):
 
     if cid and csecret and results.get('cert_valid'):
         results['api_test']['url_tests'] = []
-        ssl_files = get_ssl_context(org_id)
-        cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+        cert_path, key_path, ca_path = get_ssl_context(org_id)
+        cert_pair = (cert_path, key_path) if cert_path else None
+        verify_param = ca_path if ca_path else False
+        results['api_test']['ca_chain'] = 'loaded' if ca_path else 'not_found'
         for turl in SBER_TOKEN_URLS:
             url_result = {'url': turl}
             try:
@@ -491,7 +525,7 @@ def handle_test(params):
                     'client_id': cid,
                     'client_secret': csecret,
                     'scope': 'openid',
-                }, cert=cert_pair, verify=False, timeout=15)
+                }, cert=cert_pair, verify=verify_param, timeout=15)
                 url_result['status_code'] = resp.status_code
                 url_result['response'] = resp.text[:300]
             except Exception as e:
@@ -523,7 +557,28 @@ def handle_upload_cert(body):
         cert_data = base64.b64decode(cert_data_b64)
     s3 = get_s3_client()
     s3.put_object(Bucket='files', Key=s3_key, Body=cert_data, ContentType='application/x-pem-file')
+    _cert_cache.clear()
     return {'uploaded': s3_key, 'size': len(cert_data)}
+
+
+def handle_upload_ca_chain(body):
+    """Upload CA chain (trusted certificates from Sber) to S3."""
+    import base64
+    cert_data_b64 = body.get('cert_data', '')
+    cert_url = body.get('cert_url', '')
+    if not cert_data_b64 and not cert_url:
+        return {'error': 'cert_data (base64) or cert_url required'}
+    if cert_url:
+        resp = requests.get(cert_url, timeout=30, verify=False)
+        if resp.status_code != 200:
+            return {'error': 'Failed to download CA chain: HTTP %s' % resp.status_code}
+        cert_data = resp.content
+    else:
+        cert_data = base64.b64decode(cert_data_b64)
+    s3 = get_s3_client()
+    s3.put_object(Bucket='files', Key=CA_CHAIN_S3_KEY, Body=cert_data, ContentType='application/x-pem-file')
+    _cert_cache.clear()
+    return {'uploaded': CA_CHAIN_S3_KEY, 'size': len(cert_data)}
 
 
 # ─── New action handlers ─────────────────────────────────────────────────────
@@ -667,8 +722,9 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
             cur = conn.cursor()
             org_id, cid, csecret = get_connection_credentials(cur, connection_id)
             if org_id and cid and csecret:
-                ssl_files = get_ssl_context(org_id)
-                cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+                cert_path, key_path, ca_path = get_ssl_context(org_id)
+                cert_pair = (cert_path, key_path) if cert_path else None
+                verify_param = ca_path if ca_path else False
                 token_form = {
                     'grant_type': 'authorization_code',
                     'code': code,
@@ -680,7 +736,7 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
                 cb_errors = []
                 for turl in SBER_TOKEN_URLS:
                     try:
-                        resp = requests.post(turl, data=token_form, cert=cert_pair, verify=False, timeout=20)
+                        resp = requests.post(turl, data=token_form, cert=cert_pair, verify=verify_param, timeout=20)
                         if resp.status_code == 200:
                             break
                         err_d = resp.text[:200].strip()
@@ -771,8 +827,9 @@ def handle_auth_callback(body):
     if not cid or not csecret:
         conn.close()
         return {'error': 'client_id/client_secret not configured for org %s' % org_id}
-    ssl_files = get_ssl_context(org_id)
-    cert_pair = (ssl_files[0], ssl_files[1]) if ssl_files else None
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    cert_pair = (cert_path, key_path) if cert_path else None
+    verify_param = ca_path if ca_path else False
     token_data_form = {
         'grant_type': 'authorization_code',
         'code': code,
@@ -784,7 +841,7 @@ def handle_auth_callback(body):
     errors = []
     for url in SBER_TOKEN_URLS:
         try:
-            resp = requests.post(url, data=token_data_form, cert=cert_pair, verify=False, timeout=20)
+            resp = requests.post(url, data=token_data_form, cert=cert_pair, verify=verify_param, timeout=20)
             if resp.status_code == 200:
                 break
             err_detail = resp.text[:200].strip()
@@ -1002,6 +1059,9 @@ def handler(event, context):
         # ── POST actions ─────────────────────────────────────────────────
         if action == 'upload_cert':
             return cors_json(handle_upload_cert(body))
+
+        if action == 'upload_ca_chain':
+            return cors_json(handle_upload_ca_chain(body))
 
         if action == 'save_connection':
             result = handle_save_connection(body)
