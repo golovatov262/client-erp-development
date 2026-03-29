@@ -146,6 +146,29 @@ const BankStatements = () => {
     }
   };
 
+  const [exchanging, setExchanging] = useState(false);
+  const handleExchangeCode = async (connId: number) => {
+    setExchanging(true);
+    try {
+      const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
+      const res = await fetch(cronSberUrl + "?action=exchange_code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_id: connId }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast({ title: "Ошибка обмена", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Токен получен!" });
+        loadData();
+      }
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+    setExchanging(false);
+  };
+
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === 'sber_auth_callback') {
@@ -153,8 +176,13 @@ const BankStatements = () => {
           toast({ title: "Авторизация успешна" });
           setShowAuthDialog(false);
           loadData();
+        } else if (e.data.exchange_result === 'timeout') {
+          toast({ title: "Код сохранён", description: "Сервер Сбера не ответил. Нажмите «Обменять код» для повторной попытки." });
+          setShowAuthDialog(false);
+          loadData();
         } else if (e.data.code) {
           setAuthCode(e.data.code);
+          loadData();
         }
       }
       if (e.data?.type === 'sber_auth_error') {
@@ -383,6 +411,8 @@ const BankStatements = () => {
                           <div className="text-xs">
                             {conn.has_token ? (
                               <span className="text-green-600"><Icon name="Key" size={12} className="inline mr-1" />Токен активен (до {fmtDateTime(conn.token_expires_at)})</span>
+                            ) : conn.has_code ? (
+                              <span className="text-blue-600"><Icon name="Code" size={12} className="inline mr-1" />Код получен — нажмите «Обменять код»</span>
                             ) : (
                               <span className="text-orange-600"><Icon name="KeyRound" size={12} className="inline mr-1" />Требуется авторизация</span>
                             )}
@@ -390,6 +420,12 @@ const BankStatements = () => {
                         </div>
                         <div className="flex items-center gap-2">
                           <Switch checked={conn.is_active} onCheckedChange={v => handleToggleConnection(conn.id, v)} />
+                          {!conn.has_token && conn.has_code && (
+                            <Button size="sm" onClick={() => handleExchangeCode(conn.id)} disabled={exchanging}>
+                              {exchanging ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : <Icon name="RefreshCw" size={14} className="mr-1" />}
+                              Обменять код
+                            </Button>
+                          )}
                           {!conn.has_token && (
                             <Button size="sm" variant="outline" onClick={() => openAuthDialog(conn.id)}>
                               <Icon name="LogIn" size={14} className="mr-1" />Авторизовать

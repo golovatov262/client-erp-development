@@ -701,7 +701,9 @@ def handle_connections():
         SELECT bc.id, bc.org_id, COALESCE(o.name, ''), bc.account_number, bc.is_active,
                bc.last_sync_at, COALESCE(bc.last_sync_status, 'never'), COALESCE(bc.last_sync_error, ''),
                bc.token_expires_at, bc.created_at,
-               CASE WHEN bc.access_token IS NOT NULL AND bc.access_token != '' THEN true ELSE false END as has_token
+               CASE WHEN bc.access_token IS NOT NULL AND bc.access_token != '' THEN true ELSE false END as has_token,
+               CASE WHEN bc.auth_code IS NOT NULL AND bc.auth_code != '' THEN true ELSE false END as has_code,
+               bc.auth_code_at
         FROM bank_connections bc
         LEFT JOIN organizations o ON o.id = bc.org_id
         ORDER BY bc.id
@@ -722,6 +724,8 @@ def handle_connections():
             'token_expires_at': r[8],
             'created_at': r[9],
             'has_token': r[10],
+            'has_code': r[11],
+            'auth_code_at': r[12],
         })
     return result
 
@@ -823,18 +827,18 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
 </script></body></html>""" % (esc(error), esc(error_description), esc(error), esc(error_description))
         return cors_html(html)
 
-    # Try auto-exchange if we have state with connection_id
     exchange_result = None
     if code and state:
         try:
             connection_id = int(state.split('_')[0])
             conn = get_conn()
             cur = conn.cursor()
+            cur.execute("UPDATE bank_connections SET auth_code='%s', auth_code_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(code), connection_id))
+            conn.commit()
             org_id, cid, csecret = get_connection_credentials(cur, connection_id)
             if org_id and cid and csecret:
                 cert_path, key_path, ca_path = get_ssl_context(org_id)
                 cert_pair = (cert_path, key_path) if cert_path else None
-                verify_param = ca_path if ca_path else False
                 token_form = {
                     'grant_type': 'authorization_code',
                     'code': code,
@@ -843,29 +847,25 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
                     'redirect_uri': REDIRECT_URI,
                 }
                 resp, sber_err = sber_post(SBER_TOKEN_URL, token_form, cert_pair, ca_path, timeout=25, retries=2)
-                cb_errors = []
-                if sber_err:
-                    cb_errors.append(sber_err)
-                elif resp and resp.status_code != 200:
-                    err_d = resp.text[:200].strip()
-                    if 'certificateNotFound' in err_d:
-                        cb_errors.append('Сертификат не привязан к client_id в ЛК Сбера')
-                    else:
-                        cb_errors.append('HTTP %s %s' % (resp.status_code, err_d))
                 if resp and resp.status_code == 200:
                     token_data = resp.json()
                     access_token = token_data.get('access_token', '')
-                    refresh_token = token_data.get('refresh_token', '')
+                    refresh_token_val = token_data.get('refresh_token', '')
                     expires_in = int(token_data.get('expires_in', 3600))
                     expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
                     cur.execute(
-                        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', updated_at=NOW() WHERE id=%s"
-                        % (esc(access_token), esc(refresh_token), expires_at.isoformat(), connection_id)
+                        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
+                        % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
                     )
                     conn.commit()
                     exchange_result = 'success'
+                elif sber_err:
+                    exchange_result = 'timeout'
+                elif resp:
+                    err_d = resp.text[:200].strip()
+                    exchange_result = 'error: HTTP %s %s' % (resp.status_code, err_d)
                 else:
-                    exchange_result = 'error: %s' % '; '.join(cb_errors) if cb_errors else 'error: HTTP %s - %s' % (resp.status_code if resp else '?', resp.text[:200] if resp else 'no response')
+                    exchange_result = 'timeout'
             else:
                 exchange_result = 'error: credentials not found'
             conn.close()
@@ -873,9 +873,14 @@ if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',d
             exchange_result = 'error: %s' % str(e)
 
     success_class = 'success' if exchange_result == 'success' else 'pending'
-    status_msg = 'Tokens saved successfully!' if exchange_result == 'success' else (
-        'Auto-exchange failed: %s. Please copy the code manually.' % exchange_result if exchange_result else 'Code received. Copy it or it will be sent automatically.'
-    )
+    if exchange_result == 'success':
+        status_msg = 'Токены получены! Окно закроется автоматически.'
+    elif exchange_result == 'timeout':
+        status_msg = 'Код сохранён. Сервер Сбера не отвечает — нажмите «Обменять код» в панели управления.'
+    elif exchange_result and exchange_result.startswith('error:'):
+        status_msg = 'Код сохранён, но автообмен не удался. Нажмите «Обменять код» в панели.'
+    else:
+        status_msg = 'Код сохранён. Нажмите «Обменять код» в панели управления.'
 
     html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Sber OAuth Callback</title>
@@ -959,6 +964,67 @@ def handle_auth_callback(body):
     cur.execute(
         "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', updated_at=NOW() WHERE id=%s"
         % (esc(access_token), esc(refresh_token), expires_at.isoformat(), connection_id)
+    )
+    conn.commit()
+    conn.close()
+    return {'success': True, 'expires_at': expires_at.isoformat()}
+
+
+def handle_exchange_code(body):
+    """Exchange saved auth_code from DB for tokens. Used when auto-exchange fails due to timeout."""
+    connection_id = int(body.get('connection_id', 0))
+    code_override = body.get('code', '')
+    if not connection_id:
+        return {'error': 'connection_id required'}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT org_id, auth_code, auth_code_at FROM bank_connections WHERE id=%s" % connection_id)
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return {'error': 'Connection not found'}
+    org_id = row[0]
+    code = code_override or row[1]
+    code_at = row[2]
+    if not code:
+        conn.close()
+        return {'error': 'Нет сохранённого кода. Сначала пройдите авторизацию в Сбере.'}
+    if code_at and (datetime.utcnow() - code_at).total_seconds() > 600:
+        conn.close()
+        return {'error': 'Код авторизации истёк (старше 10 минут). Пройдите авторизацию заново.'}
+    org_id_conn, cid, csecret = get_connection_credentials(cur, connection_id)
+    if not cid or not csecret:
+        conn.close()
+        return {'error': 'client_id/client_secret not configured'}
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    cert_pair = (cert_path, key_path) if cert_path else None
+    token_data_form = {
+        'grant_type': 'authorization_code',
+        'code': code,
+        'client_id': cid,
+        'client_secret': csecret,
+        'redirect_uri': REDIRECT_URI,
+    }
+    resp, sber_err = sber_post(SBER_TOKEN_URL, token_data_form, cert_pair, ca_path, timeout=25, retries=2)
+    if sber_err:
+        conn.close()
+        return {'error': 'Сервер Сбера не отвечает: %s. Попробуйте ещё раз.' % sber_err[:150]}
+    if resp.status_code != 200:
+        err_detail = resp.text[:300].strip()
+        conn.close()
+        if 'certificateNotFound' in err_detail:
+            return {'error': 'Сертификат не привязан к client_id в ЛК Сбера'}
+        if 'invalid_grant' in err_detail.lower():
+            return {'error': 'Код авторизации уже использован или истёк. Пройдите авторизацию заново.'}
+        return {'error': 'HTTP %s — %s' % (resp.status_code, err_detail)}
+    token_data = resp.json()
+    access_token = token_data.get('access_token', '')
+    refresh_token_val = token_data.get('refresh_token', '')
+    expires_in = int(token_data.get('expires_in', 3600))
+    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+    cur.execute(
+        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
+        % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
     )
     conn.commit()
     conn.close()
@@ -1171,6 +1237,12 @@ def handler(event, context):
 
         if action == 'auth_callback':
             result = handle_auth_callback(body)
+            if 'error' in result:
+                return cors_json(result, 400)
+            return cors_json(result)
+
+        if action == 'exchange_code':
+            result = handle_exchange_code(body)
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)
