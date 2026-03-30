@@ -346,22 +346,31 @@ def get_valid_token(cur, conn, c):
     return refresh_access_token(cur, conn, c['id'], c['org_id'], refresh)
 
 def fetch_statement_page(access_token, account_number, statement_date, page=0, org_id=2):
+    import time
     cert_path, key_path, ca_path = get_ssl_context(org_id)
     cert_pair = (cert_path, key_path) if cert_path else None
     verify_param = ca_path if ca_path else False
-    resp = requests.get(SBER_STATEMENT_URL, params={
-        'accountNumber': account_number,
-        'statementDate': statement_date,
-        'page': page,
-    }, headers={
-        'Authorization': 'Bearer %s' % access_token,
-        'Accept': 'application/json',
-    }, cert=cert_pair, verify=verify_param, timeout=60)
-    if resp.status_code == 401:
-        return None, 'token_expired'
-    if resp.status_code != 200:
-        return None, 'HTTP %s' % resp.status_code
-    return resp.json(), None
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(SBER_STATEMENT_URL, params={
+                'accountNumber': account_number,
+                'statementDate': statement_date,
+                'page': page,
+            }, headers={
+                'Authorization': 'Bearer %s' % access_token,
+                'Accept': 'application/json',
+            }, cert=cert_pair, verify=verify_param, timeout=30)
+            if resp.status_code == 401:
+                return None, 'token_expired'
+            if resp.status_code != 200:
+                return None, 'HTTP %s: %s' % (resp.status_code, resp.text[:200])
+            return resp.json(), None
+        except Exception as e:
+            last_err = str(e)[:200]
+            if attempt < 2:
+                time.sleep(3)
+    return None, 'Сбер не отвечает (3 попытки): %s' % last_err
 
 def extract_contract_no(purpose_text):
     if not purpose_text:
@@ -1046,6 +1055,25 @@ def handle_save_secret(body):
     return {'success': True, 'new_secret': new_secret, 'message': 'Secret сохранён в БД (без вызова API Сбера)'}
 
 
+def handle_clear_tokens(body):
+    """Сбросить невалидные токены у подключения."""
+    connection_id = int(body.get('connection_id', 0))
+    if not connection_id:
+        conn2 = get_conn()
+        cur2 = conn2.cursor()
+        cur2.execute("UPDATE bank_connections SET access_token='', refresh_token='', token_expires_at=NULL, last_sync_status='never', last_sync_error='', updated_at=NOW()")
+        cnt = cur2.rowcount
+        conn2.commit()
+        conn2.close()
+        return {'success': True, 'cleared': cnt}
+    conn2 = get_conn()
+    cur2 = conn2.cursor()
+    cur2.execute("UPDATE bank_connections SET access_token='', refresh_token='', token_expires_at=NULL, last_sync_status='never', last_sync_error='', updated_at=NOW() WHERE id=%s" % int(connection_id))
+    conn2.commit()
+    conn2.close()
+    return {'success': True, 'cleared': 1}
+
+
 def handle_save_tokens(body):
     """Сохранить access_token и refresh_token вручную (из ЛК Сбера)."""
     connection_id = int(body.get('connection_id', 0))
@@ -1422,6 +1450,9 @@ def handler(event, context):
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)
+
+        if action == 'clear_tokens':
+            return cors_json(handle_clear_tokens(body))
 
         if action == 'save_tokens':
             result = handle_save_tokens(body)
