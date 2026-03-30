@@ -1046,6 +1046,31 @@ def handle_save_secret(body):
     return {'success': True, 'new_secret': new_secret, 'message': 'Secret сохранён в БД (без вызова API Сбера)'}
 
 
+def handle_save_tokens(body):
+    """Сохранить access_token и refresh_token вручную (из ЛК Сбера)."""
+    connection_id = int(body.get('connection_id', 0))
+    access_token = (body.get('access_token') or '').strip()
+    refresh_token = (body.get('refresh_token') or '').strip()
+    if not connection_id:
+        return {'error': 'connection_id required'}
+    if not access_token:
+        return {'error': 'access_token required'}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bank_connections WHERE id=%s" % int(connection_id))
+    if not cur.fetchone():
+        conn.close()
+        return {'error': 'connection not found'}
+    expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
+    parts = ["access_token='%s'" % esc(access_token), "token_expires_at='%s'" % expires_at, "updated_at=NOW()"]
+    if refresh_token:
+        parts.append("refresh_token='%s'" % esc(refresh_token))
+    cur.execute("UPDATE bank_connections SET %s WHERE id=%s" % (', '.join(parts), connection_id))
+    conn.commit()
+    conn.close()
+    return {'success': True, 'message': 'Токены сохранены', 'expires_at': expires_at}
+
+
 def handle_exchange_code(body):
     """Exchange saved auth_code from DB for tokens. Tries both client_secret_post and client_secret_basic."""
     import base64 as b64mod
@@ -1394,6 +1419,12 @@ def handler(event, context):
 
         if action == 'save_secret':
             result = handle_save_secret(body)
+            if 'error' in result:
+                return cors_json(result, 400)
+            return cors_json(result)
+
+        if action == 'save_tokens':
+            result = handle_save_tokens(body)
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)

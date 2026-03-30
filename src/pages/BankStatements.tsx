@@ -65,6 +65,9 @@ const BankStatements = () => {
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [authConnectionId, setAuthConnectionId] = useState<number>(0);
   const [authCode, setAuthCode] = useState("");
+  const [showTokenDialog, setShowTokenDialog] = useState(false);
+  const [tokenConnId, setTokenConnId] = useState<number>(0);
+  const [tokenForm, setTokenForm] = useState({ access_token: "", refresh_token: "" });
   const { toast } = useToast();
 
   const loadData = async () => {
@@ -164,6 +167,32 @@ const BankStatements = () => {
         toast({ title: "Ошибка сохранения secret", description: data.error, variant: "destructive" });
       } else {
         toast({ title: "Secret сохранён!", description: "Теперь можно авторизовать подключение" });
+        loadData();
+      }
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleSaveTokens = async () => {
+    if (!tokenForm.access_token) {
+      toast({ title: "Ошибка", description: "Введите Access Token", variant: "destructive" });
+      return;
+    }
+    const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
+    try {
+      const res = await fetch(cronSberUrl + "?action=save_tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_id: tokenConnId, access_token: tokenForm.access_token, refresh_token: tokenForm.refresh_token }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast({ title: "Ошибка", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Токены сохранены!", description: "Подключение готово к загрузке выписок" });
+        setShowTokenDialog(false);
+        setTokenForm({ access_token: "", refresh_token: "" });
         loadData();
       }
     } catch (e) {
@@ -490,6 +519,11 @@ const BankStatements = () => {
                               <Icon name="LogIn" size={14} className="mr-1" />Авторизовать
                             </Button>
                           )}
+                          {!conn.has_token && (
+                            <Button size="sm" variant="default" onClick={() => { setTokenConnId(conn.id); setShowTokenDialog(true); }}>
+                              <Icon name="Key" size={14} className="mr-1" />Ввести токены
+                            </Button>
+                          )}
                           <Button size="sm" variant="outline" onClick={() => handleFetch(conn.id)} disabled={fetching || !conn.has_token}>
                             <Icon name="Download" size={14} className="mr-1" />Загрузить
                           </Button>
@@ -667,6 +701,29 @@ const BankStatements = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAuthDialog(false)}>Отмена</Button>
             <Button onClick={handleAuthCallback} disabled={!authCode}>Подтвердить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Ввести токены из ЛК Сбера</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Скопируйте токены из раздела «Ключи доступа» в ЛК Сбера (ФинФормула / SberBusiness API).
+            </p>
+            <div>
+              <Label>Access Token (обязательно)</Label>
+              <Input value={tokenForm.access_token} onChange={e => setTokenForm(f => ({ ...f, access_token: e.target.value }))} placeholder="Вставьте полный Access Token..." />
+            </div>
+            <div>
+              <Label>Refresh Token (рекомендуется)</Label>
+              <Input value={tokenForm.refresh_token} onChange={e => setTokenForm(f => ({ ...f, refresh_token: e.target.value }))} placeholder="Вставьте полный Refresh Token..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTokenDialog(false)}>Отмена</Button>
+            <Button onClick={handleSaveTokens} disabled={!tokenForm.access_token}>Сохранить токены</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
