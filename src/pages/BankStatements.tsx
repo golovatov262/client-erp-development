@@ -147,23 +147,23 @@ const BankStatements = () => {
   };
 
   const handleChangeSecret = async (connId: number) => {
-    const newSecret = prompt("Введите НОВЫЙ client_secret (мин. 8 символов).\n\nСбер требует сменить начальный secret перед использованием OAuth.\nПридумайте надёжный пароль (буквы, цифры, спецсимволы):");
+    const newSecret = prompt("Введите НОВЫЙ client_secret из ЛК Сбера.\n\nЕсли вы уже сменили secret в ЛК Сбера (ФинФормула / SberBusiness API), вставьте его сюда для сохранения в систему.\n\nМинимум 8 символов:");
     if (!newSecret || newSecret.length < 8) {
       if (newSecret !== null) toast({ title: "Ошибка", description: "Secret должен быть не менее 8 символов", variant: "destructive" });
       return;
     }
     const cronSberUrl = (funcUrls as Record<string, string>)["cron-sber"];
     try {
-      const res = await fetch(cronSberUrl + "?action=change_secret", {
+      const res = await fetch(cronSberUrl + "?action=save_secret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connection_id: connId, new_secret: newSecret }),
       });
       const data = await res.json();
       if (data.error) {
-        toast({ title: "Ошибка смены secret", description: data.error, variant: "destructive" });
+        toast({ title: "Ошибка сохранения secret", description: data.error, variant: "destructive" });
       } else {
-        toast({ title: "Secret сменён!", description: "Обновите секрет SBER_CLIENT_SECRET в настройках проекта на: " + newSecret });
+        toast({ title: "Secret сохранён!", description: "Теперь можно авторизовать подключение" });
         loadData();
       }
     } catch (e) {
@@ -482,7 +482,7 @@ const BankStatements = () => {
                           )}
                           {!conn.has_token && (
                             <Button size="sm" variant="outline" onClick={() => handleChangeSecret(conn.id)}>
-                              <Icon name="KeyRound" size={14} className="mr-1" />Сменить secret
+                              <Icon name="KeyRound" size={14} className="mr-1" />Записать secret
                             </Button>
                           )}
                           {!conn.has_token && (

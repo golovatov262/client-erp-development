@@ -1026,6 +1026,26 @@ def handle_change_secret(body):
         return {'error': str(e)[:300]}
 
 
+def handle_save_secret(body):
+    """Сохранить client_secret в БД без вызова API Сбера (если secret уже сменён в ЛК)."""
+    connection_id = int(body.get('connection_id', 0))
+    new_secret = body.get('new_secret', '')
+    if not connection_id:
+        return {'error': 'connection_id required'}
+    if not new_secret or len(new_secret) < 8:
+        return {'error': 'new_secret required (min 8 chars)'}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM bank_connections WHERE id=%s" % int(connection_id))
+    if not cur.fetchone():
+        conn.close()
+        return {'error': 'connection not found'}
+    cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
+    conn.commit()
+    conn.close()
+    return {'success': True, 'new_secret': new_secret, 'message': 'Secret сохранён в БД (без вызова API Сбера)'}
+
+
 def handle_exchange_code(body):
     """Exchange saved auth_code from DB for tokens. Tries both client_secret_post and client_secret_basic."""
     import base64 as b64mod
@@ -1368,6 +1388,12 @@ def handler(event, context):
 
         if action == 'change_secret':
             result = handle_change_secret(body)
+            if 'error' in result:
+                return cors_json(result, 400)
+            return cors_json(result)
+
+        if action == 'save_secret':
+            result = handle_save_secret(body)
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)
