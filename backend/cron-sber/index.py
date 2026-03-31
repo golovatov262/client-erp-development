@@ -1377,6 +1377,279 @@ def handle_transactions(params):
     return result
 
 
+def handle_network_diag(params):
+    """Детальная сетевая диагностика подключения к fintech.sberbank.ru:9443"""
+    import socket
+    import time
+    import ssl as ssl_mod
+
+    org_id = int(params.get('org_id', '2'))
+    host = 'fintech.sberbank.ru'
+    port = 9443
+    log = []
+
+    log.append('=== NETWORK DIAGNOSTICS: %s:%s ===' % (host, port))
+    log.append('Timestamp: %s UTC' % datetime.utcnow().isoformat())
+    log.append('Org ID: %s' % org_id)
+    log.append('')
+
+    # 1. DNS Resolution
+    log.append('--- 1. DNS Resolution ---')
+    try:
+        t0 = time.time()
+        addrs = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        dns_ms = round((time.time() - t0) * 1000, 2)
+        log.append('DNS resolved in %s ms' % dns_ms)
+        for af, socktype, proto, canonname, sa in addrs:
+            fam = 'IPv4' if af == socket.AF_INET else 'IPv6'
+            log.append('  %s: %s' % (fam, sa[0]))
+        resolved_ip = addrs[0][4][0] if addrs else 'UNKNOWN'
+        log.append('Primary IP: %s' % resolved_ip)
+    except Exception as e:
+        log.append('DNS FAILED: %s' % str(e))
+        resolved_ip = 'FAILED'
+    log.append('')
+
+    # 2. TCP Connection test
+    log.append('--- 2. TCP Connection ---')
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        t0 = time.time()
+        sock.connect((host, port))
+        tcp_ms = round((time.time() - t0) * 1000, 2)
+        log.append('TCP connected in %s ms' % tcp_ms)
+        local_addr = sock.getsockname()
+        log.append('Local address: %s:%s' % local_addr)
+        sock.close()
+    except Exception as e:
+        tcp_ms = round((time.time() - t0) * 1000, 2) if 't0' in dir() else -1
+        log.append('TCP FAILED after %s ms: %s' % (tcp_ms, str(e)))
+    log.append('')
+
+    # 3. TLS Handshake WITHOUT client cert (basic)
+    log.append('--- 3. TLS Handshake (no client cert) ---')
+    try:
+        ctx = ssl_mod.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl_mod.CERT_NONE
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        t0 = time.time()
+        ssock = ctx.wrap_socket(sock, server_hostname=host)
+        ssock.connect((host, port))
+        tls_ms = round((time.time() - t0) * 1000, 2)
+        log.append('TLS handshake in %s ms' % tls_ms)
+        log.append('TLS version: %s' % ssock.version())
+        log.append('Cipher: %s' % str(ssock.cipher()))
+        server_cert = ssock.getpeercert(binary_form=True)
+        if server_cert:
+            log.append('Server cert size: %s bytes' % len(server_cert))
+            try:
+                from cryptography import x509
+                cert_obj = x509.load_der_x509_certificate(server_cert)
+                log.append('Server cert subject: %s' % cert_obj.subject.rfc4514_string())
+                log.append('Server cert issuer: %s' % cert_obj.issuer.rfc4514_string())
+                log.append('Server cert valid: %s - %s' % (cert_obj.not_valid_before_utc, cert_obj.not_valid_after_utc))
+                try:
+                    san = cert_obj.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+                    dns_names = san.value.get_values_for_type(x509.DNSName)
+                    log.append('Server cert SANs: %s' % ', '.join(dns_names))
+                except Exception:
+                    pass
+            except Exception as e2:
+                log.append('Cert parse error: %s' % str(e2)[:100])
+        ssock.close()
+    except Exception as e:
+        log.append('TLS (no cert) FAILED: %s' % str(e)[:300])
+    log.append('')
+
+    # 4. TLS Handshake WITH client cert (mTLS)
+    log.append('--- 4. mTLS Handshake (with client cert) ---')
+    cert_path, key_path, ca_path = get_ssl_context(org_id)
+    log.append('Cert path: %s (exists: %s)' % (cert_path, os.path.exists(cert_path) if cert_path else False))
+    log.append('Key path: %s (exists: %s)' % (key_path, os.path.exists(key_path) if key_path else False))
+    log.append('CA path: %s (exists: %s)' % (ca_path, os.path.exists(ca_path) if ca_path else False))
+
+    if cert_path and key_path:
+        try:
+            with open(cert_path, 'r') as f:
+                cert_content = f.read()
+            cert_blocks = cert_content.count('-----BEGIN CERTIFICATE-----')
+            log.append('Client cert file: %s bytes, %s cert block(s)' % (len(cert_content), cert_blocks))
+
+            try:
+                from cryptography import x509 as x509m
+                from cryptography.hazmat.primitives.serialization import load_pem_private_key
+                pem_certs = []
+                lines = cert_content.split('\n')
+                current = []
+                for line in lines:
+                    current.append(line)
+                    if '-----END CERTIFICATE-----' in line:
+                        pem_block = '\n'.join(current)
+                        cert_obj = x509m.load_pem_x509_certificate(pem_block.encode())
+                        log.append('  Client cert: %s (issuer: %s, valid: %s - %s)' % (
+                            cert_obj.subject.rfc4514_string(),
+                            cert_obj.issuer.rfc4514_string(),
+                            cert_obj.not_valid_before_utc,
+                            cert_obj.not_valid_after_utc
+                        ))
+                        current = []
+                    elif '-----BEGIN' in line:
+                        current = [line]
+
+                with open(key_path, 'r') as f:
+                    key_content = f.read()
+                log.append('Private key file: %s bytes' % len(key_content))
+                key_obj = load_pem_private_key(key_content.encode(), password=None)
+                log.append('Key type: %s, size: %s bits' % (key_obj.__class__.__name__, key_obj.key_size))
+            except Exception as e3:
+                log.append('Cert/key parse detail error: %s' % str(e3)[:200])
+        except Exception as e:
+            log.append('Cert file read error: %s' % str(e)[:200])
+
+        try:
+            ctx2 = ssl_mod.create_default_context()
+            if ca_path:
+                ctx2.load_verify_locations(ca_path)
+            else:
+                ctx2.check_hostname = False
+                ctx2.verify_mode = ssl_mod.CERT_NONE
+            ctx2.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock2.settimeout(10)
+            t0 = time.time()
+            ssock2 = ctx2.wrap_socket(sock2, server_hostname=host)
+            ssock2.connect((host, port))
+            mtls_ms = round((time.time() - t0) * 1000, 2)
+            log.append('mTLS handshake in %s ms' % mtls_ms)
+            log.append('TLS version: %s' % ssock2.version())
+            log.append('Cipher: %s' % str(ssock2.cipher()))
+            ssock2.close()
+        except Exception as e:
+            log.append('mTLS FAILED: %s' % str(e)[:500])
+    else:
+        log.append('SKIPPED: cert or key not available')
+    log.append('')
+
+    # 5. HTTP-level test (actual request with short timeout)
+    log.append('--- 5. HTTP Request Test ---')
+    if cert_path and key_path:
+        cert_pair = (cert_path, key_path)
+        verify_param = ca_path if ca_path else False
+        test_url = 'https://%s:%s/ic/sso/api/v2/oauth/token' % (host, port)
+        log.append('URL: %s' % test_url)
+        log.append('Verify: %s' % verify_param)
+        try:
+            t0 = time.time()
+            resp = requests.post(
+                test_url,
+                data={'grant_type': 'client_credentials'},
+                cert=cert_pair,
+                verify=verify_param,
+                timeout=(5, 15),
+            )
+            http_ms = round((time.time() - t0) * 1000, 2)
+            log.append('HTTP response in %s ms' % http_ms)
+            log.append('Status: %s' % resp.status_code)
+            log.append('Headers: %s' % dict(resp.headers))
+            body_preview = resp.text[:500] if resp.text else '(empty)'
+            log.append('Body: %s' % body_preview)
+        except requests.exceptions.ConnectTimeout as e:
+            http_ms = round((time.time() - t0) * 1000, 2)
+            log.append('CONNECT TIMEOUT after %s ms: %s' % (http_ms, str(e)[:300]))
+        except requests.exceptions.ReadTimeout as e:
+            http_ms = round((time.time() - t0) * 1000, 2)
+            log.append('READ TIMEOUT after %s ms: %s' % (http_ms, str(e)[:300]))
+            log.append('>>> Connection established but server did not respond with data')
+        except requests.exceptions.SSLError as e:
+            http_ms = round((time.time() - t0) * 1000, 2)
+            log.append('SSL ERROR after %s ms: %s' % (http_ms, str(e)[:500]))
+        except Exception as e:
+            http_ms = round((time.time() - t0) * 1000, 2)
+            log.append('HTTP ERROR after %s ms: %s: %s' % (http_ms, type(e).__name__, str(e)[:300]))
+    else:
+        log.append('SKIPPED: no certs')
+    log.append('')
+
+    # 6. Compare with sbi.sberbank.ru (which works)
+    log.append('--- 6. Control Test: sbi.sberbank.ru:9443 ---')
+    control_host = 'sbi.sberbank.ru'
+    try:
+        addrs2 = socket.getaddrinfo(control_host, 9443, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for af, socktype, proto, canonname, sa in addrs2:
+            fam = 'IPv4' if af == socket.AF_INET else 'IPv6'
+            log.append('  DNS %s: %s' % (fam, sa[0]))
+        sock3 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock3.settimeout(10)
+        t0 = time.time()
+        sock3.connect((control_host, 9443))
+        ctl_tcp_ms = round((time.time() - t0) * 1000, 2)
+        log.append('TCP connected in %s ms' % ctl_tcp_ms)
+
+        ctx3 = ssl_mod.create_default_context()
+        ctx3.check_hostname = False
+        ctx3.verify_mode = ssl_mod.CERT_NONE
+        sock3b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock3b.settimeout(10)
+        ssock3 = ctx3.wrap_socket(sock3b, server_hostname=control_host)
+        t0 = time.time()
+        ssock3.connect((control_host, 9443))
+        ctl_tls_ms = round((time.time() - t0) * 1000, 2)
+        log.append('TLS handshake in %s ms' % ctl_tls_ms)
+        log.append('TLS version: %s' % ssock3.version())
+        log.append('Cipher: %s' % str(ssock3.cipher()))
+        ssock3.close()
+        sock3.close()
+    except Exception as e:
+        log.append('Control test FAILED: %s' % str(e)[:300])
+    log.append('')
+
+    # 7. Our outgoing IP
+    log.append('--- 7. Our Outgoing IP ---')
+    try:
+        resp_ip = requests.get('https://api.ipify.org?format=json', timeout=5)
+        ip_data = resp_ip.json()
+        log.append('Outgoing IP: %s' % ip_data.get('ip', 'unknown'))
+    except Exception as e:
+        log.append('Could not determine outgoing IP: %s' % str(e)[:100])
+    log.append('')
+
+    # 8. Python / SSL version info
+    log.append('--- 8. Environment ---')
+    import sys
+    log.append('Python: %s' % sys.version)
+    log.append('OpenSSL: %s' % ssl_mod.OPENSSL_VERSION)
+    log.append('requests version: %s' % requests.__version__)
+    log.append('Default TLS ciphers count: %s' % len(ssl_mod.create_default_context().get_ciphers()))
+    log.append('')
+
+    full_log = '\n'.join(log)
+
+    try:
+        db = get_conn()
+        dcur = db.cursor()
+        dcur.execute("""
+            CREATE TABLE IF NOT EXISTS network_diag_logs (
+                id SERIAL PRIMARY KEY,
+                org_id INT,
+                log_text TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        dcur.execute(
+            "INSERT INTO network_diag_logs (org_id, log_text) VALUES (%s, '%s')"
+            % (org_id, esc(full_log))
+        )
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
+    return {'diagnostics': full_log, 'lines': len(log)}
+
+
 # ─── Main handler ─────────────────────────────────────────────────────────────
 
 def handler(event, context):
@@ -1421,6 +1694,9 @@ def handler(event, context):
 
         if action == 'transactions':
             return cors_json(handle_transactions(params))
+
+        if action == 'network_diag':
+            return cors_json(handle_network_diag(params))
 
         # ── POST actions ─────────────────────────────────────────────────
         if action == 'upload_cert':
