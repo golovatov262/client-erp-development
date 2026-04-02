@@ -208,13 +208,13 @@ export default function useSavingsHandlers() {
     if (!detail || !backfillForm.date_from || !backfillForm.date_to) return;
     setSaving(true);
     try {
-      const res = await api.savings.backfillAccruals({
+      const res = await api.savings.backfillAccrue({
         saving_id: detail.id,
         date_from: backfillForm.date_from,
         date_to: backfillForm.date_to,
         mode: backfillForm.mode,
       });
-      toast({ title: "Начисления пересчитаны", description: `Добавлено: ${res.added}, удалено: ${res.deleted || 0}` });
+      toast({ title: "Начисления пересчитаны", description: `Добавлено: ${res.days_added}, исправлено: ${res.days_fixed}` });
       setShowBackfill(false);
       await refreshDetail();
     } catch (e) {
