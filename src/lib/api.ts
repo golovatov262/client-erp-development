@@ -1154,6 +1154,8 @@ export const bankApi = {
     sberRequest<{ items: BankStatement[]; total: number }>("GET", { action: "statements", connection_id: connectionId, limit, offset }),
   transactions: (statementId?: number, matchStatus?: string) =>
     sberRequest<BankTransaction[]>("GET", { action: "transactions", statement_id: statementId, match_status: matchStatus }),
+  syncLog: (limit?: number) =>
+    sberRequest<BankSyncLogEntry[]>("GET", { action: "sync_log", limit: limit || 20 }),
 };
 
 export interface BankConnection {
@@ -1226,6 +1228,19 @@ export interface BankFetchEmailResult {
   errors: string[];
   error?: string;
   message?: string;
+}
+
+export interface BankSyncLogEntry {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  source: string;
+  status: string;
+  emails_found: number;
+  statements_loaded: number;
+  transactions_total: number;
+  transactions_matched: number;
+  errors: string | null;
 }
 
 export interface BankImapStatus {

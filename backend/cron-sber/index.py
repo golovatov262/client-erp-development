@@ -793,8 +793,19 @@ def handle_fetch_from_email(body):
     if not target_date:
         target_date = (date.today() - timedelta(days=1)).isoformat()
 
+    source = body.get('source', 'manual')
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO bank_sync_log (source, status, started_at) VALUES ('%s', 'running', NOW()) RETURNING id" % esc(source))
+    log_id = cur.fetchone()[0]
+    conn.commit()
+
     emails, err = fetch_emails_from_imap(target_date)
     if err:
+        cur.execute("UPDATE bank_sync_log SET status='error', finished_at=NOW(), errors='%s' WHERE id=%s" % (esc(err), log_id))
+        conn.commit()
+        conn.close()
         send_error_notification(
             'Ошибка получения банковских выписок',
             'Не удалось подключиться к почте %s:\n%s\n\nДата: %s' % (IMAP_USER, err, target_date)
@@ -802,10 +813,10 @@ def handle_fetch_from_email(body):
         return {'error': err}
 
     if not emails:
+        cur.execute("UPDATE bank_sync_log SET status='ok', finished_at=NOW(), emails_found=0 WHERE id=%s" % log_id)
+        conn.commit()
+        conn.close()
         return {'message': 'Писем с выписками не найдено', 'emails_found': 0, 'results': []}
-
-    conn = get_conn()
-    cur = conn.cursor()
 
     cur.execute("SELECT id, account_number, org_id FROM bank_connections WHERE is_active=true")
     connections = cur.fetchall()
@@ -843,13 +854,25 @@ def handle_fetch_from_email(body):
             except Exception as e:
                 errors.append('Файл %s: %s' % (att['filename'], str(e)))
 
+    loaded = [r for r in all_results if not r.get('error') and not r.get('skipped')]
+    total_txns = sum(r.get('total', 0) for r in loaded)
+    total_matched = sum(r.get('matched', 0) for r in loaded)
+    log_status = 'error' if errors else 'ok'
+
+    cur.execute("UPDATE bank_sync_log SET status='%s', finished_at=NOW(), emails_found=%s, statements_loaded=%s, transactions_total=%s, transactions_matched=%s, errors=%s, details='%s' WHERE id=%s" % (
+        log_status, len(emails), len(loaded), total_txns, total_matched,
+        ("'%s'" % esc('\n'.join(errors))) if errors else 'NULL',
+        esc(json.dumps(all_results, default=str)),
+        log_id
+    ))
+    conn.commit()
     conn.close()
 
     if errors:
         send_error_notification(
             'Ошибки при загрузке банковских выписок',
             'Дата: %s\n\nОшибки:\n%s\n\nУспешно загружено: %d' % (
-                target_date, '\n'.join(errors), len([r for r in all_results if not r.get('error')])
+                target_date, '\n'.join(errors), len(loaded)
             )
         )
 
@@ -954,12 +977,35 @@ def handle_status():
     }
 
 
+def handle_sync_log(params):
+    """Лог загрузок выписок."""
+    conn = get_conn()
+    cur = conn.cursor()
+    limit = int(params.get('limit', '20'))
+    cur.execute("""
+        SELECT id, started_at, finished_at, source, status,
+               emails_found, statements_loaded, transactions_total,
+               transactions_matched, errors
+        FROM bank_sync_log
+        ORDER BY id DESC
+        LIMIT %s
+    """ % limit)
+    rows = cur.fetchall()
+    conn.close()
+    return [{
+        'id': r[0], 'started_at': r[1], 'finished_at': r[2],
+        'source': r[3], 'status': r[4], 'emails_found': r[5],
+        'statements_loaded': r[6], 'transactions_total': r[7],
+        'transactions_matched': r[8], 'errors': r[9],
+    } for r in rows]
+
+
 # ─── Крон: автоматическая загрузка (вызов без action) ──────────────────────
 
 def cron_fetch():
     """Автоматическая загрузка выписок из почты. Вызывается по крону в 08:30 МСК."""
     target_date = (date.today() - timedelta(days=1)).isoformat()
-    result = handle_fetch_from_email({'date': target_date})
+    result = handle_fetch_from_email({'date': target_date, 'source': 'cron'})
     return result
 
 
@@ -996,6 +1042,9 @@ def handler(event, context):
 
         if action == 'status':
             return cors_json(handle_status())
+
+        if action == 'sync_log':
+            return cors_json(handle_sync_log(params))
 
         if action == 'save_connection':
             result = handle_save_connection(body)

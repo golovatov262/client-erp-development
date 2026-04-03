@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import Icon from "@/components/ui/icon";
 import PageHeader from "@/components/ui/page-header";
 import { useToast } from "@/hooks/use-toast";
-import api, { bankApi, BankConnection, BankStatement, BankTransaction, BankImapStatus, Organization } from "@/lib/api";
+import api, { bankApi, BankConnection, BankStatement, BankTransaction, BankImapStatus, BankSyncLogEntry, Organization } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -57,6 +57,7 @@ const BankStatements = () => {
   const [selectedStmt, setSelectedStmt] = useState<number | undefined>();
   const [matchFilter, setMatchFilter] = useState<string>("");
   const [imapStatus, setImapStatus] = useState<BankImapStatus | null>(null);
+  const [syncLog, setSyncLog] = useState<BankSyncLogEntry[]>([]);
   const { toast } = useToast();
 
   const loadData = async () => {
@@ -70,6 +71,7 @@ const BankStatements = () => {
       setStatements(stmts.items);
       setStatementsTotal(stmts.total);
       bankApi.status().then(setImapStatus).catch(() => {});
+      bankApi.syncLog(20).then(setSyncLog).catch(() => {});
     } catch (e) {
       toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
     }
@@ -249,6 +251,68 @@ const BankStatements = () => {
                           </TableCell>
                           <TableCell>
                             <Switch checked={c.is_active} onCheckedChange={(v) => handleToggleConnection(c.id, v)} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Журнал загрузок</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {syncLog.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">Загрузок пока не было</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Дата/время</TableHead>
+                      <TableHead>Источник</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead className="text-center">Писем</TableHead>
+                      <TableHead className="text-center">Выписок</TableHead>
+                      <TableHead className="text-center">Операций</TableHead>
+                      <TableHead className="text-center">Разнесено</TableHead>
+                      <TableHead>Длительность</TableHead>
+                      <TableHead>Ошибки</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {syncLog.map(log => {
+                      const duration = log.started_at && log.finished_at
+                        ? Math.round((new Date(log.finished_at).getTime() - new Date(log.started_at).getTime()) / 1000)
+                        : null;
+                      return (
+                        <TableRow key={log.id}>
+                          <TableCell className="whitespace-nowrap">{fmtDateTime(log.started_at)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              <Icon name={log.source === "cron" ? "Clock" : "MousePointerClick"} size={12} className="mr-1" />
+                              {log.source === "cron" ? "Авто" : "Вручную"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {log.status === "ok" && <Badge variant="default">Успешно</Badge>}
+                            {log.status === "error" && <Badge variant="destructive">Ошибка</Badge>}
+                            {log.status === "running" && <Badge variant="secondary"><Icon name="Loader2" size={12} className="mr-1 animate-spin" />В процессе</Badge>}
+                          </TableCell>
+                          <TableCell className="text-center">{log.emails_found || 0}</TableCell>
+                          <TableCell className="text-center">{log.statements_loaded || 0}</TableCell>
+                          <TableCell className="text-center">{log.transactions_total || 0}</TableCell>
+                          <TableCell className="text-center font-medium text-green-600">{log.transactions_matched || 0}</TableCell>
+                          <TableCell className="text-muted-foreground">{duration !== null ? `${duration} сек` : "—"}</TableCell>
+                          <TableCell className="max-w-[250px]">
+                            {log.errors ? (
+                              <span className="text-xs text-red-500 truncate block" title={log.errors}>{log.errors}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
