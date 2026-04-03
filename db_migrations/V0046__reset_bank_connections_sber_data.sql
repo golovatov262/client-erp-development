@@ -1,0 +1,1 @@
+UPDATE bank_connections SET last_sync_status = 'never', last_sync_error = '', last_sync_at = NULL, access_token = '', refresh_token = '', token_expires_at = NULL, client_id = '', client_secret_ref = '', auth_code = NULL, auth_code_at = NULL, updated_at = NOW();
