@@ -1,19 +1,19 @@
 {
   "tests": [
     {
-      "name": "Test Sber connection",
-      "method": "GET",
-      "path": "/?action=test&org_id=2",
-      "expectedStatus": 200,
-      "expectedBody": {"secrets": "object"},
-      "bodyMatcher": "partial"
-    },
-    {
       "name": "List connections",
       "method": "GET",
       "path": "/?action=connections",
       "expectedStatus": 200,
       "bodyMatcher": "array"
+    },
+    {
+      "name": "Get status",
+      "method": "GET",
+      "path": "/?action=status",
+      "expectedStatus": 200,
+      "expectedBody": {"imap_user": "string"},
+      "bodyMatcher": "partial"
     },
     {
       "name": "List statements",
@@ -29,15 +29,6 @@
       "path": "/?action=transactions",
       "expectedStatus": 200,
       "bodyMatcher": "array"
-    },
-    {
-      "name": "Run cron with no active connections",
-      "method": "POST",
-      "path": "/",
-      "body": {"date": "2025-01-01"},
-      "expectedStatus": 200,
-      "expectedBody": {"date": "2025-01-01"},
-      "bodyMatcher": "partial"
     }
   ]
 }

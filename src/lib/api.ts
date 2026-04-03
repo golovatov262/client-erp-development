@@ -1146,14 +1146,10 @@ export const bankApi = {
     sberRequest<{ success: boolean }>("POST", undefined, { action: "save_connection", ...data }),
   toggleConnection: (connectionId: number, isActive: boolean) =>
     sberRequest<{ success: boolean }>("POST", undefined, { action: "toggle_connection", connection_id: connectionId, is_active: isActive }),
-  authUrl: (connectionId: number, redirectUri: string) =>
-    sberRequest<{ auth_url: string }>("GET", { action: "auth_url", connection_id: connectionId, redirect_uri: redirectUri }),
-  authCallback: (connectionId: number, code: string, redirectUri: string) =>
-    sberRequest<{ success: boolean; expires_at: string }>("POST", undefined, { action: "auth_callback", connection_id: connectionId, code, redirect_uri: redirectUri }),
-  fetch: (connectionId: number, date: string) =>
-    sberRequest<BankFetchResult>("POST", undefined, { action: "fetch", connection_id: connectionId, date }),
-  fetchAll: (date: string) =>
-    sberRequest<BankFetchResult[]>("POST", undefined, { action: "fetch_all", date }),
+  fetchFromEmail: (date?: string) =>
+    sberRequest<BankFetchEmailResult>("POST", undefined, { action: "fetch", date }),
+  status: () =>
+    sberRequest<BankImapStatus>("GET", { action: "status" }),
   statements: (connectionId?: number, limit?: number, offset?: number) =>
     sberRequest<{ items: BankStatement[]; total: number }>("GET", { action: "statements", connection_id: connectionId, limit, offset }),
   transactions: (statementId?: number, matchStatus?: string) =>
@@ -1222,6 +1218,27 @@ export interface BankFetchResult {
   skipped?: boolean;
   reason?: string;
   error?: string;
+}
+
+export interface BankFetchEmailResult {
+  emails_found: number;
+  results: BankFetchResult[];
+  errors: string[];
+  error?: string;
+  message?: string;
+}
+
+export interface BankImapStatus {
+  imap_host: string;
+  imap_user: string;
+  imap_configured: boolean;
+  connections: {
+    id: number;
+    account_number: string;
+    last_sync_at: string | null;
+    last_sync_status: string;
+    last_sync_error: string;
+  }[];
 }
 
 export default api;

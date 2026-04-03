@@ -1,77 +1,12 @@
 import json
 import os
 import re
-import ssl
-import tempfile
-import uuid
-import requests
-import boto3
+import imaplib
+import email
+from email.header import decode_header
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import psycopg2
-from urllib.parse import urlencode, quote
-
-# ─── Sber API URLs ───────────────────────────────────────────────────────────
-SBER_OAUTH_AUTHORIZE_URL = "https://sbi.sberbank.ru:9443/ic/sso/api/v2/oauth/authorize"
-SBER_TOKEN_URLS = [
-    "https://fintech.sberbank.ru:9443/ic/sso/api/v2/oauth/token",
-]
-SBER_TOKEN_URL = SBER_TOKEN_URLS[0]
-SBER_STATEMENT_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/transactions"
-SBER_STATEMENT_SUMMARY_URL = "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/summary"
-
-# Legacy alias
-SBER_AUTH_URL = SBER_TOKEN_URL
-
-REDIRECT_URI = 'https://functions.poehali.dev/1f3896d2-7604-47b6-b33d-c1ce55e29925/?action=callback'
-
-# Scopes per org
-ORG_SCOPES = {
-    2: 'openid GET_STATEMENT_ACCOUNT GET_STATEMENT_TRANSACTION GET_CLIENT_ACCOUNTS',
-    3: 'openid GET_STATEMENT_ACCOUNT GET_STATEMENT_TRANSACTION GET_CLIENT_ACCOUNTS',
-}
-
-CERT_S3_KEYS = {
-    2: 'sber_cert_org2.pem',
-    3: 'sber_cert_org3.pem',
-}
-
-CA_CHAIN_S3_KEY = 'sber_ca_chain.pem'
-
-_cert_cache = {}
-_CACHE_VER = 4
-
-def sber_post_json(url, json_body, cert_pair, ca_path, timeout=20, retries=3):
-    """POST JSON to Sber API with retry."""
-    import time
-    verify_param = ca_path if ca_path else False
-    last_err = None
-    for attempt in range(retries):
-        try:
-            resp = requests.post(url, data=json_body, headers={'Content-Type': 'application/json'}, cert=cert_pair, verify=verify_param, timeout=timeout)
-            return resp, None
-        except Exception as e:
-            last_err = str(e)[:200]
-            if attempt < retries - 1:
-                time.sleep(2)
-    return None, last_err
-
-
-def sber_post(url, data, cert_pair, ca_path, timeout=25, retries=2):
-    """POST to Sber API with retry logic."""
-    import time
-    verify_param = ca_path if ca_path else False
-    last_err = None
-    for attempt in range(retries):
-        try:
-            resp = requests.post(url, data=data, cert=cert_pair, verify=verify_param, timeout=timeout)
-            return resp, None
-        except Exception as e:
-            last_err = str(e)[:200]
-            if attempt < retries - 1:
-                time.sleep(1)
-    return None, last_err
-
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -80,6 +15,13 @@ CORS_HEADERS = {
     'Access-Control-Max-Age': '86400',
 }
 
+IMAP_HOST = os.environ.get('BANK_IMAP_HOST', 'mail.jino.ru')
+IMAP_PORT = int(os.environ.get('BANK_IMAP_PORT', '143'))
+IMAP_USER = os.environ.get('BANK_IMAP_USER', 'cber@sll-expert.ru')
+IMAP_PASS = os.environ.get('BANK_IMAP_PASSWORD', '')
+NOTIFY_EMAIL = 'info@sll-expert.ru'
+
+
 def cors_json(data, status=200):
     return {
         'statusCode': status,
@@ -87,290 +29,495 @@ def cors_json(data, status=200):
         'body': json.dumps(data, default=str),
     }
 
-def cors_html(html, status=200):
-    return {
-        'statusCode': status,
-        'headers': {**CORS_HEADERS, 'Content-Type': 'text/html; charset=utf-8'},
-        'body': html,
-    }
 
 def esc(s):
-    if s is None: return ''
+    if s is None:
+        return ''
     return str(s).replace("'", "''")
+
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
-def get_s3_client():
-    return boto3.client(
-        's3',
-        endpoint_url='https://bucket.poehali.dev',
-        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-    )
 
-SBER_SECRET_MAP = {
-    2: '2',
-    3: '3',
-}
-
-def get_sber_credentials(org_id, cur=None):
-    """Get client_id and client_secret for org.
-    First checks bank_connections table, falls back to env vars.
-    Note: env secrets are swapped (ORG2 contains org3 data and vice versa),
-    so we use SBER_SECRET_MAP to read from the correct env var."""
-    cid = ''
-    csecret = ''
-    if cur:
-        try:
-            cur.execute(
-                "SELECT client_id, client_secret_ref FROM bank_connections WHERE org_id=%s AND client_id IS NOT NULL AND client_id != '' LIMIT 1"
-                % int(org_id)
-            )
-            row = cur.fetchone()
-            if row:
-                cid = row[0] or ''
-                csecret = row[1] or ''
-        except Exception:
-            pass
-    env_suffix = SBER_SECRET_MAP.get(int(org_id), str(org_id))
-    if not cid:
-        cid = os.environ.get('SBER_CLIENT_ID_ORG%s' % env_suffix, '')
-    if not csecret:
-        csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % env_suffix, '')
-    return cid, csecret
-
-def get_connection_credentials(cur, connection_id):
-    """Get client_id and client_secret from a specific connection, fall back to env."""
-    cur.execute(
-        "SELECT org_id, client_id, client_secret_ref FROM bank_connections WHERE id=%s" % int(connection_id)
-    )
-    row = cur.fetchone()
-    if not row:
-        return None, '', ''
-    org_id, cid, csecret = row
-    if not cid:
-        cid = os.environ.get('SBER_CLIENT_ID_ORG%s' % org_id, '')
-    if not csecret:
-        csecret = os.environ.get('SBER_CLIENT_SECRET_ORG%s' % org_id, '')
-    return org_id, cid, csecret
-
-def convert_p12_to_pem(p12_data, password=None):
-    """Convert PKCS12 (.p12) binary data to PEM format (cert + key)."""
-    from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
-    pwd = password.encode('utf-8') if isinstance(password, str) else password
-    private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(p12_data, pwd)
-    parts = []
-    if certificate:
-        parts.append(certificate.public_bytes(Encoding.PEM).decode('utf-8'))
-    if additional_certs:
-        for c in additional_certs:
-            parts.append(c.public_bytes(Encoding.PEM).decode('utf-8'))
-    key_pem = ''
-    if private_key:
-        key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()).decode('utf-8')
-    return ''.join(parts), key_pem
-
-
-def is_p12_data(data):
-    return isinstance(data, bytes) and len(data) > 2 and data[0:1] == b'\x30'
-
-
-def auto_convert_cert(data, password=None):
-    """Auto-detect format: if PEM return as-is, if P12 convert to PEM."""
-    if isinstance(data, bytes):
-        try:
-            text = data.decode('utf-8')
-            if '-----BEGIN' in text:
-                return data, None
-        except UnicodeDecodeError:
-            pass
-        try:
-            cert_pem, key_pem = convert_p12_to_pem(data, password)
-            if cert_pem or key_pem:
-                combined = cert_pem + key_pem
-                return combined.encode('utf-8'), 'converted_from_p12'
-        except Exception as e:
-            return None, 'Failed to convert P12: %s' % str(e)[:200]
-    return data, None
-
-
-def split_pem_bundle(pem_data):
-    text = pem_data.decode('utf-8') if isinstance(pem_data, bytes) else pem_data
-    cert_parts = []
-    key_part = None
-    current = []
-    for line in text.splitlines(True):
-        current.append(line)
-        if '-----END' in line:
-            block = ''.join(current)
-            if 'PRIVATE KEY' in block:
-                key_part = block
-            else:
-                cert_parts.append(block)
-            current = []
-    return ''.join(cert_parts), key_part
-
-def download_cert_from_s3(org_id):
-    s3_key = CERT_S3_KEYS.get(int(org_id))
-    if not s3_key:
-        return None, None
-    cache_key = s3_key + '_cert_v2'
-    cache_key_k = s3_key + '_key_v2'
-    if cache_key in _cert_cache and cache_key_k in _cert_cache:
-        cp = _cert_cache[cache_key]
-        kp = _cert_cache[cache_key_k]
-        if os.path.exists(cp) and os.path.exists(kp):
-            return cp, kp
-    s3 = get_s3_client()
-    obj = s3.get_object(Bucket='files', Key=s3_key)
-    data = obj['Body'].read()
-    converted, conv_info = auto_convert_cert(data)
-    if converted is None:
-        return None, None
-    if isinstance(converted, str):
-        converted = converted.encode('utf-8')
-    cert_text, key_text = split_pem_bundle(converted)
-    if not cert_text or not key_text:
-        return None, None
-    cf = tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False)
-    cf.write(cert_text)
-    cf.close()
-    kf = tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False)
-    kf.write(key_text)
-    kf.close()
-    _cert_cache[cache_key] = cf.name
-    _cert_cache[cache_key_k] = kf.name
-    return cf.name, kf.name
-
-def extract_pem_from_data(raw_data):
-    """If data is a ZIP archive, extract all .pem/.crt/.cer files and concatenate them.
-    Skips __MACOSX and .DS_Store junk. If already PEM, returns as-is."""
-    import zipfile
-    import io
-    if raw_data[:2] == b'PK':
-        pem_parts = []
-        file_list = []
-        with zipfile.ZipFile(io.BytesIO(raw_data)) as zf:
-            for name in sorted(zf.namelist()):
-                if name.endswith('/'):
-                    continue
-                if '__MACOSX' in name or '.DS_Store' in name:
-                    continue
-                file_list.append(name)
-                lower = name.lower()
-                if lower.endswith(('.pem', '.crt', '.cer', '.cert')):
-                    content = zf.read(name)
-                    if content and b'-----BEGIN' in content:
-                        pem_parts.append(content)
-            if not pem_parts:
-                for name in file_list:
-                    content = zf.read(name)
-                    if content and b'-----BEGIN' in content:
-                        pem_parts.append(content)
-        if not pem_parts:
-            return None, 'ZIP does not contain PEM certificates (files: %s)' % ', '.join(file_list)
-        combined = b'\n'.join(pem_parts)
-        return combined, None
-    if b'-----BEGIN' in raw_data:
-        return raw_data, None
-    return None, 'Data is not PEM format and not a ZIP archive'
-
-
-def download_ca_chain():
-    cache_key = 'ca_chain_path_v2'
-    if cache_key in _cert_cache:
-        p = _cert_cache[cache_key]
-        if os.path.exists(p):
-            return p
+def send_error_notification(subject, body_text):
+    """Отправляет уведомление об ошибке на info@sll-expert.ru через SMTP из настроек БД."""
     try:
-        s3 = get_s3_client()
-        obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
-        raw_data = obj['Body'].read()
-        if not raw_data:
-            return None
-        pem_data, err = extract_pem_from_data(raw_data)
-        if err or not pem_data:
-            return None
-        if isinstance(pem_data, str):
-            pem_data = pem_data.encode('utf-8')
-        cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-        cf.write(pem_data)
-        cf.close()
-        _cert_cache[cache_key] = cf.name
-        return cf.name
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='email'")
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return
+        ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        smtp_host = ch.get('smtp_host', '')
+        smtp_port = int(ch.get('smtp_port', 587))
+        smtp_user = ch.get('smtp_user', '')
+        smtp_pass = ch.get('smtp_pass', '')
+        from_email = ch.get('from_email', '')
+        from_name = ch.get('from_name', 'Система')
+        if not smtp_host or not smtp_user or not from_email:
+            return
+        import smtplib
+        from email.mime.text import MIMEText
+        msg = MIMEText(body_text, 'plain', 'utf-8')
+        msg['Subject'] = subject
+        msg['From'] = '%s <%s>' % (from_name, from_email) if from_name else from_email
+        msg['To'] = NOTIFY_EMAIL
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, [NOTIFY_EMAIL], msg.as_string())
     except Exception:
+        pass
+
+
+# ─── Парсер формата 1С (1CClientBankExchange v1.03) ────────────────────────
+
+def parse_1c_statement(text):
+    """Парсит текстовый файл формата 1CClientBankExchange.
+    Возвращает список секций выписок, каждая содержит:
+    - account: номер расчётного счёта
+    - date_from, date_to: период выписки
+    - opening_balance, closing_balance
+    - transactions: список операций
+    """
+    sections = []
+    current_section = None
+    current_txn = None
+    lines = text.splitlines()
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        if line == 'СекцияДокумент=Платёжное поручение' or line.startswith('СекцияДокумент='):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            current_txn = {'doc_type': line.split('=', 1)[1] if '=' in line else ''}
+            continue
+
+        if line == 'КонецДокумента':
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            current_txn = None
+            continue
+
+        if line == 'СекцияРас662чёт662Сч' or line.startswith('СекцияРас662чётСч') or line == 'СекцияРасч662Сч' or '=' not in line:
+            if line == 'КонецРасч662Сч' or line == 'КонецФайла':
+                if current_section:
+                    sections.append(current_section)
+                    current_section = None
+            continue
+
+        if '=' not in line:
+            continue
+
+        key, val = line.split('=', 1)
+        key = key.strip()
+        val = val.strip()
+
+        if key == 'РасsчётСч' or key == 'РасsчётныйСчёт' or key == 'РасsчСч':
+            pass
+
+        if current_txn is not None:
+            if key == 'Номер':
+                current_txn['document_number'] = val
+            elif key == 'Дата':
+                current_txn['document_date'] = val
+            elif key == 'Сумма':
+                current_txn['amount'] = val
+            elif key == 'ПлательщикСчет':
+                current_txn['payer_account'] = val
+            elif key == 'Плательщик':
+                current_txn['payer_name'] = val
+            elif key == 'ПлательщикИНН':
+                current_txn['payer_inn'] = val
+            elif key == 'ПлательщикБанк1':
+                current_txn['payer_bank'] = val
+            elif key == 'ПлательщикБИК':
+                current_txn['payer_bik'] = val
+            elif key == 'ПолучательСчет':
+                current_txn['payee_account'] = val
+            elif key == 'Получатель':
+                current_txn['payee_name'] = val
+            elif key == 'ПолучательИНН':
+                current_txn['payee_inn'] = val
+            elif key == 'ПолучательБанк1':
+                current_txn['payee_bank'] = val
+            elif key == 'ПолучательБИК':
+                current_txn['payee_bik'] = val
+            elif key == 'НазначениеПлатежа':
+                current_txn['purpose'] = val
+            elif key == 'ДатаСписwordsано' or key == 'ДатаСписано':
+                current_txn['debit_date'] = val
+            elif key == 'ДатаПоступwordsило' or key == 'ДатаПоступило':
+                current_txn['credit_date'] = val
+        else:
+            if key == 'РасsчёткнійСч' or key == 'РасчСч' or key == 'РасчётныйСчёт':
+                pass
+
+        if key == 'ДатаНачала' and current_section is None:
+            pass
+        if key == 'ДатаКонца' and current_section is None:
+            pass
+
+    if current_section:
+        sections.append(current_section)
+
+    return sections
+
+
+def parse_1c_file(text):
+    """Более robust парсер формата 1CClientBankExchange v1.03 UTF-8."""
+    sections = []
+    current_section = None
+    current_txn = None
+    in_section = False
+    lines = text.splitlines()
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        if line.startswith('СекцияРасч'):
+            if current_section:
+                sections.append(current_section)
+            current_section = {
+                'account': '',
+                'date_from': '',
+                'date_to': '',
+                'opening_balance': 0.0,
+                'closing_balance': 0.0,
+                'transactions': [],
+            }
+            in_section = True
+            current_txn = None
+            continue
+
+        if line.startswith('КонецРасч'):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+                current_txn = None
+            if current_section:
+                sections.append(current_section)
+                current_section = None
+            in_section = False
+            continue
+
+        if line.startswith('СекцияДокумент'):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            doc_type = line.split('=', 1)[1] if '=' in line else ''
+            current_txn = {'doc_type': doc_type}
+            continue
+
+        if line == 'КонецДокумента':
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            current_txn = None
+            continue
+
+        if line == 'КонецФайла':
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+                current_txn = None
+            if current_section:
+                sections.append(current_section)
+                current_section = None
+            break
+
+        if '=' not in line:
+            continue
+
+        key, val = line.split('=', 1)
+        key = key.strip()
+        val = val.strip()
+
+        if current_txn is not None:
+            txn_map = {
+                'Номер': 'document_number',
+                'Дата': 'document_date',
+                'Сумма': 'amount',
+                'ПлательщикСчет': 'payer_account',
+                'Плательщик': 'payer_name',
+                'ПлательщикИНН': 'payer_inn',
+                'ПлательщикКПП': 'payer_kpp',
+                'ПлательщикБанк1': 'payer_bank',
+                'ПлательщикБИК': 'payer_bik',
+                'ПлательщикКорpsчёт': 'payer_corr',
+                'ПолучательСчет': 'payee_account',
+                'Получатель': 'payee_name',
+                'ПолучательИНН': 'payee_inn',
+                'ПолучательКПП': 'payee_kpp',
+                'ПолучательБанк1': 'payee_bank',
+                'ПолучательБИК': 'payee_bik',
+                'ПолучательКорpsчёт': 'payee_corr',
+                'НазначениеПлатежа': 'purpose',
+                'ДатаСписано': 'debit_date',
+                'ДатаПоступило': 'credit_date',
+                'Плательщик1': 'payer_name_full',
+                'Получатель1': 'payee_name_full',
+            }
+            field = txn_map.get(key)
+            if field:
+                current_txn[field] = val
+        elif current_section is not None:
+            if key == 'РасsчётныйСчёт' or key == 'РасчСч' or 'РасчетныйСчет' in key or 'РасчётныйСчёт' in key:
+                current_section['account'] = val
+            elif key == 'ДатаНачала':
+                current_section['date_from'] = val
+            elif key == 'ДатаКонца':
+                current_section['date_to'] = val
+            elif key == 'НачsальныйОстаток' or 'НачальныйОстаток' in key:
+                current_section['opening_balance'] = safe_float(val)
+            elif key == 'КонечныйОстаток' or 'Конечный' in key and 'Остаток' in key:
+                current_section['closing_balance'] = safe_float(val)
+        else:
+            pass
+
+    return sections
+
+
+def robust_parse_1c(text):
+    """Самый надёжный парсер 1С — работает с любыми вариациями ключей."""
+    sections = []
+    current_section = None
+    current_txn = None
+    lines = text.splitlines()
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        lower = line.lower()
+
+        if lower.startswith('секциярасч'):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+                current_txn = None
+            if current_section:
+                sections.append(current_section)
+            current_section = {
+                'account': '', 'date_from': '', 'date_to': '',
+                'opening_balance': 0.0, 'closing_balance': 0.0,
+                'transactions': [],
+            }
+            continue
+
+        if lower.startswith('конецрасч'):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+                current_txn = None
+            if current_section:
+                sections.append(current_section)
+                current_section = None
+            continue
+
+        if lower.startswith('секциядокумент'):
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            doc_type = line.split('=', 1)[1].strip() if '=' in line else ''
+            current_txn = {'doc_type': doc_type}
+            continue
+
+        if lower == 'конецдокумента':
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+            current_txn = None
+            continue
+
+        if lower == 'конецфайла':
+            if current_txn and current_section:
+                current_section['transactions'].append(current_txn)
+                current_txn = None
+            if current_section:
+                sections.append(current_section)
+                current_section = None
+            break
+
+        if '=' not in line:
+            continue
+
+        key, val = line.split('=', 1)
+        key = key.strip()
+        val = val.strip()
+        kl = key.lower()
+
+        if current_txn is not None:
+            if kl == 'номер':
+                current_txn['document_number'] = val
+            elif kl == 'дата':
+                current_txn['document_date'] = val
+            elif kl == 'сумма':
+                current_txn['amount'] = val
+            elif kl == 'плательщиксчет':
+                current_txn['payer_account'] = val
+            elif kl in ('плательщик', 'плательщик1'):
+                current_txn.setdefault('payer_name', val)
+            elif kl == 'плательщикинн':
+                current_txn['payer_inn'] = val
+            elif kl in ('плательщикбанк1', 'плательщикбанк'):
+                current_txn['payer_bank'] = val
+            elif kl == 'плательщикбик':
+                current_txn['payer_bik'] = val
+            elif kl == 'получательсчет':
+                current_txn['payee_account'] = val
+            elif kl in ('получатель', 'получатель1'):
+                current_txn.setdefault('payee_name', val)
+            elif kl == 'получательинн':
+                current_txn['payee_inn'] = val
+            elif kl in ('получательбанк1', 'получательбанк'):
+                current_txn['payee_bank'] = val
+            elif kl == 'получательбик':
+                current_txn['payee_bik'] = val
+            elif kl == 'назначениеплатежа':
+                current_txn['purpose'] = val
+            elif kl == 'датасписано':
+                current_txn['debit_date'] = val
+            elif kl == 'датапоступило':
+                current_txn['credit_date'] = val
+        elif current_section is not None:
+            if 'расч' in kl and ('счет' in kl or 'сч' in kl or 'счёт' in kl):
+                current_section['account'] = val
+            elif kl == 'датаначала':
+                current_section['date_from'] = val
+            elif kl == 'датаконца':
+                current_section['date_to'] = val
+            elif 'начальн' in kl and 'остаток' in kl:
+                current_section['opening_balance'] = safe_float(val)
+            elif 'конечн' in kl and 'остаток' in kl:
+                current_section['closing_balance'] = safe_float(val)
+
+    if current_txn and current_section:
+        current_section['transactions'].append(current_txn)
+    if current_section:
+        sections.append(current_section)
+
+    return sections
+
+
+def safe_float(val):
+    try:
+        return float(val.replace(',', '.').replace(' ', ''))
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+def parse_1c_date(val):
+    """Парсит дату из формата 1С: ДД.ММ.ГГГГ"""
+    if not val:
         return None
+    try:
+        parts = val.split('.')
+        if len(parts) == 3:
+            return '%s-%s-%s' % (parts[2], parts[1], parts[0])
+    except Exception:
+        pass
+    return val
 
-def get_ssl_context(org_id=2):
-    cert_path, key_path = download_cert_from_s3(org_id)
-    if not cert_path or not key_path:
-        return None, None, None
-    ca_path = download_ca_chain()
-    return cert_path, key_path, ca_path
 
-def refresh_access_token(cur, conn, connection_id, org_id, refresh_token):
-    cid, csecret = get_sber_credentials(org_id, cur)
-    if not cid or not csecret:
-        return None, 'client_id/secret not configured for org %s' % org_id
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    cert_pair = (cert_path, key_path) if cert_path else None
-    refresh_data = {
-        'grant_type': 'refresh_token',
-        'refresh_token': refresh_token,
-        'client_id': cid,
-        'client_secret': csecret,
-    }
-    resp, sber_err = sber_post(SBER_TOKEN_URL, refresh_data, cert_pair, ca_path, timeout=25, retries=2)
-    if sber_err:
-        return None, 'Refresh token error: %s' % sber_err
-    if resp.status_code != 200:
-        return None, 'Refresh token error: HTTP %s' % resp.status_code
-    data = resp.json()
-    new_access = data.get('access_token', '')
-    new_refresh = data.get('refresh_token', refresh_token)
-    expires_in = int(data.get('expires_in', 3600))
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-    cur.execute("UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', updated_at=NOW() WHERE id=%s" % (esc(new_access), esc(new_refresh), expires_at.isoformat(), connection_id))
-    conn.commit()
-    return new_access, None
+# ─── IMAP: получение писем с вложениями ────────────────────────────────────
 
-def get_valid_token(cur, conn, c):
-    token = c['access_token']
-    refresh = c['refresh_token']
-    expires = c['token_expires_at']
-    if token and expires and datetime.utcnow() < expires - timedelta(minutes=5):
-        return token, None
-    if not refresh:
-        return None, 'No refresh_token'
-    return refresh_access_token(cur, conn, c['id'], c['org_id'], refresh)
+def fetch_emails_from_imap(target_date=None):
+    """Подключается к IMAP, ищет письма с вложениями .txt за указанную дату.
+    Возвращает список dict: {subject, date, attachments: [{filename, content}]}
+    """
+    if not IMAP_PASS:
+        return [], 'BANK_IMAP_PASSWORD не задан'
 
-def fetch_statement_page(access_token, account_number, statement_date, page=0, org_id=2):
-    import time
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    cert_pair = (cert_path, key_path) if cert_path else None
-    verify_param = ca_path if ca_path else False
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = requests.get(SBER_STATEMENT_URL, params={
-                'accountNumber': account_number,
-                'statementDate': statement_date,
-                'page': page,
-            }, headers={
-                'Authorization': 'Bearer %s' % access_token,
-                'Accept': 'application/json',
-            }, cert=cert_pair, verify=verify_param, timeout=30)
-            if resp.status_code == 401:
-                return None, 'token_expired'
-            if resp.status_code != 200:
-                return None, 'HTTP %s: %s' % (resp.status_code, resp.text[:200])
-            return resp.json(), None
-        except Exception as e:
-            last_err = str(e)[:200]
-            if attempt < 2:
-                time.sleep(3)
-    return None, 'Сбер не отвечает (3 попытки): %s' % last_err
+    results = []
+    try:
+        mail = imaplib.IMAP4(IMAP_HOST, IMAP_PORT)
+        mail.login(IMAP_USER, IMAP_PASS)
+        mail.select('INBOX')
+
+        search_criteria = 'ALL'
+        if target_date:
+            if isinstance(target_date, str):
+                dt = datetime.strptime(target_date, '%Y-%m-%d')
+            else:
+                dt = target_date
+            date_str = dt.strftime('%d-%b-%Y')
+            search_criteria = '(SINCE "%s")' % date_str
+
+        status, msg_ids = mail.search(None, search_criteria)
+        if status != 'OK' or not msg_ids[0]:
+            mail.logout()
+            return [], None
+
+        for msg_id in msg_ids[0].split():
+            status, msg_data = mail.fetch(msg_id, '(RFC822)')
+            if status != 'OK':
+                continue
+
+            msg = email.message_from_bytes(msg_data[0][1])
+            subject = ''
+            raw_subject = msg.get('Subject', '')
+            if raw_subject:
+                decoded = decode_header(raw_subject)
+                parts = []
+                for data, charset in decoded:
+                    if isinstance(data, bytes):
+                        parts.append(data.decode(charset or 'utf-8', errors='replace'))
+                    else:
+                        parts.append(data)
+                subject = ''.join(parts)
+
+            msg_date = msg.get('Date', '')
+
+            attachments = []
+            for part in msg.walk():
+                content_disposition = str(part.get('Content-Disposition', ''))
+                if 'attachment' not in content_disposition:
+                    continue
+                filename = part.get_filename()
+                if filename:
+                    decoded_fn = decode_header(filename)
+                    fn_parts = []
+                    for data, charset in decoded_fn:
+                        if isinstance(data, bytes):
+                            fn_parts.append(data.decode(charset or 'utf-8', errors='replace'))
+                        else:
+                            fn_parts.append(data)
+                    filename = ''.join(fn_parts)
+
+                if not filename or not filename.lower().endswith('.txt'):
+                    continue
+
+                content = part.get_payload(decode=True)
+                if content:
+                    try:
+                        text = content.decode('utf-8')
+                    except UnicodeDecodeError:
+                        try:
+                            text = content.decode('windows-1251')
+                        except UnicodeDecodeError:
+                            text = content.decode('utf-8', errors='replace')
+
+                    if '1CClientBankExchange' in text or 'СекцияРасч' in text.replace(' ', ''):
+                        attachments.append({'filename': filename, 'content': text})
+
+            if attachments:
+                results.append({
+                    'subject': subject,
+                    'date': msg_date,
+                    'msg_id': msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id),
+                    'attachments': attachments,
+                })
+
+        mail.logout()
+        return results, None
+
+    except Exception as e:
+        return [], 'Ошибка IMAP: %s' % str(e)
+
+
+# ─── Бизнес-логика: разнесение по договорам ───────────────────────────────
 
 def extract_contract_no(purpose_text):
     if not purpose_text:
@@ -386,6 +533,7 @@ def extract_contract_no(purpose_text):
             return m.group(1).strip()
     return None
 
+
 def match_contract(cur, contract_no):
     if not contract_no:
         return None, None, None
@@ -398,6 +546,7 @@ def match_contract(cur, contract_no):
     if row:
         return contract_no, row[1], row[0]
     return contract_no, None, None
+
 
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     cur.execute("SELECT balance, rate, schedule_type, status FROM loans WHERE id=%s" % loan_id)
@@ -450,11 +599,13 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     pay_id = cur.fetchone()[0]
     cur.execute("UPDATE loan_schedule SET payment_id=%s WHERE loan_id=%s AND paid_date='%s' AND payment_id IS NULL AND status IN ('paid','partial')" % (pay_id, loan_id, payment_date))
     nb = Decimal(str(bal)) - principal_part
-    if nb < 0: nb = Decimal('0')
+    if nb < 0:
+        nb = Decimal('0')
     cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), loan_id))
     if nb == 0:
         cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % loan_id)
     return pay_id, None
+
 
 def process_savings_deposit(cur, conn, saving_id, amount, payment_date, description):
     cur.execute("SELECT current_balance, status FROM savings WHERE id=%s" % saving_id)
@@ -466,83 +617,103 @@ def process_savings_deposit(cur, conn, saving_id, amount, payment_date, descript
     cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (amt, amt, saving_id))
     return True, None
 
-def load_statement(cur, conn, c, target_date):
-    cid = c['id']
-    token, err = get_valid_token(cur, conn, c)
-    if err:
-        cur.execute("UPDATE bank_connections SET last_sync_status='error', last_sync_error='%s', last_sync_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(err), cid))
-        conn.commit()
-        return {'error': err}
-    date_str = target_date if isinstance(target_date, str) else target_date.isoformat()
-    cur.execute("SELECT id FROM bank_statements WHERE connection_id=%s AND statement_date='%s'" % (cid, date_str))
+
+# ─── Определение direction (CREDIT/DEBIT) по счёту организации ─────────────
+
+def determine_direction(txn, org_account):
+    """Определяет направление операции: CREDIT (поступление) или DEBIT (списание)
+    на основании того, является ли счёт организации плательщиком или получателем."""
+    if txn.get('credit_date'):
+        return 'CREDIT'
+    if txn.get('debit_date'):
+        return 'DEBIT'
+    payee_acc = txn.get('payee_account', '')
+    payer_acc = txn.get('payer_account', '')
+    if payee_acc == org_account:
+        return 'CREDIT'
+    if payer_acc == org_account:
+        return 'DEBIT'
+    return 'UNKNOWN'
+
+
+# ─── Загрузка выписки из распарсенного файла 1С ───────────────────────────
+
+def load_statement_from_1c(cur, conn, section, connection_id):
+    """Загружает выписку из распарсенной секции файла 1С в БД.
+    Возвращает dict с результатом."""
+    account = section.get('account', '')
+    date_from = parse_1c_date(section.get('date_from', ''))
+    date_to = parse_1c_date(section.get('date_to', ''))
+    stmt_date = date_to or date_from
+    if not stmt_date:
+        return {'error': 'Не указана дата выписки'}
+
+    cur.execute("SELECT id FROM bank_statements WHERE connection_id=%s AND statement_date='%s'" % (connection_id, esc(stmt_date)))
     if cur.fetchone():
-        return {'skipped': True}
-    all_txns = []
-    page = 0
-    data = None
-    while True:
-        data, err = fetch_statement_page(token, c['account_number'], date_str, page, org_id=c['org_id'])
-        if err == 'token_expired':
-            token, re_err = refresh_access_token(cur, conn, cid, c['org_id'], c['refresh_token'])
-            if re_err:
-                cur.execute("UPDATE bank_connections SET last_sync_status='error', last_sync_error='%s', last_sync_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(re_err), cid))
-                conn.commit()
-                return {'error': re_err}
-            data, err = fetch_statement_page(token, c['account_number'], date_str, page, org_id=c['org_id'])
-        if err:
-            cur.execute("UPDATE bank_connections SET last_sync_status='error', last_sync_error='%s', last_sync_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(err), cid))
-            conn.commit()
-            return {'error': err}
-        txns = data.get('transactions', data.get('operationsList', []))
-        if not txns:
-            break
-        all_txns.extend(txns)
-        if data.get('isLastPage', data.get('lastPage', True)):
-            break
-        page += 1
+        return {'skipped': True, 'reason': 'Выписка за %s уже загружена' % stmt_date}
 
-    ob = float(data.get('openingBalance', data.get('balanceOpeningDay', 0)) or 0) if data else 0
-    cb = float(data.get('closingBalance', data.get('balanceClosingDay', 0)) or 0) if data else 0
-    dt_val = float(data.get('debitTurnover', data.get('turnoverDebit', 0)) or 0) if data else 0
-    ct_val = float(data.get('creditTurnover', data.get('turnoverCredit', 0)) or 0) if data else 0
+    ob = section.get('opening_balance', 0.0)
+    cb = section.get('closing_balance', 0.0)
+    txns = section.get('transactions', [])
 
-    cur.execute("INSERT INTO bank_statements (connection_id, statement_date, opening_balance, closing_balance, debit_turnover, credit_turnover, transaction_count, status) VALUES (%s, '%s', %s, %s, %s, %s, %s, 'loaded') RETURNING id" % (cid, date_str, ob, cb, dt_val, ct_val, len(all_txns)))
+    dt_val = 0.0
+    ct_val = 0.0
+    for txn in txns:
+        amt = safe_float(txn.get('amount', '0'))
+        direction = determine_direction(txn, account)
+        if direction == 'DEBIT':
+            dt_val += amt
+        elif direction == 'CREDIT':
+            ct_val += amt
+
+    cur.execute("INSERT INTO bank_statements (connection_id, statement_date, opening_balance, closing_balance, debit_turnover, credit_turnover, transaction_count, status) VALUES (%s, '%s', %s, %s, %s, %s, %s, 'loaded') RETURNING id" % (connection_id, esc(stmt_date), ob, cb, dt_val, ct_val, len(txns)))
     stmt_id = cur.fetchone()[0]
+
     matched = 0
     unmatched = 0
-    for txn in all_txns:
-        sber_uuid = txn.get('uuid', txn.get('id', txn.get('operationId', '')))
-        op_date_raw = txn.get('operationDate', txn.get('date', date_str))
-        op_date = str(op_date_raw) + 'T00:00:00' if 'T' not in str(op_date_raw) else op_date_raw
-        doc_date = txn.get('documentDate', date_str)
-        doc_number = txn.get('documentNumber', txn.get('number', ''))
-        amount_val = float(txn.get('amount', txn.get('amountRub', 0)))
-        direction = txn.get('direction', '')
-        if not direction:
-            direction = 'CREDIT' if txn.get('operationCode', '') in ('01', '06', '16') else 'DEBIT'
-        purpose = txn.get('paymentPurpose', txn.get('purpose', txn.get('description', '')))
-        payer_name = txn.get('payerName', txn.get('contragentName', ''))
-        payer_inn = txn.get('payerInn', txn.get('contragentInn', ''))
-        payer_account = txn.get('payerAccount', '')
-        payer_bank = txn.get('payerBankName', '')
-        payer_bik = txn.get('payerBankBic', '')
-        payee_name = txn.get('payeeName', txn.get('recipientName', ''))
-        payee_inn = txn.get('payeeInn', '')
-        payee_account = txn.get('payeeAccount', '')
-        payee_bank = txn.get('payeeBankName', '')
-        payee_bik = txn.get('payeeBankBic', '')
-        if sber_uuid:
-            cur.execute("SELECT id FROM bank_transactions WHERE sber_uuid='%s'" % esc(sber_uuid))
-            if cur.fetchone():
-                continue
+
+    for txn in txns:
+        doc_number = txn.get('document_number', '')
+        doc_date = parse_1c_date(txn.get('document_date', '')) or stmt_date
+        amount_val = safe_float(txn.get('amount', '0'))
+        direction = determine_direction(txn, account)
+        purpose = txn.get('purpose', '')
+        payer_name = txn.get('payer_name', '')
+        payer_inn = txn.get('payer_inn', '')
+        payer_account = txn.get('payer_account', '')
+        payer_bank = txn.get('payer_bank', '')
+        payer_bik = txn.get('payer_bik', '')
+        payee_name = txn.get('payee_name', '')
+        payee_inn = txn.get('payee_inn', '')
+        payee_account = txn.get('payee_account', '')
+        payee_bank = txn.get('payee_bank', '')
+        payee_bik = txn.get('payee_bik', '')
+
+        sber_uuid = 'doc_%s_%s_%s' % (doc_number, doc_date, amount_val)
+        cur.execute("SELECT id FROM bank_transactions WHERE sber_uuid='%s' AND statement_id=%s" % (esc(sber_uuid), stmt_id))
+        if cur.fetchone():
+            continue
+
         contract_no = extract_contract_no(purpose)
         m_contract, m_entity, m_entity_id = match_contract(cur, contract_no)
         m_status = 'matched' if m_entity_id else ('no_contract' if not contract_no else 'not_found')
-        cur.execute("INSERT INTO bank_transactions (statement_id, sber_uuid, operation_date, document_date, document_number, amount, direction, payment_purpose, payer_name, payer_inn, payer_account, payer_bank_name, payer_bik, payee_name, payee_inn, payee_account, payee_bank_name, payee_bik, matched_contract_no, matched_entity, matched_entity_id, match_status) VALUES (%s, '%s', '%s', '%s', '%s', %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, '%s') RETURNING id" % (stmt_id, esc(sber_uuid), esc(op_date), esc(doc_date), esc(doc_number), amount_val, esc(direction), esc(purpose), esc(payer_name), esc(payer_inn), esc(payer_account), esc(payer_bank), esc(payer_bik), esc(payee_name), esc(payee_inn), esc(payee_account), esc(payee_bank), esc(payee_bik), ("'%s'" % esc(m_contract)) if m_contract else 'NULL', ("'%s'" % esc(m_entity)) if m_entity else 'NULL', m_entity_id if m_entity_id else 'NULL', m_status))
+
+        op_date = doc_date + 'T00:00:00' if doc_date and 'T' not in doc_date else doc_date
+
+        cur.execute("INSERT INTO bank_transactions (statement_id, sber_uuid, operation_date, document_date, document_number, amount, direction, payment_purpose, payer_name, payer_inn, payer_account, payer_bank_name, payer_bik, payee_name, payee_inn, payee_account, payee_bank_name, payee_bik, matched_contract_no, matched_entity, matched_entity_id, match_status) VALUES (%s, '%s', '%s', '%s', '%s', %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, '%s') RETURNING id" % (
+            stmt_id, esc(sber_uuid), esc(op_date), esc(doc_date), esc(doc_number),
+            amount_val, esc(direction), esc(purpose),
+            esc(payer_name), esc(payer_inn), esc(payer_account), esc(payer_bank), esc(payer_bik),
+            esc(payee_name), esc(payee_inn), esc(payee_account), esc(payee_bank), esc(payee_bik),
+            ("'%s'" % esc(m_contract)) if m_contract else 'NULL',
+            ("'%s'" % esc(m_entity)) if m_entity else 'NULL',
+            m_entity_id if m_entity_id else 'NULL',
+            m_status))
         txn_id = cur.fetchone()[0]
-        if m_status == 'matched' and direction.upper() == 'CREDIT' and amount_val > 0:
-            pay_date = doc_date if doc_date else date_str
-            desc = 'Auto from statement %s' % date_str
+
+        if m_status == 'matched' and direction == 'CREDIT' and amount_val > 0:
+            pay_date = doc_date or stmt_date
+            desc = 'Авто из выписки %s' % stmt_date
             if m_entity == 'loan':
                 pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
                 if pay_id:
@@ -562,782 +733,182 @@ def load_statement(cur, conn, c, target_date):
         else:
             if m_status != 'matched':
                 unmatched += 1
+
     cur.execute("UPDATE bank_statements SET matched_count=%s, unmatched_count=%s WHERE id=%s" % (matched, unmatched, stmt_id))
-    cur.execute("UPDATE bank_connections SET last_sync_at=NOW(), last_sync_status='ok', last_sync_error='', updated_at=NOW() WHERE id=%s" % cid)
+    cur.execute("UPDATE bank_connections SET last_sync_at=NOW(), last_sync_status='ok', last_sync_error='', updated_at=NOW() WHERE id=%s" % connection_id)
     conn.commit()
-    return {'total': len(all_txns), 'matched': matched, 'unmatched': unmatched}
+    return {'total': len(txns), 'matched': matched, 'unmatched': unmatched, 'statement_date': stmt_date}
 
 
-def handle_test(params):
-    results = {}
-    results['secrets'] = {}
-    for key in ['SBER_CLIENT_ID_ORG2', 'SBER_CLIENT_SECRET_ORG2', 'SBER_CLIENT_ID_ORG3', 'SBER_CLIENT_SECRET_ORG3', 'SBER_CERT_KEY']:
-        val = os.environ.get(key, '')
-        results['secrets'][key] = {'present': bool(val), 'length': len(val)}
-
-    try:
-        s3 = get_s3_client()
-        s3.put_object(Bucket='files', Key='_test_ping.txt', Body=b'hello_sber_test', ContentType='text/plain')
-        obj = s3.get_object(Bucket='files', Key='_test_ping.txt')
-        content = obj['Body'].read().decode('utf-8')
-        results['s3_roundtrip'] = content
-        for oid in [2, 3]:
-            sk = CERT_S3_KEYS.get(oid)
-            try:
-                o2 = s3.get_object(Bucket='files', Key=sk)
-                results['cert_org%s_size' % oid] = len(o2['Body'].read())
-            except Exception as e2:
-                results['cert_org%s_error' % oid] = str(e2)
-        try:
-            ca_obj = s3.get_object(Bucket='files', Key=CA_CHAIN_S3_KEY)
-            ca_raw = ca_obj['Body'].read()
-            results['ca_chain_raw_size'] = len(ca_raw)
-            results['ca_chain_is_zip'] = ca_raw[:2] == b'PK'
-            ca_pem, ca_err = extract_pem_from_data(ca_raw)
-            if ca_err:
-                results['ca_chain_error'] = ca_err
-            else:
-                results['ca_chain_pem_size'] = len(ca_pem)
-                preview = ca_pem[:200].decode('utf-8', errors='replace') if isinstance(ca_pem, bytes) else ca_pem[:200]
-                results['ca_chain_preview'] = preview
-        except Exception as e3:
-            results['ca_chain_error'] = 'Not uploaded yet'
-    except Exception as e:
-        results['s3_error'] = str(e)
-
-    org_id = int(params.get('org_id', '2'))
-
-    results['cert_valid'] = False
-    results['cert_error'] = None
-
-    try:
-        cert_path, key_path = download_cert_from_s3(org_id)
-        if cert_path and key_path:
-            ctx = ssl.create_default_context()
-            ctx.load_cert_chain(cert_path, key_path)
-            results['cert_valid'] = True
-            results['s3_cert'] = CERT_S3_KEYS.get(org_id, 'not_configured')
-        else:
-            results['cert_error'] = 'Cert/key not found in S3 for org%s' % org_id
-    except Exception as e:
-        results['cert_error'] = str(e)
-
-    cid, csecret = get_sber_credentials(org_id)
-    env_suffix = SBER_SECRET_MAP.get(int(org_id), str(org_id))
-    results['api_test'] = {
-        'org_id': org_id,
-        'client_id_present': bool(cid),
-        'client_secret_present': bool(csecret),
-        'client_id_value': cid,
-        'env_suffix_used': env_suffix,
-        'raw_org2': os.environ.get('SBER_CLIENT_ID_ORG2', '')[:10],
-        'raw_org3': os.environ.get('SBER_CLIENT_ID_ORG3', '')[:10],
-    }
-
-    if cid and csecret and results.get('cert_valid'):
-        results['api_test']['url_tests'] = []
-        cert_path, key_path, ca_path = get_ssl_context(org_id)
-        cert_pair = (cert_path, key_path) if cert_path else None
-        verify_param = ca_path if ca_path else False
-        results['api_test']['ca_chain'] = 'loaded' if ca_path else 'not_found'
-        for turl in SBER_TOKEN_URLS:
-            url_result = {'url': turl}
-            try:
-                resp = requests.post(turl, data={
-                    'grant_type': 'client_credentials',
-                    'client_id': cid,
-                    'client_secret': csecret,
-                    'scope': 'openid',
-                }, cert=cert_pair, verify=verify_param, timeout=8)
-                url_result['status_code'] = resp.status_code
-                url_result['response'] = resp.text[:300]
-            except Exception as e:
-                url_result['error'] = str(e)[:200]
-            results['api_test']['url_tests'].append(url_result)
-    else:
-        results['api_test']['skipped'] = True
-        results['api_test']['reason'] = 'Missing credentials or invalid cert'
-
-    return results
-
-
-def handle_upload_cert(body):
-    import base64
-    org_id = int(body.get('org_id', 0))
-    cert_data_b64 = body.get('cert_data', '')
-    cert_url = body.get('cert_url', '')
-    password = body.get('password', '')
-    if not org_id or (not cert_data_b64 and not cert_url):
-        return {'error': 'org_id and cert_data (base64) or cert_url required'}
-    s3_key = CERT_S3_KEYS.get(org_id)
-    if not s3_key:
-        return {'error': 'Unknown org_id: %s' % org_id}
-    if cert_url:
-        resp = requests.get(cert_url, timeout=30)
-        if resp.status_code != 200:
-            return {'error': 'Failed to download cert from URL: HTTP %s' % resp.status_code}
-        raw_data = resp.content
-    else:
-        raw_data = base64.b64decode(cert_data_b64)
-    converted, conv_info = auto_convert_cert(raw_data, password or None)
-    if converted is None:
-        return {'error': 'Не удалось обработать сертификат: %s. Для .p12 файлов укажите пароль.' % (conv_info or 'unknown')}
-    if isinstance(converted, str):
-        converted = converted.encode('utf-8')
-    s3 = get_s3_client()
-    s3.put_object(Bucket='files', Key=s3_key, Body=converted, ContentType='application/x-pem-file')
-    _cert_cache.clear()
-    result = {'uploaded': s3_key, 'size': len(converted)}
-    if conv_info:
-        result['format'] = conv_info
-    return result
-
-
-def handle_upload_ca_chain(body):
-    """Upload CA chain (trusted certificates from Sber) to S3."""
-    import base64
-    cert_data_b64 = body.get('cert_data', '')
-    cert_url = body.get('cert_url', '')
-    if not cert_data_b64 and not cert_url:
-        return {'error': 'cert_data (base64) or cert_url required'}
-    if cert_url:
-        resp = requests.get(cert_url, timeout=30, verify=False)
-        if resp.status_code != 200:
-            return {'error': 'Failed to download CA chain: HTTP %s' % resp.status_code}
-        raw_data = resp.content
-    else:
-        raw_data = base64.b64decode(cert_data_b64)
-    cert_data, err = extract_pem_from_data(raw_data)
-    if err:
-        return {'error': err}
-    s3 = get_s3_client()
-    s3.put_object(Bucket='files', Key=CA_CHAIN_S3_KEY, Body=cert_data, ContentType='application/x-pem-file')
-    _cert_cache.clear()
-    return {'uploaded': CA_CHAIN_S3_KEY, 'size': len(cert_data), 'format': 'extracted_from_zip' if raw_data[:2] == b'PK' else 'pem'}
-
-
-# ─── New action handlers ─────────────────────────────────────────────────────
+# ─── Handlers ──────────────────────────────────────────────────────────────
 
 def handle_connections():
-    """List bank_connections with org_name from organizations table."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        SELECT bc.id, bc.org_id, COALESCE(o.name, ''), bc.account_number, bc.is_active,
-               bc.last_sync_at, COALESCE(bc.last_sync_status, 'never'), COALESCE(bc.last_sync_error, ''),
-               bc.token_expires_at, bc.created_at,
-               CASE WHEN bc.access_token IS NOT NULL AND bc.access_token != '' THEN true ELSE false END as has_token,
-               CASE WHEN bc.auth_code IS NOT NULL AND bc.auth_code != '' THEN true ELSE false END as has_code,
-               bc.auth_code_at
+        SELECT bc.id, bc.org_id, o.short_name, bc.account_number,
+               bc.is_active, bc.last_sync_at, bc.last_sync_status, bc.last_sync_error,
+               bc.created_at
         FROM bank_connections bc
         LEFT JOIN organizations o ON o.id = bc.org_id
         ORDER BY bc.id
     """)
     rows = cur.fetchall()
     conn.close()
-    result = []
-    for r in rows:
-        result.append({
-            'id': r[0],
-            'org_id': r[1],
-            'org_name': r[2],
-            'account_number': r[3],
-            'is_active': r[4],
-            'last_sync_at': r[5],
-            'last_sync_status': r[6],
-            'last_sync_error': r[7],
-            'token_expires_at': r[8],
-            'created_at': r[9],
-            'has_token': r[10],
-            'has_code': r[11],
-            'auth_code_at': r[12],
-        })
-    return result
+    return [{
+        'id': r[0], 'org_id': r[1], 'org_name': r[2] or '', 'account_number': r[3],
+        'is_active': r[4], 'last_sync_at': r[5], 'last_sync_status': r[6] or 'never',
+        'last_sync_error': r[7] or '', 'created_at': r[8],
+        'has_token': True, 'token_expires_at': None,
+    } for r in rows]
 
 
 def handle_save_connection(body):
-    """Create a new bank_connection."""
-    org_id = int(body.get('org_id', 0))
-    account_number = body.get('account_number', '').strip()
-    if not org_id or not account_number:
-        return {'error': 'org_id and account_number required'}
+    org_id = body.get('org_id')
+    account = body.get('account_number', '').strip()
+    if not org_id or not account:
+        return {'error': 'org_id и account_number обязательны'}
     conn = get_conn()
     cur = conn.cursor()
-    # Check for existing
-    cur.execute("SELECT id FROM bank_connections WHERE org_id=%s AND account_number='%s'" % (org_id, esc(account_number)))
-    existing = cur.fetchone()
-    if existing:
-        conn.close()
-        return {'error': 'Connection already exists', 'id': existing[0]}
-    scope = ORG_SCOPES.get(org_id, 'openid')
-    cur.execute("""
-        INSERT INTO bank_connections (org_id, bank_name, account_number, scope, is_active, created_at, updated_at)
-        VALUES (%s, 'sber', '%s', '%s', true, NOW(), NOW()) RETURNING id
-    """ % (org_id, esc(account_number), esc(scope)))
-    new_id = cur.fetchone()[0]
-    conn.commit()
-    conn.close()
-    return {'success': True, 'id': new_id}
-
-
-def handle_toggle_connection(body):
-    """Enable/disable a connection."""
-    connection_id = int(body.get('connection_id', 0))
-    is_active = body.get('is_active', True)
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE bank_connections SET is_active=%s, updated_at=NOW() WHERE id=%s" % (
-        'true' if is_active else 'false', connection_id))
+    cur.execute("INSERT INTO bank_connections (org_id, account_number, is_active) VALUES (%s, '%s', true)" % (int(org_id), esc(account)))
     conn.commit()
     conn.close()
     return {'success': True}
 
 
-def handle_auth_url(params):
-    """Generate OAuth authorize URL for a connection."""
-    connection_id = int(params.get('connection_id', 0))
-    if not connection_id:
-        return {'error': 'connection_id required'}
+def handle_toggle_connection(body):
+    cid = body.get('connection_id')
+    is_active = body.get('is_active', False)
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT org_id, client_id, scope FROM bank_connections WHERE id=%s" % connection_id)
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return {'error': 'Connection not found'}
-    org_id = row[0]
-    client_id = row[1] or ''
-    scope = row[2] or ORG_SCOPES.get(org_id, 'openid')
-    if not client_id:
-        client_id = os.environ.get('SBER_CLIENT_ID_ORG%s' % org_id, '')
-    if not client_id:
-        conn.close()
-        return {'error': 'client_id not configured for connection %s' % connection_id}
-    state = '%s_%s' % (connection_id, uuid.uuid4().hex[:16])
-    nonce = uuid.uuid4().hex
-    auth_params = {
-        'response_type': 'code',
-        'client_id': client_id,
-        'redirect_uri': REDIRECT_URI,
-        'scope': scope,
-        'state': state,
-        'nonce': nonce,
-        'prompt': 'login',
-    }
-    auth_url = SBER_OAUTH_AUTHORIZE_URL + '?' + urlencode(auth_params)
-    conn.close()
-    return {'auth_url': auth_url, 'state': state}
-
-
-def handle_callback(params):
-    """OAuth callback - Sber redirects here after user authorizes.
-    Returns HTML page that shows the code and attempts to auto-exchange it."""
-    code = params.get('code', '')
-    state = params.get('state', '')
-    error = params.get('error', '')
-    error_description = params.get('error_description', '')
-
-    if error:
-        html = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Sber OAuth Error</title>
-<style>body{font-family:sans-serif;max-width:600px;margin:60px auto;text-align:center;}
-.error{color:#dc2626;font-size:18px;margin:20px 0;} .desc{color:#666;}</style></head>
-<body><h2>Authorization Error</h2>
-<div class="error">%s</div><div class="desc">%s</div>
-<p>You can close this window.</p>
-<script>
-if(window.opener){window.opener.postMessage({type:'sber_auth_error',error:'%s',description:'%s'},'*');}
-</script></body></html>""" % (esc(error), esc(error_description), esc(error), esc(error_description))
-        return cors_html(html)
-
-    exchange_result = None
-    if code and state:
-        try:
-            connection_id = int(state.split('_')[0])
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("UPDATE bank_connections SET auth_code='%s', auth_code_at=NOW(), updated_at=NOW() WHERE id=%s" % (esc(code), connection_id))
-            conn.commit()
-            org_id, cid, csecret = get_connection_credentials(cur, connection_id)
-            if org_id and cid and csecret:
-                cert_path, key_path, ca_path = get_ssl_context(org_id)
-                cert_pair = (cert_path, key_path) if cert_path else None
-                token_form = {
-                    'grant_type': 'authorization_code',
-                    'code': code,
-                    'client_id': cid,
-                    'client_secret': csecret,
-                    'redirect_uri': REDIRECT_URI,
-                }
-                resp, sber_err = sber_post(SBER_TOKEN_URL, token_form, cert_pair, ca_path, timeout=25, retries=2)
-                if resp and resp.status_code == 200:
-                    token_data = resp.json()
-                    access_token = token_data.get('access_token', '')
-                    refresh_token_val = token_data.get('refresh_token', '')
-                    expires_in = int(token_data.get('expires_in', 3600))
-                    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-                    cur.execute(
-                        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
-                        % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
-                    )
-                    conn.commit()
-                    exchange_result = 'success'
-                elif sber_err:
-                    exchange_result = 'timeout'
-                elif resp:
-                    err_d = resp.text[:200].strip()
-                    exchange_result = 'error: HTTP %s %s' % (resp.status_code, err_d)
-                else:
-                    exchange_result = 'timeout'
-            else:
-                exchange_result = 'error: credentials not found'
-            conn.close()
-        except Exception as e:
-            exchange_result = 'error: %s' % str(e)
-
-    success_class = 'success' if exchange_result == 'success' else 'pending'
-    if exchange_result == 'success':
-        status_msg = 'Токены получены! Окно закроется автоматически.'
-    elif exchange_result == 'timeout':
-        status_msg = 'Код сохранён. Сервер Сбера не отвечает — нажмите «Обменять код» в панели управления.'
-    elif exchange_result and exchange_result.startswith('error:'):
-        status_msg = 'Код сохранён, но автообмен не удался. Нажмите «Обменять код» в панели.'
-    else:
-        status_msg = 'Код сохранён. Нажмите «Обменять код» в панели управления.'
-
-    html = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Sber OAuth Callback</title>
-<style>
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:500px;margin:60px auto;text-align:center;padding:0 20px;}
-.success{color:#16a34a;font-size:18px;font-weight:600;} .pending{color:#ca8a04;font-size:18px;font-weight:600;}
-.code-box{background:#f3f4f6;border:2px solid #d1d5db;border-radius:8px;padding:16px;margin:20px 0;font-family:monospace;font-size:14px;word-break:break-all;user-select:all;}
-button{background:#2563eb;color:white;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;margin:8px;}
-button:hover{background:#1d4ed8;}
-.info{color:#6b7280;font-size:13px;margin-top:16px;}
-</style></head>
-<body>
-<h2>Sber Authorization</h2>
-<div class="%s">%s</div>
-%s
-<div class="info">State: %s</div>
-<script>
-var code = '%s';
-var state = '%s';
-var exchangeResult = '%s';
-if(window.opener){
-  window.opener.postMessage({type:'sber_auth_callback',code:code,state:state,exchange_result:exchangeResult},'*');
-}
-function copyCode(){
-  navigator.clipboard.writeText(code).then(function(){alert('Code copied!')});
-}
-%s
-</script>
-</body></html>""" % (
-        success_class,
-        status_msg,
-        ('<div class="code-box">%s</div><button onclick="copyCode()">Copy Code</button>' % esc(code)) if code and exchange_result != 'success' else '',
-        esc(state),
-        esc(code),
-        esc(state),
-        esc(exchange_result or ''),
-        'setTimeout(function(){window.close();},3000);' if exchange_result == 'success' else '',
-    )
-    return cors_html(html)
-
-
-def handle_auth_callback(body):
-    """Exchange authorization code for tokens (manual flow from frontend)."""
-    connection_id = int(body.get('connection_id', 0))
-    code = body.get('code', '')
-    if not connection_id or not code:
-        return {'error': 'connection_id and code required'}
-    conn = get_conn()
-    cur = conn.cursor()
-    org_id, cid, csecret = get_connection_credentials(cur, connection_id)
-    if not org_id:
-        conn.close()
-        return {'error': 'Connection not found'}
-    if not cid or not csecret:
-        conn.close()
-        return {'error': 'client_id/client_secret not configured for org %s' % org_id}
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    cert_pair = (cert_path, key_path) if cert_path else None
-    token_data_form = {
-        'grant_type': 'authorization_code',
-        'code': code,
-        'client_id': cid,
-        'client_secret': csecret,
-        'redirect_uri': REDIRECT_URI,
-    }
-    resp, sber_err = sber_post(SBER_TOKEN_URL, token_data_form, cert_pair, ca_path, timeout=25, retries=2)
-    if sber_err:
-        conn.close()
-        return {'error': 'Token exchange failed: %s' % sber_err}
-    if resp.status_code != 200:
-        err_detail = resp.text[:300].strip()
-        conn.close()
-        if 'certificateNotFound' in err_detail:
-            return {'error': 'Сертификат не привязан к client_id в личном кабинете Сбера'}
-        return {'error': 'Token exchange failed: HTTP %s — %s' % (resp.status_code, err_detail)}
-    token_data = resp.json()
-    access_token = token_data.get('access_token', '')
-    refresh_token = token_data.get('refresh_token', '')
-    expires_in = int(token_data.get('expires_in', 3600))
-    expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-    cur.execute(
-        "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', updated_at=NOW() WHERE id=%s"
-        % (esc(access_token), esc(refresh_token), expires_at.isoformat(), connection_id)
-    )
+    cur.execute("UPDATE bank_connections SET is_active=%s, updated_at=NOW() WHERE id=%s" % ('true' if is_active else 'false', int(cid)))
     conn.commit()
     conn.close()
-    return {'success': True, 'expires_at': expires_at.isoformat()}
+    return {'success': True}
 
 
-def handle_change_secret(body):
-    """Change client_secret via Sber API. Required before first use."""
-    connection_id = int(body.get('connection_id', 0))
-    new_secret = body.get('new_secret', '')
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    if not new_secret or len(new_secret) < 8:
-        return {'error': 'new_secret required (min 8 chars)'}
+def handle_fetch_from_email(body):
+    """Загрузить выписки из почтового ящика."""
+    target_date = body.get('date')
+    if not target_date:
+        target_date = (date.today() - timedelta(days=1)).isoformat()
+
+    emails, err = fetch_emails_from_imap(target_date)
+    if err:
+        send_error_notification(
+            'Ошибка получения банковских выписок',
+            'Не удалось подключиться к почте %s:\n%s\n\nДата: %s' % (IMAP_USER, err, target_date)
+        )
+        return {'error': err}
+
+    if not emails:
+        return {'message': 'Писем с выписками не найдено', 'emails_found': 0, 'results': []}
+
     conn = get_conn()
     cur = conn.cursor()
-    org_id, cid, csecret = get_connection_credentials(cur, connection_id)
-    if not org_id or not cid or not csecret:
-        conn.close()
-        return {'error': 'credentials not configured'}
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    cert_pair = (cert_path, key_path) if cert_path else None
-    verify_param = ca_path if ca_path else False
-    change_url = "https://fintech.sberbank.ru:9443/ic/sso/api/v1/change-client-secret"
-    change_payload = json.dumps({
-        'client_id': cid,
-        'client_secret': csecret,
-        'new_client_secret': new_secret,
-    })
-    try:
-        resp, sber_err = sber_post_json(change_url, change_payload, cert_pair, ca_path, timeout=20, retries=3)
-        if sber_err:
-            conn.close()
-            return {'error': 'Сервер Сбера не отвечает (3 попытки): %s' % sber_err[:150]}
-        if resp.status_code == 200:
-            cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
-            conn.commit()
-            conn.close()
-            return {'success': True, 'new_secret': new_secret, 'response': resp.text[:300]}
-        conn.close()
-        return {'error': 'HTTP %s — %s' % (resp.status_code, resp.text[:300])}
-    except Exception as e:
-        conn.close()
-        return {'error': str(e)[:300]}
 
+    cur.execute("SELECT id, account_number, org_id FROM bank_connections WHERE is_active=true")
+    connections = cur.fetchall()
+    conn_map = {}
+    for c in connections:
+        conn_map[c[1]] = {'id': c[0], 'org_id': c[2]}
 
-def handle_save_secret(body):
-    """Сохранить client_secret в БД без вызова API Сбера (если secret уже сменён в ЛК)."""
-    connection_id = int(body.get('connection_id', 0))
-    new_secret = body.get('new_secret', '')
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    if not new_secret or len(new_secret) < 8:
-        return {'error': 'new_secret required (min 8 chars)'}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM bank_connections WHERE id=%s" % int(connection_id))
-    if not cur.fetchone():
-        conn.close()
-        return {'error': 'connection not found'}
-    cur.execute("UPDATE bank_connections SET client_secret_ref='%s', updated_at=NOW() WHERE id=%s" % (esc(new_secret), connection_id))
-    conn.commit()
+    all_results = []
+    errors = []
+
+    for eml in emails:
+        for att in eml['attachments']:
+            try:
+                sections = robust_parse_1c(att['content'])
+                if not sections:
+                    errors.append('Файл %s: не удалось распарсить формат 1С' % att['filename'])
+                    continue
+
+                for section in sections:
+                    account = section.get('account', '')
+                    conn_info = conn_map.get(account)
+                    if not conn_info:
+                        cur.execute("SELECT id FROM bank_connections WHERE account_number='%s'" % esc(account))
+                        row = cur.fetchone()
+                        if row:
+                            conn_info = {'id': row[0]}
+                        else:
+                            errors.append('Счёт %s не найден в подключениях' % account)
+                            continue
+
+                    result = load_statement_from_1c(cur, conn, section, conn_info['id'])
+                    result['account'] = account
+                    result['filename'] = att['filename']
+                    all_results.append(result)
+            except Exception as e:
+                errors.append('Файл %s: %s' % (att['filename'], str(e)))
+
     conn.close()
-    return {'success': True, 'new_secret': new_secret, 'message': 'Secret сохранён в БД (без вызова API Сбера)'}
 
-
-def handle_clear_tokens(body):
-    """Сбросить невалидные токены у подключения."""
-    connection_id = int(body.get('connection_id', 0))
-    if not connection_id:
-        conn2 = get_conn()
-        cur2 = conn2.cursor()
-        cur2.execute("UPDATE bank_connections SET access_token='', refresh_token='', token_expires_at=NULL, last_sync_status='never', last_sync_error='', updated_at=NOW()")
-        cnt = cur2.rowcount
-        conn2.commit()
-        conn2.close()
-        return {'success': True, 'cleared': cnt}
-    conn2 = get_conn()
-    cur2 = conn2.cursor()
-    cur2.execute("UPDATE bank_connections SET access_token='', refresh_token='', token_expires_at=NULL, last_sync_status='never', last_sync_error='', updated_at=NOW() WHERE id=%s" % int(connection_id))
-    conn2.commit()
-    conn2.close()
-    return {'success': True, 'cleared': 1}
-
-
-def handle_save_tokens(body):
-    """Сохранить access_token и refresh_token вручную (из ЛК Сбера)."""
-    connection_id = int(body.get('connection_id', 0))
-    access_token = (body.get('access_token') or '').strip()
-    refresh_token = (body.get('refresh_token') or '').strip()
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    if not access_token:
-        return {'error': 'access_token required'}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM bank_connections WHERE id=%s" % int(connection_id))
-    if not cur.fetchone():
-        conn.close()
-        return {'error': 'connection not found'}
-    expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
-    parts = ["access_token='%s'" % esc(access_token), "token_expires_at='%s'" % expires_at, "updated_at=NOW()"]
-    if refresh_token:
-        parts.append("refresh_token='%s'" % esc(refresh_token))
-    cur.execute("UPDATE bank_connections SET %s WHERE id=%s" % (', '.join(parts), connection_id))
-    conn.commit()
-    conn.close()
-    return {'success': True, 'message': 'Токены сохранены', 'expires_at': expires_at}
-
-
-def handle_exchange_code(body):
-    """Exchange saved auth_code from DB for tokens. Tries both client_secret_post and client_secret_basic."""
-    import base64 as b64mod
-    connection_id = int(body.get('connection_id', 0))
-    code_override = body.get('code', '')
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT org_id, auth_code, auth_code_at FROM bank_connections WHERE id=%s" % connection_id)
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return {'error': 'Connection not found'}
-    org_id = row[0]
-    code = code_override or row[1]
-    code_at = row[2]
-    if not code:
-        conn.close()
-        return {'error': 'Нет сохранённого кода. Сначала пройдите авторизацию в Сбере.'}
-    if code_at and (datetime.utcnow() - code_at).total_seconds() > 600:
-        conn.close()
-        return {'error': 'Код авторизации истёк (старше 10 минут). Пройдите авторизацию заново.'}
-    org_id_conn, cid, csecret = get_connection_credentials(cur, connection_id)
-    if not cid or not csecret:
-        conn.close()
-        return {'error': 'client_id/client_secret not configured'}
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    cert_pair = (cert_path, key_path) if cert_path else None
-    verify_param = ca_path if ca_path else False
-    scope = ORG_SCOPES.get(int(org_id), 'openid')
-    attempts_log = []
-    methods = [
-        {
-            'name': 'post_with_scope',
-            'data': {
-                'grant_type': 'authorization_code',
-                'code': code,
-                'client_id': cid,
-                'client_secret': csecret,
-                'redirect_uri': REDIRECT_URI,
-                'scope': scope,
-            },
-            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
-        },
-        {
-            'name': 'post_no_redirect',
-            'data': {
-                'grant_type': 'authorization_code',
-                'code': code,
-                'client_id': cid,
-                'client_secret': csecret,
-            },
-            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
-        },
-        {
-            'name': 'mtls_only',
-            'data': {
-                'grant_type': 'authorization_code',
-                'code': code,
-                'client_id': cid,
-                'redirect_uri': REDIRECT_URI,
-            },
-            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
-        },
-        {
-            'name': 'client_secret_post',
-            'data': {
-                'grant_type': 'authorization_code',
-                'code': code,
-                'client_id': cid,
-                'client_secret': csecret,
-                'redirect_uri': REDIRECT_URI,
-            },
-            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
-        },
-        {
-            'name': 'client_secret_basic',
-            'data': {
-                'grant_type': 'authorization_code',
-                'code': code,
-                'redirect_uri': REDIRECT_URI,
-            },
-            'headers': {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': 'Basic ' + b64mod.b64encode(('%s:%s' % (cid, csecret)).encode()).decode(),
-            },
-        },
-    ]
-    for method in methods:
-        try:
-            resp = requests.post(
-                SBER_TOKEN_URL,
-                data=method['data'],
-                headers=method['headers'],
-                cert=cert_pair,
-                verify=verify_param,
-                timeout=10,
+    if errors:
+        send_error_notification(
+            'Ошибки при загрузке банковских выписок',
+            'Дата: %s\n\nОшибки:\n%s\n\nУспешно загружено: %d' % (
+                target_date, '\n'.join(errors), len([r for r in all_results if not r.get('error')])
             )
-            log_entry = {
-                'method': method['name'],
-                'status': resp.status_code,
-                'response': resp.text[:300],
-                'client_id': cid,
-                'client_id_len': len(cid),
-                'secret_len': len(csecret),
-                'secret_prefix': csecret[:3] + '...' if len(csecret) > 3 else csecret,
-                'secret_suffix': '...' + csecret[-3:] if len(csecret) > 3 else '',
-                'code_len': len(code),
-                'redirect_uri': REDIRECT_URI,
-                'org_id': org_id,
-                'env_key': 'SBER_CLIENT_SECRET_ORG%s' % SBER_SECRET_MAP.get(int(org_id), str(org_id)),
-            }
-            attempts_log.append(log_entry)
-            if resp.status_code == 200:
-                token_data = resp.json()
-                access_token = token_data.get('access_token', '')
-                refresh_token_val = token_data.get('refresh_token', '')
-                expires_in = int(token_data.get('expires_in', 3600))
-                expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-                cur.execute(
-                    "UPDATE bank_connections SET access_token='%s', refresh_token='%s', token_expires_at='%s', auth_code=NULL, updated_at=NOW() WHERE id=%s"
-                    % (esc(access_token), esc(refresh_token_val), expires_at.isoformat(), connection_id)
-                )
-                conn.commit()
-                conn.close()
-                return {'success': True, 'expires_at': expires_at.isoformat(), 'method': method['name']}
-        except Exception as e:
-            attempts_log.append({'method': method['name'], 'error': str(e)[:200]})
-    conn.close()
-    last = attempts_log[-1] if attempts_log else {}
-    if any('timeout' in str(a.get('error', '')).lower() or 'timed out' in str(a.get('error', '')).lower() for a in attempts_log):
-        return {'error': 'Сервер Сбера не отвечает. Попробуйте ещё раз.', 'debug': attempts_log}
-    return {'error': 'HTTP %s — %s' % (last.get('status', '?'), last.get('response', 'no response')[:200]), 'debug': attempts_log}
+        )
 
-
-def handle_fetch(body):
-    """Load statement for a single connection."""
-    connection_id = int(body.get('connection_id', 0))
-    target_date = body.get('date', (date.today() - timedelta(days=1)).isoformat())
-    if not connection_id:
-        return {'error': 'connection_id required'}
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, org_id, account_number, access_token, refresh_token, token_expires_at
-        FROM bank_connections WHERE id=%s
-    """ % connection_id)
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return {'error': 'Connection not found'}
-    c = {
-        'id': row[0], 'org_id': row[1], 'account_number': row[2],
-        'access_token': row[3], 'refresh_token': row[4], 'token_expires_at': row[5],
+    return {
+        'emails_found': len(emails),
+        'results': all_results,
+        'errors': errors,
     }
-    result = load_statement(cur, conn, c, target_date)
-    conn.close()
-    return result
-
-
-def handle_fetch_all(body):
-    """Load statements for all active connections."""
-    target_date = body.get('date', (date.today() - timedelta(days=1)).isoformat())
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, org_id, account_number, access_token, refresh_token, token_expires_at FROM bank_connections WHERE is_active=true")
-    rows = cur.fetchall()
-    results = []
-    for row in rows:
-        c = {
-            'id': row[0], 'org_id': row[1], 'account_number': row[2],
-            'access_token': row[3], 'refresh_token': row[4], 'token_expires_at': row[5],
-        }
-        result = load_statement(cur, conn, c, target_date)
-        results.append({'connection_id': row[0], 'org_id': row[1], **result})
-    conn.close()
-    return results
 
 
 def handle_statements(params):
-    """List bank_statements with org_name."""
-    connection_id = params.get('connection_id', '')
-    limit = int(params.get('limit', '50'))
-    offset = int(params.get('offset', '0'))
     conn = get_conn()
     cur = conn.cursor()
+    cid = params.get('connection_id')
+    limit = int(params.get('limit', '30'))
+    offset = int(params.get('offset', '0'))
     where = ''
-    if connection_id:
-        where = ' WHERE bs.connection_id=%s' % int(connection_id)
-    # Count
-    cur.execute("SELECT COUNT(*) FROM bank_statements bs %s" % where)
-    total = cur.fetchone()[0]
+    if cid:
+        where = 'WHERE bs.connection_id=%s' % int(cid)
     cur.execute("""
-        SELECT bs.id, bs.connection_id, COALESCE(o.name, ''), bs.statement_date,
-               bs.opening_balance, bs.closing_balance, bs.debit_turnover, bs.credit_turnover,
-               bs.transaction_count, COALESCE(bs.matched_count, 0), COALESCE(bs.unmatched_count, 0),
+        SELECT bs.id, bs.connection_id, o.short_name,
+               bs.statement_date, bs.opening_balance, bs.closing_balance,
+               bs.debit_turnover, bs.credit_turnover,
+               bs.transaction_count, bs.matched_count, bs.unmatched_count,
                bs.status, bs.created_at
         FROM bank_statements bs
-        LEFT JOIN bank_connections bc ON bc.id = bs.connection_id
+        JOIN bank_connections bc ON bc.id = bs.connection_id
         LEFT JOIN organizations o ON o.id = bc.org_id
         %s
         ORDER BY bs.statement_date DESC, bs.id DESC
         LIMIT %s OFFSET %s
     """ % (where, limit, offset))
     rows = cur.fetchall()
+    count_where = where
+    cur.execute("SELECT COUNT(*) FROM bank_statements bs JOIN bank_connections bc ON bc.id = bs.connection_id %s" % count_where)
+    total = cur.fetchone()[0]
     conn.close()
-    items = []
-    for r in rows:
-        items.append({
-            'id': r[0],
-            'connection_id': r[1],
-            'org_name': r[2],
-            'statement_date': r[3],
-            'opening_balance': float(r[4] or 0),
-            'closing_balance': float(r[5] or 0),
-            'debit_turnover': float(r[6] or 0),
-            'credit_turnover': float(r[7] or 0),
-            'transaction_count': r[8] or 0,
-            'matched_count': r[9],
-            'unmatched_count': r[10],
-            'status': r[11],
-            'created_at': r[12],
-        })
+    items = [{
+        'id': r[0], 'connection_id': r[1], 'org_name': r[2] or '',
+        'statement_date': r[3], 'opening_balance': float(r[4] or 0),
+        'closing_balance': float(r[5] or 0), 'debit_turnover': float(r[6] or 0),
+        'credit_turnover': float(r[7] or 0), 'transaction_count': r[8],
+        'matched_count': r[9], 'unmatched_count': r[10], 'status': r[11],
+        'created_at': r[12],
+    } for r in rows]
     return {'items': items, 'total': total}
 
 
 def handle_transactions(params):
-    """List bank_transactions, optionally filtered by statement_id and match_status."""
-    statement_id = params.get('statement_id', '')
-    match_status = params.get('match_status', '')
-    conditions = []
-    if statement_id:
-        conditions.append('bt.statement_id=%s' % int(statement_id))
-    if match_status:
-        conditions.append("bt.match_status='%s'" % esc(match_status))
-    where = (' WHERE ' + ' AND '.join(conditions)) if conditions else ''
     conn = get_conn()
     cur = conn.cursor()
+    stmt_id = params.get('statement_id')
+    match_status = params.get('match_status')
+    where_parts = []
+    if stmt_id:
+        where_parts.append('bt.statement_id=%s' % int(stmt_id))
+    if match_status:
+        where_parts.append("bt.match_status='%s'" % esc(match_status))
+    where = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
     cur.execute("""
         SELECT bt.id, bt.statement_id, bt.sber_uuid, bt.operation_date, bt.document_date,
                bt.document_number, bt.amount, bt.direction, bt.payment_purpose,
@@ -1351,309 +922,51 @@ def handle_transactions(params):
     """ % where)
     rows = cur.fetchall()
     conn.close()
-    result = []
-    for r in rows:
-        result.append({
-            'id': r[0],
-            'statement_id': r[1],
-            'sber_uuid': r[2],
-            'operation_date': r[3],
-            'document_date': r[4],
-            'document_number': r[5],
-            'amount': float(r[6] or 0),
-            'direction': r[7],
-            'payment_purpose': r[8],
-            'payer_name': r[9],
-            'payer_inn': r[10],
-            'payee_name': r[11],
-            'payee_inn': r[12],
-            'matched_contract_no': r[13],
-            'matched_entity': r[14],
-            'matched_entity_id': r[15],
-            'match_status': r[16],
-            'payment_id': r[17],
-            'created_at': r[18],
-        })
+    return [{
+        'id': r[0], 'statement_id': r[1], 'sber_uuid': r[2],
+        'operation_date': r[3], 'document_date': r[4], 'document_number': r[5],
+        'amount': float(r[6] or 0), 'direction': r[7], 'payment_purpose': r[8],
+        'payer_name': r[9], 'payer_inn': r[10], 'payee_name': r[11], 'payee_inn': r[12],
+        'matched_contract_no': r[13], 'matched_entity': r[14], 'matched_entity_id': r[15],
+        'match_status': r[16], 'payment_id': r[17], 'created_at': r[18],
+    } for r in rows]
+
+
+def handle_status():
+    """Статус системы: последняя синхронизация, настройки IMAP."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, account_number, last_sync_at, last_sync_status, last_sync_error
+        FROM bank_connections WHERE is_active=true
+        ORDER BY id
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return {
+        'imap_host': IMAP_HOST,
+        'imap_user': IMAP_USER,
+        'imap_configured': bool(IMAP_PASS),
+        'connections': [{
+            'id': r[0], 'account_number': r[1],
+            'last_sync_at': r[2], 'last_sync_status': r[3], 'last_sync_error': r[4],
+        } for r in rows],
+    }
+
+
+# ─── Крон: автоматическая загрузка (вызов без action) ──────────────────────
+
+def cron_fetch():
+    """Автоматическая загрузка выписок из почты. Вызывается по крону в 08:30 МСК."""
+    target_date = (date.today() - timedelta(days=1)).isoformat()
+    result = handle_fetch_from_email({'date': target_date})
     return result
-
-
-def handle_network_diag(params):
-    """Детальная сетевая диагностика подключения к fintech.sberbank.ru:9443"""
-    import socket
-    import time
-    import ssl as ssl_mod
-
-    org_id = int(params.get('org_id', '2'))
-    host = 'fintech.sberbank.ru'
-    port = 9443
-    log = []
-
-    log.append('=== NETWORK DIAGNOSTICS: %s:%s ===' % (host, port))
-    log.append('Timestamp: %s UTC' % datetime.utcnow().isoformat())
-    log.append('Org ID: %s' % org_id)
-    log.append('')
-
-    # 1. DNS Resolution
-    log.append('--- 1. DNS Resolution ---')
-    try:
-        t0 = time.time()
-        addrs = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        dns_ms = round((time.time() - t0) * 1000, 2)
-        log.append('DNS resolved in %s ms' % dns_ms)
-        for af, socktype, proto, canonname, sa in addrs:
-            fam = 'IPv4' if af == socket.AF_INET else 'IPv6'
-            log.append('  %s: %s' % (fam, sa[0]))
-        resolved_ip = addrs[0][4][0] if addrs else 'UNKNOWN'
-        log.append('Primary IP: %s' % resolved_ip)
-    except Exception as e:
-        log.append('DNS FAILED: %s' % str(e))
-        resolved_ip = 'FAILED'
-    log.append('')
-
-    # 2. TCP Connection test
-    log.append('--- 2. TCP Connection ---')
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        t0 = time.time()
-        sock.connect((host, port))
-        tcp_ms = round((time.time() - t0) * 1000, 2)
-        log.append('TCP connected in %s ms' % tcp_ms)
-        local_addr = sock.getsockname()
-        log.append('Local address: %s:%s' % local_addr)
-        sock.close()
-    except Exception as e:
-        tcp_ms = round((time.time() - t0) * 1000, 2) if 't0' in dir() else -1
-        log.append('TCP FAILED after %s ms: %s' % (tcp_ms, str(e)))
-    log.append('')
-
-    # 3. TLS Handshake WITHOUT client cert (basic)
-    log.append('--- 3. TLS Handshake (no client cert) ---')
-    try:
-        ctx = ssl_mod.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl_mod.CERT_NONE
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        t0 = time.time()
-        ssock = ctx.wrap_socket(sock, server_hostname=host)
-        ssock.connect((host, port))
-        tls_ms = round((time.time() - t0) * 1000, 2)
-        log.append('TLS handshake in %s ms' % tls_ms)
-        log.append('TLS version: %s' % ssock.version())
-        log.append('Cipher: %s' % str(ssock.cipher()))
-        server_cert = ssock.getpeercert(binary_form=True)
-        if server_cert:
-            log.append('Server cert size: %s bytes' % len(server_cert))
-            try:
-                from cryptography import x509
-                cert_obj = x509.load_der_x509_certificate(server_cert)
-                log.append('Server cert subject: %s' % cert_obj.subject.rfc4514_string())
-                log.append('Server cert issuer: %s' % cert_obj.issuer.rfc4514_string())
-                log.append('Server cert valid: %s - %s' % (cert_obj.not_valid_before_utc, cert_obj.not_valid_after_utc))
-                try:
-                    san = cert_obj.extensions.get_extension_for_class(x509.SubjectAlternativeName)
-                    dns_names = san.value.get_values_for_type(x509.DNSName)
-                    log.append('Server cert SANs: %s' % ', '.join(dns_names))
-                except Exception:
-                    pass
-            except Exception as e2:
-                log.append('Cert parse error: %s' % str(e2)[:100])
-        ssock.close()
-    except Exception as e:
-        log.append('TLS (no cert) FAILED: %s' % str(e)[:300])
-    log.append('')
-
-    # 4. TLS Handshake WITH client cert (mTLS)
-    log.append('--- 4. mTLS Handshake (with client cert) ---')
-    cert_path, key_path, ca_path = get_ssl_context(org_id)
-    log.append('Cert path: %s (exists: %s)' % (cert_path, os.path.exists(cert_path) if cert_path else False))
-    log.append('Key path: %s (exists: %s)' % (key_path, os.path.exists(key_path) if key_path else False))
-    log.append('CA path: %s (exists: %s)' % (ca_path, os.path.exists(ca_path) if ca_path else False))
-
-    if cert_path and key_path:
-        try:
-            with open(cert_path, 'r') as f:
-                cert_content = f.read()
-            cert_blocks = cert_content.count('-----BEGIN CERTIFICATE-----')
-            log.append('Client cert file: %s bytes, %s cert block(s)' % (len(cert_content), cert_blocks))
-
-            try:
-                from cryptography import x509 as x509m
-                from cryptography.hazmat.primitives.serialization import load_pem_private_key
-                pem_certs = []
-                lines = cert_content.split('\n')
-                current = []
-                for line in lines:
-                    current.append(line)
-                    if '-----END CERTIFICATE-----' in line:
-                        pem_block = '\n'.join(current)
-                        cert_obj = x509m.load_pem_x509_certificate(pem_block.encode())
-                        log.append('  Client cert: %s (issuer: %s, valid: %s - %s)' % (
-                            cert_obj.subject.rfc4514_string(),
-                            cert_obj.issuer.rfc4514_string(),
-                            cert_obj.not_valid_before_utc,
-                            cert_obj.not_valid_after_utc
-                        ))
-                        current = []
-                    elif '-----BEGIN' in line:
-                        current = [line]
-
-                with open(key_path, 'r') as f:
-                    key_content = f.read()
-                log.append('Private key file: %s bytes' % len(key_content))
-                key_obj = load_pem_private_key(key_content.encode(), password=None)
-                log.append('Key type: %s, size: %s bits' % (key_obj.__class__.__name__, key_obj.key_size))
-            except Exception as e3:
-                log.append('Cert/key parse detail error: %s' % str(e3)[:200])
-        except Exception as e:
-            log.append('Cert file read error: %s' % str(e)[:200])
-
-        try:
-            ctx2 = ssl_mod.create_default_context()
-            if ca_path:
-                ctx2.load_verify_locations(ca_path)
-            else:
-                ctx2.check_hostname = False
-                ctx2.verify_mode = ssl_mod.CERT_NONE
-            ctx2.load_cert_chain(certfile=cert_path, keyfile=key_path)
-            sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock2.settimeout(10)
-            t0 = time.time()
-            ssock2 = ctx2.wrap_socket(sock2, server_hostname=host)
-            ssock2.connect((host, port))
-            mtls_ms = round((time.time() - t0) * 1000, 2)
-            log.append('mTLS handshake in %s ms' % mtls_ms)
-            log.append('TLS version: %s' % ssock2.version())
-            log.append('Cipher: %s' % str(ssock2.cipher()))
-            ssock2.close()
-        except Exception as e:
-            log.append('mTLS FAILED: %s' % str(e)[:500])
-    else:
-        log.append('SKIPPED: cert or key not available')
-    log.append('')
-
-    # 5. HTTP-level test (actual request with short timeout)
-    log.append('--- 5. HTTP Request Test ---')
-    if cert_path and key_path:
-        cert_pair = (cert_path, key_path)
-        verify_param = ca_path if ca_path else False
-        test_url = 'https://%s:%s/ic/sso/api/v2/oauth/token' % (host, port)
-        log.append('URL: %s' % test_url)
-        log.append('Verify: %s' % verify_param)
-        try:
-            t0 = time.time()
-            resp = requests.post(
-                test_url,
-                data={'grant_type': 'client_credentials'},
-                cert=cert_pair,
-                verify=verify_param,
-                timeout=(5, 15),
-            )
-            http_ms = round((time.time() - t0) * 1000, 2)
-            log.append('HTTP response in %s ms' % http_ms)
-            log.append('Status: %s' % resp.status_code)
-            log.append('Headers: %s' % dict(resp.headers))
-            body_preview = resp.text[:500] if resp.text else '(empty)'
-            log.append('Body: %s' % body_preview)
-        except requests.exceptions.ConnectTimeout as e:
-            http_ms = round((time.time() - t0) * 1000, 2)
-            log.append('CONNECT TIMEOUT after %s ms: %s' % (http_ms, str(e)[:300]))
-        except requests.exceptions.ReadTimeout as e:
-            http_ms = round((time.time() - t0) * 1000, 2)
-            log.append('READ TIMEOUT after %s ms: %s' % (http_ms, str(e)[:300]))
-            log.append('>>> Connection established but server did not respond with data')
-        except requests.exceptions.SSLError as e:
-            http_ms = round((time.time() - t0) * 1000, 2)
-            log.append('SSL ERROR after %s ms: %s' % (http_ms, str(e)[:500]))
-        except Exception as e:
-            http_ms = round((time.time() - t0) * 1000, 2)
-            log.append('HTTP ERROR after %s ms: %s: %s' % (http_ms, type(e).__name__, str(e)[:300]))
-    else:
-        log.append('SKIPPED: no certs')
-    log.append('')
-
-    # 6. Compare with sbi.sberbank.ru (which works)
-    log.append('--- 6. Control Test: sbi.sberbank.ru:9443 ---')
-    control_host = 'sbi.sberbank.ru'
-    try:
-        addrs2 = socket.getaddrinfo(control_host, 9443, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        for af, socktype, proto, canonname, sa in addrs2:
-            fam = 'IPv4' if af == socket.AF_INET else 'IPv6'
-            log.append('  DNS %s: %s' % (fam, sa[0]))
-        sock3 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock3.settimeout(10)
-        t0 = time.time()
-        sock3.connect((control_host, 9443))
-        ctl_tcp_ms = round((time.time() - t0) * 1000, 2)
-        log.append('TCP connected in %s ms' % ctl_tcp_ms)
-
-        ctx3 = ssl_mod.create_default_context()
-        ctx3.check_hostname = False
-        ctx3.verify_mode = ssl_mod.CERT_NONE
-        sock3b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock3b.settimeout(10)
-        ssock3 = ctx3.wrap_socket(sock3b, server_hostname=control_host)
-        t0 = time.time()
-        ssock3.connect((control_host, 9443))
-        ctl_tls_ms = round((time.time() - t0) * 1000, 2)
-        log.append('TLS handshake in %s ms' % ctl_tls_ms)
-        log.append('TLS version: %s' % ssock3.version())
-        log.append('Cipher: %s' % str(ssock3.cipher()))
-        ssock3.close()
-        sock3.close()
-    except Exception as e:
-        log.append('Control test FAILED: %s' % str(e)[:300])
-    log.append('')
-
-    # 7. Our outgoing IP
-    log.append('--- 7. Our Outgoing IP ---')
-    try:
-        resp_ip = requests.get('https://api.ipify.org?format=json', timeout=5)
-        ip_data = resp_ip.json()
-        log.append('Outgoing IP: %s' % ip_data.get('ip', 'unknown'))
-    except Exception as e:
-        log.append('Could not determine outgoing IP: %s' % str(e)[:100])
-    log.append('')
-
-    # 8. Python / SSL version info
-    log.append('--- 8. Environment ---')
-    import sys
-    log.append('Python: %s' % sys.version)
-    log.append('OpenSSL: %s' % ssl_mod.OPENSSL_VERSION)
-    log.append('requests version: %s' % requests.__version__)
-    log.append('Default TLS ciphers count: %s' % len(ssl_mod.create_default_context().get_ciphers()))
-    log.append('')
-
-    full_log = '\n'.join(log)
-
-    try:
-        db = get_conn()
-        dcur = db.cursor()
-        dcur.execute("""
-            CREATE TABLE IF NOT EXISTS network_diag_logs (
-                id SERIAL PRIMARY KEY,
-                org_id INT,
-                log_text TEXT,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        dcur.execute(
-            "INSERT INTO network_diag_logs (org_id, log_text) VALUES (%s, '%s')"
-            % (org_id, esc(full_log))
-        )
-        db.commit()
-        db.close()
-    except Exception:
-        pass
-
-    return {'diagnostics': full_log, 'lines': len(log)}
 
 
 # ─── Main handler ─────────────────────────────────────────────────────────────
 
 def handler(event, context):
-    """Bank statements from Sber API with OAuth2, statement loading, and payment matching."""
+    """Загрузка банковских выписок из почты в формате 1С и разнесение по договорам."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
 
@@ -1668,26 +981,12 @@ def handler(event, context):
         except Exception:
             body = {}
 
-    # If action is in body (for POST requests where frontend sends action in body)
     if not action and body.get('action'):
         action = body['action']
 
     try:
-        # ── GET actions ──────────────────────────────────────────────────
-        if action == 'test':
-            return cors_json(handle_test(params))
-
         if action == 'connections':
             return cors_json(handle_connections())
-
-        if action == 'auth_url':
-            result = handle_auth_url(params)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'callback':
-            return handle_callback(params)
 
         if action == 'statements':
             return cors_json(handle_statements(params))
@@ -1695,15 +994,8 @@ def handler(event, context):
         if action == 'transactions':
             return cors_json(handle_transactions(params))
 
-        if action == 'network_diag':
-            return cors_json(handle_network_diag(params))
-
-        # ── POST actions ─────────────────────────────────────────────────
-        if action == 'upload_cert':
-            return cors_json(handle_upload_cert(body))
-
-        if action == 'upload_ca_chain':
-            return cors_json(handle_upload_ca_chain(body))
+        if action == 'status':
+            return cors_json(handle_status())
 
         if action == 'save_connection':
             result = handle_save_connection(body)
@@ -1712,76 +1004,25 @@ def handler(event, context):
             return cors_json(result)
 
         if action == 'toggle_connection':
-            result = handle_toggle_connection(body)
-            return cors_json(result)
+            return cors_json(handle_toggle_connection(body))
 
-        if action == 'change_secret':
-            result = handle_change_secret(body)
+        if action == 'fetch' or action == 'fetch_all':
+            result = handle_fetch_from_email(body)
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)
 
-        if action == 'save_secret':
-            result = handle_save_secret(body)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'clear_tokens':
-            return cors_json(handle_clear_tokens(body))
-
-        if action == 'save_tokens':
-            result = handle_save_tokens(body)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'auth_callback':
-            result = handle_auth_callback(body)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'exchange_code':
-            result = handle_exchange_code(body)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'fetch':
-            result = handle_fetch(body)
-            if 'error' in result:
-                return cors_json(result, 400)
-            return cors_json(result)
-
-        if action == 'fetch_all':
-            result = handle_fetch_all(body)
-            return cors_json(result)
-
-        # ── Default: cron-style fetch all active connections (legacy) ────
         if method == 'POST' and not action:
-            target_date = body.get('date', (date.today() - timedelta(days=1)).isoformat())
-            conn = get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT id, org_id, account_number, access_token, refresh_token, token_expires_at FROM bank_connections WHERE is_active=true")
-            rows = cur.fetchall()
-            results = []
-            for row in rows:
-                c = {
-                    'id': row[0], 'org_id': row[1], 'account_number': row[2],
-                    'access_token': row[3], 'refresh_token': row[4], 'token_expires_at': row[5],
-                }
-                result = load_statement(cur, conn, c, target_date)
-                results.append({'connection_id': row[0], 'org_id': row[1], **result})
-            conn.close()
-            return cors_json({
-                'date': target_date,
-                'connections_processed': len(results),
-                'results': results,
-            })
+            result = cron_fetch()
+            return cors_json(result)
 
         return cors_json({'error': 'Unknown action: %s' % action}, 400)
 
     except Exception as e:
         import traceback
-        return cors_json({'error': str(e), 'trace': traceback.format_exc()}, 500)
+        error_msg = str(e)
+        send_error_notification(
+            'Критическая ошибка банковских выписок',
+            'Ошибка: %s\n\n%s' % (error_msg, traceback.format_exc())
+        )
+        return cors_json({'error': error_msg, 'trace': traceback.format_exc()}, 500)
