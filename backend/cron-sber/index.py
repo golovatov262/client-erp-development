@@ -8,7 +8,10 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 import psycopg2
 import requests
+import urllib3
 from html.parser import HTMLParser
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -526,7 +529,8 @@ def _download_file_from_url(url, timeout=30):
     """
     try:
         print('[IMAP] Скачиваем файл по ссылке: %s' % url)
-        resp = requests.get(url, timeout=timeout, allow_redirects=True, headers={
+        verify_ssl = not _is_sber_download_url(url)
+        resp = requests.get(url, timeout=timeout, allow_redirects=True, verify=verify_ssl, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         resp.raise_for_status()
