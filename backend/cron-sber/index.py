@@ -288,9 +288,11 @@ def parse_1c_file(text):
 
 
 def robust_parse_1c(text):
-    """Самый надёжный парсер 1С — работает с любыми вариациями ключей."""
+    """Самый надёжный парсер 1С — работает с любыми вариациями ключей.
+    Поддерживает формат Сбера, где документы идут ПОСЛЕ КонецРасчСчет."""
     sections = []
     current_section = None
+    last_closed_section = None
     current_txn = None
     lines = text.splitlines()
 
@@ -312,6 +314,7 @@ def robust_parse_1c(text):
                 'opening_balance': 0.0, 'closing_balance': 0.0,
                 'transactions': [],
             }
+            last_closed_section = None
             continue
 
         if lower.startswith('конецрасч'):
@@ -320,25 +323,29 @@ def robust_parse_1c(text):
                 current_txn = None
             if current_section:
                 sections.append(current_section)
+                last_closed_section = current_section
                 current_section = None
             continue
 
         if lower.startswith('секциядокумент'):
-            if current_txn and current_section:
-                current_section['transactions'].append(current_txn)
+            target = current_section or last_closed_section
+            if current_txn and target:
+                target['transactions'].append(current_txn)
             doc_type = line.split('=', 1)[1].strip() if '=' in line else ''
             current_txn = {'doc_type': doc_type}
             continue
 
         if lower == 'конецдокумента':
-            if current_txn and current_section:
-                current_section['transactions'].append(current_txn)
+            target = current_section or last_closed_section
+            if current_txn and target:
+                target['transactions'].append(current_txn)
             current_txn = None
             continue
 
         if lower == 'конецфайла':
-            if current_txn and current_section:
-                current_section['transactions'].append(current_txn)
+            target = current_section or last_closed_section
+            if current_txn and target:
+                target['transactions'].append(current_txn)
                 current_txn = None
             if current_section:
                 sections.append(current_section)
@@ -398,9 +405,10 @@ def robust_parse_1c(text):
             elif 'конечн' in kl and 'остаток' in kl:
                 current_section['closing_balance'] = safe_float(val)
 
-    if current_txn and current_section:
-        current_section['transactions'].append(current_txn)
-    if current_section:
+    target = current_section or last_closed_section
+    if current_txn and target:
+        target['transactions'].append(current_txn)
+    if current_section and current_section not in sections:
         sections.append(current_section)
 
     return sections
@@ -857,9 +865,11 @@ def load_statement_from_1c(cur, conn, section, connection_id):
     if not stmt_date:
         return {'error': 'Не указана дата выписки'}
 
-    cur.execute("SELECT id FROM bank_statements WHERE connection_id=%s AND statement_date='%s'" % (connection_id, esc(stmt_date)))
-    if cur.fetchone():
+    cur.execute("SELECT id, transaction_count FROM bank_statements WHERE connection_id=%s AND statement_date='%s'" % (connection_id, esc(stmt_date)))
+    existing = cur.fetchone()
+    if existing and existing[1] > 0:
         return {'skipped': True, 'reason': 'Выписка за %s уже загружена' % stmt_date}
+    existing_id = existing[0] if existing else None
 
     ob = section.get('opening_balance', 0.0)
     cb = section.get('closing_balance', 0.0)
@@ -875,8 +885,12 @@ def load_statement_from_1c(cur, conn, section, connection_id):
         elif direction == 'CREDIT':
             ct_val += amt
 
-    cur.execute("INSERT INTO bank_statements (connection_id, statement_date, opening_balance, closing_balance, debit_turnover, credit_turnover, transaction_count, status) VALUES (%s, '%s', %s, %s, %s, %s, %s, 'loaded') RETURNING id" % (connection_id, esc(stmt_date), ob, cb, dt_val, ct_val, len(txns)))
-    stmt_id = cur.fetchone()[0]
+    if existing_id:
+        cur.execute("UPDATE bank_statements SET opening_balance=%s, closing_balance=%s, debit_turnover=%s, credit_turnover=%s, transaction_count=%s, status='loaded' WHERE id=%s" % (ob, cb, dt_val, ct_val, len(txns), existing_id))
+        stmt_id = existing_id
+    else:
+        cur.execute("INSERT INTO bank_statements (connection_id, statement_date, opening_balance, closing_balance, debit_turnover, credit_turnover, transaction_count, status) VALUES (%s, '%s', %s, %s, %s, %s, %s, 'loaded') RETURNING id" % (connection_id, esc(stmt_date), ob, cb, dt_val, ct_val, len(txns)))
+        stmt_id = cur.fetchone()[0]
 
     matched = 0
     unmatched = 0
@@ -1039,7 +1053,8 @@ def handle_fetch_from_email(body):
     for eml in emails:
         for att in eml['attachments']:
             try:
-                sections = robust_parse_1c(att['content'])
+                content = att['content']
+                sections = robust_parse_1c(content)
                 if not sections:
                     errors.append('Файл %s: не удалось распарсить формат 1С' % att['filename'])
                     continue
