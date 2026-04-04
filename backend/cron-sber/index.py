@@ -766,56 +766,95 @@ def match_contract(cur, contract_no):
 
 
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
+    """Разнесение платежа по займу — аналогично ручному разнесению.
+    Логика: оплачиваем просроченные + текущий период, остаток — в тело долга (досрочное погашение).
+    НЕ оплачиваем будущие проценты."""
     cur.execute("SELECT balance, rate, schedule_type, status FROM loans WHERE id=%s" % loan_id)
     loan = cur.fetchone()
     if not loan or loan[3] == 'closed':
         return None, 'Loan closed or not found'
-    bal = float(loan[0])
-    amt = float(amount)
+    loan_bal = Decimal(str(loan[0]))
+    amt = Decimal(str(amount))
+
     cur.execute("""
-        SELECT id, payment_amount, principal_amount, interest_amount,
-               COALESCE(paid_amount, 0), COALESCE(penalty_amount, 0)
+        SELECT id, principal_amount, interest_amount, penalty_amount,
+               COALESCE(paid_amount, 0), payment_date
         FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
-        ORDER BY payment_date ASC
+        ORDER BY payment_no, id
     """ % loan_id)
-    rows = cur.fetchall()
-    principal_part = Decimal('0')
-    interest_part = Decimal('0')
-    penalty_part = Decimal('0')
-    remaining = Decimal(str(amt))
-    for row in rows:
-        sid, s_amt, s_principal, s_interest, s_paid, s_penalty = row
-        s_penalty = Decimal(str(s_penalty or 0))
-        s_interest = Decimal(str(s_interest or 0))
-        s_principal = Decimal(str(s_principal or 0))
-        s_paid = Decimal(str(s_paid or 0))
-        s_due = Decimal(str(s_amt or 0)) + s_penalty - s_paid
-        if remaining <= 0 or s_due <= 0:
-            continue
-        allocated = min(remaining, s_due)
-        if s_penalty > 0:
-            pnp = min(remaining, s_penalty)
-            penalty_part += pnp
-            remaining -= pnp
-        if remaining > 0 and s_interest > 0:
-            ip = min(remaining, s_interest)
-            interest_part += ip
-            remaining -= ip
-        if remaining > 0 and s_principal > 0:
-            pp = min(remaining, s_principal)
-            principal_part += pp
-            remaining -= pp
-        new_paid = s_paid + allocated
-        ns = 'paid' if new_paid >= Decimal(str(s_amt)) + s_penalty else 'partial'
-        cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), payment_date, ns, sid))
-    if remaining > 0:
-        extra_principal = min(remaining, Decimal(str(bal)) - principal_part)
-        if extra_principal > 0:
-            principal_part += extra_principal
-    cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, interest_part, penalty_part, payment_type, description) VALUES (%s, '%s', %s, %s, %s, %s, 'regular', '%s') RETURNING id" % (loan_id, payment_date, amt, float(principal_part), float(interest_part), float(penalty_part), esc(description)))
+    unpaid_rows = cur.fetchall()
+
+    pp = Decimal('0')
+    i_p = Decimal('0')
+    pnp = Decimal('0')
+    remaining_amt = amt
+    pd = str(payment_date)
+
+    if unpaid_rows:
+        covered_one_future = False
+        for row in unpaid_rows:
+            if remaining_amt <= Decimal('0.005'):
+                break
+            sid = row[0]
+            sp = Decimal(str(row[1]))
+            si = Decimal(str(row[2]))
+            spn = Decimal(str(row[3]))
+            spa = Decimal(str(row[4]))
+            sch_date = str(row[5])
+
+            is_future = sch_date > pd
+            if is_future and covered_one_future:
+                break
+
+            already_i = min(spa, si)
+            already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+
+            need_i = si - already_i
+            need_pn = spn - (min(spa - si, spn) if spa > si else Decimal('0'))
+            need_pp = sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0'))
+            need_total = need_i + need_pn + need_pp
+
+            if need_total <= Decimal('0.005'):
+                if is_future:
+                    covered_one_future = True
+                continue
+
+            if is_future and remaining_amt < need_total:
+                break
+
+            take_total = min(remaining_amt, need_total)
+            item_i = min(take_total, need_i)
+            after_i = take_total - item_i
+            item_pn = min(after_i, need_pn)
+            item_pp = after_i - item_pn
+            remaining_amt -= take_total
+
+            i_p += item_i
+            pnp += item_pn
+            pp += item_pp
+
+            total_item = sp + si + spn
+            new_paid = spa + item_i + item_pn + item_pp
+            ns = 'paid' if new_paid >= total_item else 'partial'
+            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
+                float(new_paid), pd, ns, sid))
+
+            if is_future:
+                covered_one_future = True
+
+        if remaining_amt > Decimal('0.005'):
+            pp += remaining_amt
+            remaining_amt = Decimal('0')
+    else:
+        pp = min(amt, loan_bal)
+
+    cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, interest_part, penalty_part, payment_type, description) VALUES (%s, '%s', %s, %s, %s, %s, 'regular', '%s') RETURNING id" % (
+        loan_id, pd, float(amt), float(pp), float(i_p), float(pnp), esc(description)))
     pay_id = cur.fetchone()[0]
-    cur.execute("UPDATE loan_schedule SET payment_id=%s WHERE loan_id=%s AND paid_date='%s' AND payment_id IS NULL AND status IN ('paid','partial')" % (pay_id, loan_id, payment_date))
-    nb = Decimal(str(bal)) - principal_part
+    cur.execute("UPDATE loan_schedule SET payment_id=%s WHERE loan_id=%s AND paid_date='%s' AND payment_id IS NULL AND status IN ('paid','partial')" % (
+        pay_id, loan_id, pd))
+
+    nb = loan_bal - pp
     if nb < 0:
         nb = Decimal('0')
     cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), loan_id))
@@ -1224,6 +1263,78 @@ def handle_sync_log(params):
     } for r in rows]
 
 
+def handle_reapply(body):
+    """Повторное разнесение транзакций из существующей выписки."""
+    stmt_id = body.get('statement_id')
+    if not stmt_id:
+        return {'error': 'statement_id обязателен'}
+    stmt_id = int(stmt_id)
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT bt.id, bt.amount, bt.direction, bt.payment_purpose,
+               bt.matched_contract_no, bt.matched_entity, bt.matched_entity_id,
+               bt.match_status, bt.document_date,
+               bs.statement_date
+        FROM bank_transactions bt
+        JOIN bank_statements bs ON bs.id = bt.statement_id
+        WHERE bt.statement_id = %s AND bt.payment_id IS NULL
+        ORDER BY bt.id
+    """ % stmt_id)
+    rows = cur.fetchall()
+
+    matched = 0
+    unmatched = 0
+    results = []
+
+    for r in rows:
+        txn_id, amount_val, direction, purpose = r[0], float(r[1]), r[2], r[3]
+        doc_date = str(r[8]) if r[8] else str(r[9])
+        stmt_date = str(r[9])
+
+        contract_no = extract_contract_no(purpose)
+        m_contract, m_entity, m_entity_id = match_contract(cur, contract_no)
+        m_status = 'matched' if m_entity_id else ('no_contract' if not contract_no else 'not_found')
+
+        cur.execute("UPDATE bank_transactions SET matched_contract_no=%s, matched_entity=%s, matched_entity_id=%s, match_status='%s' WHERE id=%s" % (
+            ("'%s'" % esc(m_contract)) if m_contract else 'NULL',
+            ("'%s'" % esc(m_entity)) if m_entity else 'NULL',
+            m_entity_id if m_entity_id else 'NULL',
+            m_status, txn_id))
+
+        if m_status == 'matched' and direction == 'CREDIT' and amount_val > 0:
+            pay_date = parse_1c_date(doc_date) or stmt_date
+            desc = 'Авто из выписки %s' % stmt_date
+            if m_entity == 'loan':
+                pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
+                if pay_id:
+                    cur.execute("UPDATE bank_transactions SET match_status='applied', payment_id=%s WHERE id=%s" % (pay_id, txn_id))
+                    matched += 1
+                else:
+                    cur.execute("UPDATE bank_transactions SET match_status='error' WHERE id=%s" % txn_id)
+                    unmatched += 1
+            elif m_entity == 'saving':
+                ok, _ = process_savings_deposit(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
+                if ok:
+                    cur.execute("UPDATE bank_transactions SET match_status='applied' WHERE id=%s" % txn_id)
+                    matched += 1
+                else:
+                    cur.execute("UPDATE bank_transactions SET match_status='error' WHERE id=%s" % txn_id)
+                    unmatched += 1
+        else:
+            if m_status != 'matched':
+                unmatched += 1
+
+        results.append({'txn_id': txn_id, 'contract': m_contract, 'entity': m_entity, 'status': m_status, 'amount': amount_val})
+
+    cur.execute("UPDATE bank_statements SET matched_count=matched_count+%s, unmatched_count=unmatched_count+%s WHERE id=%s" % (matched, unmatched, stmt_id))
+    conn.commit()
+    conn.close()
+    return {'matched': matched, 'unmatched': unmatched, 'results': results}
+
+
 # ─── Крон: автоматическая загрузка (вызов без action) ──────────────────────
 
 def cron_fetch():
@@ -1281,6 +1392,12 @@ def handler(event, context):
 
         if action == 'fetch' or action == 'fetch_all':
             result = handle_fetch_from_email(body)
+            if 'error' in result:
+                return cors_json(result, 400)
+            return cors_json(result)
+
+        if action == 'reapply':
+            result = handle_reapply(body)
             if 'error' in result:
                 return cors_json(result, 400)
             return cors_json(result)

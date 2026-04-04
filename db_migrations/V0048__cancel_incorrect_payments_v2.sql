@@ -1,0 +1,1 @@
+UPDATE loan_payments SET amount = 0.01, principal_part = 0, interest_part = 0, penalty_part = 0, description = 'ОТМЕНЕНО: некорректное авторазнесение' WHERE id IN (1821, 1822, 1823);
