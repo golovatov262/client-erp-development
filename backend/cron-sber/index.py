@@ -765,86 +765,165 @@ def match_contract(cur, contract_no):
     return contract_no, None, None
 
 
+def calc_daily_interest(balance, annual_rate, days):
+    """Расчёт процентов за фактическое количество дней."""
+    if days <= 0 or balance <= 0:
+        return Decimal('0')
+    daily_rate = Decimal(str(annual_rate)) / Decimal('100') / Decimal('365')
+    return (Decimal(str(balance)) * daily_rate * Decimal(str(days))).quantize(Decimal('0.01'))
+
+
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
-    """Разнесение платежа по займу — аналогично ручному разнесению.
-    Логика: оплачиваем просроченные + текущий период, остаток — в тело долга (досрочное погашение).
-    НЕ оплачиваем будущие проценты."""
+    """Разнесение платежа по займу.
+    При досрочном погашении (сумма > текущего периода) проценты считаются
+    за фактические дни от предыдущего платежа, а не по графику."""
     cur.execute("SELECT balance, rate, schedule_type, status FROM loans WHERE id=%s" % loan_id)
     loan = cur.fetchone()
     if not loan or loan[3] == 'closed':
         return None, 'Loan closed or not found'
     loan_bal = Decimal(str(loan[0]))
+    loan_rate = float(loan[1])
     amt = Decimal(str(amount))
 
     cur.execute("""
         SELECT id, principal_amount, interest_amount, penalty_amount,
-               COALESCE(paid_amount, 0), payment_date
+               COALESCE(paid_amount, 0), payment_date, payment_no
         FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
         ORDER BY payment_no, id
     """ % loan_id)
     unpaid_rows = cur.fetchall()
+
+    cur.execute("""
+        SELECT payment_date FROM loan_schedule
+        WHERE loan_id=%s AND status = 'paid'
+        ORDER BY payment_no DESC LIMIT 1
+    """ % loan_id)
+    last_paid_row = cur.fetchone()
 
     pp = Decimal('0')
     i_p = Decimal('0')
     pnp = Decimal('0')
     remaining_amt = amt
     pd = str(payment_date)
+    pd_date = date.fromisoformat(pd) if isinstance(payment_date, str) else payment_date
 
     if unpaid_rows:
-        covered_one_future = False
-        for row in unpaid_rows:
-            if remaining_amt <= Decimal('0.005'):
+        first_row = unpaid_rows[0]
+        first_sp = Decimal(str(first_row[1]))
+        first_si = Decimal(str(first_row[2]))
+        first_spn = Decimal(str(first_row[3]))
+        first_spa = Decimal(str(first_row[4]))
+        first_sch_date = str(first_row[5])
+        first_need = first_sp + first_si + first_spn - first_spa
+
+        is_early_repayment = amt > first_need + Decimal('0.01')
+
+        if is_early_repayment:
+            if last_paid_row:
+                prev_date = last_paid_row[0]
+                if isinstance(prev_date, str):
+                    prev_date = date.fromisoformat(prev_date)
+            else:
+                cur.execute("SELECT start_date FROM loans WHERE id=%s" % loan_id)
+                prev_date = cur.fetchone()[0]
+                if isinstance(prev_date, str):
+                    prev_date = date.fromisoformat(prev_date)
+
+            days_used = (pd_date - prev_date).days
+            if days_used < 0:
+                days_used = 0
+
+            actual_interest = calc_daily_interest(loan_bal, loan_rate, days_used)
+
+            for row in unpaid_rows:
+                spn = Decimal(str(row[3]))
+                spa = Decimal(str(row[4]))
+                if spn > 0:
+                    already_pn = min(spa, spn)
+                    need_pn = spn - already_pn
+                    if need_pn > 0 and remaining_amt > 0:
+                        take_pn = min(remaining_amt, need_pn)
+                        pnp += take_pn
+                        remaining_amt -= take_pn
                 break
-            sid = row[0]
-            sp = Decimal(str(row[1]))
-            si = Decimal(str(row[2]))
-            spn = Decimal(str(row[3]))
-            spa = Decimal(str(row[4]))
-            sch_date = str(row[5])
 
-            is_future = sch_date > pd
-            if is_future and covered_one_future:
+            if remaining_amt > 0 and actual_interest > 0:
+                take_i = min(remaining_amt, actual_interest)
+                i_p += take_i
+                remaining_amt -= take_i
+
+            if remaining_amt > Decimal('0.005'):
+                pp += min(remaining_amt, loan_bal)
+                remaining_amt = Decimal('0')
+
+            for row in unpaid_rows:
+                sid = row[0]
+                sp = Decimal(str(row[1]))
+                si = Decimal(str(row[2]))
+                spn = Decimal(str(row[3]))
+                spa = Decimal(str(row[4]))
+                total_item = sp + si + spn
+                allocated_to_row = min(pp + i_p + pnp, total_item)
+                new_paid = spa + allocated_to_row
+                ns = 'paid' if new_paid >= total_item or pp >= loan_bal else 'partial'
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
+                    float(new_paid), pd, ns, sid))
                 break
+        else:
+            covered_one_future = False
+            for row in unpaid_rows:
+                if remaining_amt <= Decimal('0.005'):
+                    break
+                sid = row[0]
+                sp = Decimal(str(row[1]))
+                si = Decimal(str(row[2]))
+                spn = Decimal(str(row[3]))
+                spa = Decimal(str(row[4]))
+                sch_date = str(row[5])
 
-            already_i = min(spa, si)
-            already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+                is_future = sch_date > pd
+                if is_future and covered_one_future:
+                    break
 
-            need_i = si - already_i
-            need_pn = spn - (min(spa - si, spn) if spa > si else Decimal('0'))
-            need_pp = sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0'))
-            need_total = need_i + need_pn + need_pp
+                already_i = min(spa, si)
+                already_pn = min(spa - si, spn) if spa > si else Decimal('0')
 
-            if need_total <= Decimal('0.005'):
+                need_i = si - already_i
+                need_pn = spn - (min(spa - si, spn) if spa > si else Decimal('0'))
+                need_pp = sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0'))
+                need_total = need_i + need_pn + need_pp
+
+                if need_total <= Decimal('0.005'):
+                    if is_future:
+                        covered_one_future = True
+                    continue
+
+                if is_future and remaining_amt < need_total:
+                    break
+
+                take_total = min(remaining_amt, need_total)
+                item_i = min(take_total, need_i)
+                after_i = take_total - item_i
+                item_pn = min(after_i, need_pn)
+                item_pp = after_i - item_pn
+                remaining_amt -= take_total
+
+                i_p += item_i
+                pnp += item_pn
+                pp += item_pp
+
+                total_item = sp + si + spn
+                new_paid = spa + item_i + item_pn + item_pp
+                ns = 'paid' if new_paid >= total_item else 'partial'
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
+                    float(new_paid), pd, ns, sid))
+
                 if is_future:
                     covered_one_future = True
-                continue
 
-            if is_future and remaining_amt < need_total:
-                break
-
-            take_total = min(remaining_amt, need_total)
-            item_i = min(take_total, need_i)
-            after_i = take_total - item_i
-            item_pn = min(after_i, need_pn)
-            item_pp = after_i - item_pn
-            remaining_amt -= take_total
-
-            i_p += item_i
-            pnp += item_pn
-            pp += item_pp
-
-            total_item = sp + si + spn
-            new_paid = spa + item_i + item_pn + item_pp
-            ns = 'paid' if new_paid >= total_item else 'partial'
-            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
-                float(new_paid), pd, ns, sid))
-
-            if is_future:
-                covered_one_future = True
-
-        if remaining_amt > Decimal('0.005'):
-            pp += remaining_amt
-            remaining_amt = Decimal('0')
+            if remaining_amt > Decimal('0.005'):
+                pp += remaining_amt
+                remaining_amt = Decimal('0')
     else:
         pp = min(amt, loan_bal)
 
