@@ -67,6 +67,13 @@ def calc_payment_dates(start_date, term):
             dates.append(last_day_of_month(add_months(start_date, i)))
     return dates
 
+def calc_daily_interest(balance, annual_rate, days):
+    """Расчёт процентов за фактическое количество дней."""
+    if days <= 0 or balance <= 0:
+        return Decimal('0')
+    daily_rate = Decimal(str(annual_rate)) / Decimal('100') / Decimal('365')
+    return (Decimal(str(balance)) * daily_rate * Decimal(str(days))).quantize(Decimal('0.01'))
+
 def calc_annuity_schedule(amount, rate, term, start_date):
     monthly_rate = Decimal(str(rate)) / Decimal('100') / Decimal('12')
     amt = Decimal(str(amount))
@@ -711,7 +718,57 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             pp = i_p = pnp = Decimal('0')
             remaining_amt = amt
 
-            if first_row:
+            is_full_early_repayment = amt >= loan_bal and first_row
+
+            if is_full_early_repayment:
+                cur.execute("""
+                    SELECT payment_date FROM loan_schedule
+                    WHERE loan_id=%s AND status = 'paid'
+                    ORDER BY payment_no DESC LIMIT 1
+                """ % lid)
+                last_paid_row = cur.fetchone()
+                if last_paid_row:
+                    prev_date = last_paid_row[0]
+                    if isinstance(prev_date, str):
+                        prev_date = date.fromisoformat(prev_date)
+                else:
+                    prev_date = loan_start if isinstance(loan_start, date) else date.fromisoformat(str(loan_start))
+
+                pd_date = date.fromisoformat(pd) if isinstance(pd, str) else pd
+                days_used = (pd_date - prev_date).days
+                if days_used < 0:
+                    days_used = 0
+
+                actual_interest = calc_daily_interest(loan_bal, l_rate, days_used)
+
+                spn_first = Decimal(str(first_row[3]))
+                spa_first = Decimal(str(first_row[4]))
+                if spn_first > 0:
+                    need_pn = spn_first - min(spa_first, spn_first)
+                    if need_pn > 0 and remaining_amt > 0:
+                        take_pn = min(remaining_amt, need_pn)
+                        pnp += take_pn
+                        remaining_amt -= take_pn
+
+                if remaining_amt > 0 and actual_interest > 0:
+                    take_i = min(remaining_amt, actual_interest)
+                    i_p += take_i
+                    remaining_amt -= take_i
+
+                if remaining_amt > Decimal('0.005'):
+                    pp += min(remaining_amt, loan_bal)
+                    remaining_amt = Decimal('0')
+
+                sid_first = first_row[0]
+                sp_first = Decimal(str(first_row[1]))
+                si_first = Decimal(str(first_row[2]))
+                total_item = sp_first + si_first + spn_first
+                new_paid = spa_first + pp + i_p + pnp
+                ns = 'paid' if pp >= loan_bal else 'partial'
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
+                    float(new_paid), pd, ns, sid_first))
+
+            elif first_row:
                 cur.execute("""
                     SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                     FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')

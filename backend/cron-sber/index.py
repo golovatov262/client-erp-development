@@ -816,7 +816,7 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
         first_sch_date = str(first_row[5])
         first_need = first_sp + first_si + first_spn - first_spa
 
-        is_early_repayment = amt > first_need + Decimal('0.01')
+        is_early_repayment = amt >= loan_bal
 
         if is_early_repayment:
             if last_paid_row:
