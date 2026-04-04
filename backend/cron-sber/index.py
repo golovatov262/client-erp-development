@@ -7,6 +7,8 @@ from email.header import decode_header
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import psycopg2
+import requests
+from html.parser import HTMLParser
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -421,10 +423,180 @@ def parse_1c_date(val):
     return val
 
 
+# ─── Извлечение ссылок из HTML писем Сбера ─────────────────────────────────
+
+class _LinkExtractor(HTMLParser):
+    """Простой HTML-парсер для сбора всех href из тегов <a>."""
+    def __init__(self):
+        super().__init__()
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'a':
+            for attr_name, attr_val in attrs:
+                if attr_name == 'href' and attr_val:
+                    self.links.append(attr_val)
+
+
+# Паттерны URL, которые могут содержать выписку Сбера
+_SBER_DOWNLOAD_PATTERNS = [
+    re.compile(r'https?://[^"\'<>\s]*sberbank\.ru[^"\'<>\s]*', re.IGNORECASE),
+    re.compile(r'https?://[^"\'<>\s]*sbi\.sberbank\.ru[^"\'<>\s]*', re.IGNORECASE),
+    re.compile(r'https?://[^"\'<>\s]*\.sber\.ru[^"\'<>\s]*', re.IGNORECASE),
+]
+
+_DOWNLOAD_KEYWORDS = re.compile(
+    r'(download|statement|vypiska|1c|export|file|attachment|\.txt)',
+    re.IGNORECASE,
+)
+
+
+def _is_sber_download_url(url):
+    """Проверяет, похожа ли ссылка на скачивание выписки Сбера."""
+    for pattern in _SBER_DOWNLOAD_PATTERNS:
+        if pattern.search(url):
+            return True
+    return False
+
+
+def _looks_like_download_link(url):
+    """Проверяет, содержит ли URL ключевые слова скачивания/выписки."""
+    if _DOWNLOAD_KEYWORDS.search(url):
+        return True
+    return False
+
+
+def _extract_links_from_html(html_body):
+    """Извлекает из HTML все ссылки, которые могут быть ссылками на скачивание выписки."""
+    if not html_body:
+        return []
+
+    parser = _LinkExtractor()
+    try:
+        parser.feed(html_body)
+    except Exception:
+        pass
+
+    # Также ищем ссылки regex-ом на случай если HTMLParser не справился
+    # (например, если URL не в теге <a>)
+    regex_links = re.findall(r'href=["\']([^"\']+)["\']', html_body, re.IGNORECASE)
+    all_links = list(set(parser.links + regex_links))
+
+    candidates = []
+    for url in all_links:
+        url = url.strip()
+        if not url.startswith('http'):
+            continue
+        # Приоритет 1: ссылки на домены Сбера с ключевыми словами скачивания
+        if _is_sber_download_url(url) and _looks_like_download_link(url):
+            candidates.insert(0, url)
+        # Приоритет 2: просто ссылки на домены Сбера
+        elif _is_sber_download_url(url):
+            candidates.append(url)
+        # Приоритет 3: любые ссылки с ключевыми словами скачивания
+        elif _looks_like_download_link(url):
+            candidates.append(url)
+
+    return candidates
+
+
+def _decode_content_bytes(raw_bytes):
+    """Декодирует байты в строку, пробуя utf-8 и windows-1251."""
+    try:
+        return raw_bytes.decode('utf-8')
+    except (UnicodeDecodeError, AttributeError):
+        pass
+    try:
+        return raw_bytes.decode('windows-1251')
+    except (UnicodeDecodeError, AttributeError):
+        pass
+    return raw_bytes.decode('utf-8', errors='replace')
+
+
+def _is_1c_content(text):
+    """Проверяет, является ли текст форматом 1CClientBankExchange."""
+    if not text:
+        return False
+    return '1CClientBankExchange' in text or 'СекцияРасч' in text.replace(' ', '')
+
+
+def _download_file_from_url(url, timeout=30):
+    """Скачивает файл по URL и возвращает текстовое содержимое, если это формат 1С.
+    Возвращает (text, filename) или (None, None) если не удалось или не формат 1С.
+    """
+    try:
+        print('[IMAP] Скачиваем файл по ссылке: %s' % url)
+        resp = requests.get(url, timeout=timeout, allow_redirects=True, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        resp.raise_for_status()
+
+        # Определяем имя файла из Content-Disposition или URL
+        filename = 'downloaded_statement.txt'
+        cd = resp.headers.get('Content-Disposition', '')
+        if cd:
+            fn_match = re.search(r'filename[*]?=["\']?([^"\';\s]+)', cd)
+            if fn_match:
+                filename = fn_match.group(1)
+                # Декодируем если RFC 5987 encoded
+                if filename.startswith("utf-8''") or filename.startswith("UTF-8''"):
+                    from urllib.parse import unquote
+                    filename = unquote(filename.split("''", 1)[1])
+
+        # Декодируем содержимое
+        text = _decode_content_bytes(resp.content)
+
+        if _is_1c_content(text):
+            print('[IMAP] Скачан файл 1С из ссылки: %s (%d байт)' % (url, len(resp.content)))
+            return text, filename
+        else:
+            print('[IMAP] Содержимое по ссылке НЕ является форматом 1С: %s (первые 200 символов: %s)' % (
+                url, text[:200].replace('\n', ' ')
+            ))
+            return None, None
+
+    except Exception as e:
+        print('[IMAP] Ошибка при скачивании %s: %s' % (url, str(e)))
+        return None, None
+
+
+def _extract_email_parts(msg):
+    """Извлекает HTML-тело и текстовые части из email-сообщения.
+    Возвращает (html_body, text_parts) где:
+    - html_body: строка HTML или None
+    - text_parts: список строк текстовых частей письма
+    """
+    html_body = None
+    text_parts = []
+
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        content_disposition = str(part.get('Content-Disposition', ''))
+
+        # Пропускаем вложения — они обрабатываются отдельно
+        if 'attachment' in content_disposition:
+            continue
+
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+
+        if content_type == 'text/html':
+            html_body = _decode_content_bytes(payload)
+        elif content_type == 'text/plain':
+            text_parts.append(_decode_content_bytes(payload))
+
+    return html_body, text_parts
+
+
 # ─── IMAP: получение писем с вложениями ────────────────────────────────────
 
 def fetch_emails_from_imap(target_date=None):
-    """Подключается к IMAP, ищет письма с вложениями .txt за указанную дату.
+    """Подключается к IMAP, ищет письма с выписками 1С за указанную дату.
+    Поддерживает три способа получения выписки:
+    1. Вложения .txt в формате 1CClientBankExchange
+    2. Ссылки на скачивание в HTML-теле письма (Сбер Бизнес)
+    3. Текст формата 1С прямо в теле письма (text/plain)
     Возвращает список dict: {subject, date, attachments: [{filename, content}]}
     """
     if not IMAP_PASS:
@@ -471,6 +643,9 @@ def fetch_emails_from_imap(target_date=None):
             msg_date = msg.get('Date', '')
 
             attachments = []
+            source_type = None
+
+            # --- Способ 1: Стандартные вложения .txt ---
             for part in msg.walk():
                 content_disposition = str(part.get('Content-Disposition', ''))
                 if 'attachment' not in content_disposition:
@@ -491,18 +666,48 @@ def fetch_emails_from_imap(target_date=None):
 
                 content = part.get_payload(decode=True)
                 if content:
-                    try:
-                        text = content.decode('utf-8')
-                    except UnicodeDecodeError:
-                        try:
-                            text = content.decode('windows-1251')
-                        except UnicodeDecodeError:
-                            text = content.decode('utf-8', errors='replace')
+                    text = _decode_content_bytes(content)
 
-                    if '1CClientBankExchange' in text or 'СекцияРасч' in text.replace(' ', ''):
+                    if _is_1c_content(text):
+                        print('[IMAP] Найдено вложение 1С: %s (тема: %s)' % (filename, subject))
                         attachments.append({'filename': filename, 'content': text})
+                        source_type = 'attachment'
+
+            # --- Способ 2: Ссылки на скачивание в HTML-теле письма (Сбер Бизнес) ---
+            if not attachments:
+                html_body, text_bodies = _extract_email_parts(msg)
+
+                if html_body:
+                    download_links = _extract_links_from_html(html_body)
+                    if download_links:
+                        print('[IMAP] Найдено %d ссылок для скачивания в письме "%s"' % (
+                            len(download_links), subject
+                        ))
+                    for link_url in download_links:
+                        dl_text, dl_filename = _download_file_from_url(link_url)
+                        if dl_text and _is_1c_content(dl_text):
+                            print('[IMAP] Выписка 1С скачана по ссылке: %s -> %s' % (link_url, dl_filename))
+                            attachments.append({'filename': dl_filename, 'content': dl_text})
+                            source_type = 'html_link'
+                            break  # Достаточно одной успешной выписки
+
+                # --- Способ 3: Текст формата 1С прямо в теле письма (text/plain) ---
+                if not attachments and text_bodies:
+                    for idx, body_text in enumerate(text_bodies):
+                        if _is_1c_content(body_text):
+                            print('[IMAP] Формат 1С найден в текстовом теле письма "%s" (часть %d)' % (
+                                subject, idx + 1
+                            ))
+                            attachments.append({
+                                'filename': 'email_body_%d.txt' % (idx + 1),
+                                'content': body_text,
+                            })
+                            source_type = 'text_body'
 
             if attachments:
+                print('[IMAP] Письмо "%s" -> %d выписок (источник: %s)' % (
+                    subject, len(attachments), source_type or 'unknown'
+                ))
                 results.append({
                     'subject': subject,
                     'date': msg_date,
