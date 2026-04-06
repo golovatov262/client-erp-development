@@ -147,7 +147,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" variant="destructive" onClick={props.onClose}><Icon name="XCircle" size={14} className="mr-1" />Закрытие договора</Button>
               </>)}
             </div>
-            {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
+            {(isAdmin || isManager) && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
           </div>
         )}
 
