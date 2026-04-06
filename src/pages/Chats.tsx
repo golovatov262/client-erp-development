@@ -36,14 +36,26 @@ const Chats = () => {
 
   useEffect(() => {
     loadConversations().finally(() => setLoading(false));
-    const iv = setInterval(loadConversations, 8000);
-    return () => clearInterval(iv);
+    let iv = setInterval(loadConversations, 30000);
+    const onVisibility = () => {
+      clearInterval(iv);
+      if (document.hidden) {
+        iv = setInterval(loadConversations, 120000);
+      } else {
+        loadConversations();
+        iv = setInterval(loadConversations, 30000);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVisibility); };
   }, [loadConversations]);
 
   useEffect(() => {
     if (!activeConvId) return;
     loadMessages(activeConvId);
-    pollRef.current = setInterval(() => loadMessages(activeConvId), 4000);
+    pollRef.current = setInterval(() => {
+      if (!document.hidden) loadMessages(activeConvId);
+    }, 15000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeConvId, loadMessages]);
 

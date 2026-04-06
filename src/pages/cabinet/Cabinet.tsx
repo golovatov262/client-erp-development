@@ -131,8 +131,18 @@ const Cabinet = () => {
     if (!token) return;
     if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
     pollChatUnread();
-    const iv = setInterval(pollChatUnread, 6000);
-    return () => clearInterval(iv);
+    let iv = setInterval(pollChatUnread, 30000);
+    const onVisibility = () => {
+      clearInterval(iv);
+      if (document.hidden) {
+        iv = setInterval(pollChatUnread, 120000);
+      } else {
+        pollChatUnread();
+        iv = setInterval(pollChatUnread, 30000);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVisibility); };
   }, [token, pollChatUnread]);
 
   const handleTelegramLink = async () => {

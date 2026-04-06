@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api, ChatConversationStaff } from "@/lib/api";
 
-const POLL_INTERVAL = 6000;
+const POLL_INTERVAL = 30000;
+const POLL_INTERVAL_HIDDEN = 120000;
 
 const playNotificationSound = () => {
   try {
@@ -89,8 +90,21 @@ const useChatNotifications = () => {
       Notification.requestPermission().catch(() => {});
     }
     poll();
-    const iv = setInterval(poll, POLL_INTERVAL);
-    return () => clearInterval(iv);
+    let iv = setInterval(poll, POLL_INTERVAL);
+    const onVisibility = () => {
+      clearInterval(iv);
+      if (document.hidden) {
+        iv = setInterval(poll, POLL_INTERVAL_HIDDEN);
+      } else {
+        poll();
+        iv = setInterval(poll, POLL_INTERVAL);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [poll]);
 
   const clearEvent = useCallback(() => setLastEvent(null), []);

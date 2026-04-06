@@ -53,7 +53,9 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
   useEffect(() => {
     if (!activeConvId || !open) return;
     loadMessages(activeConvId);
-    pollRef.current = setInterval(() => loadMessages(activeConvId), 5000);
+    pollRef.current = setInterval(() => {
+      if (!document.hidden) loadMessages(activeConvId);
+    }, 15000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeConvId, open, loadMessages]);
 
