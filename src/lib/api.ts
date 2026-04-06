@@ -25,8 +25,19 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
   const options: RequestInit = { method, headers: hdrs };
   if (body) options.body = JSON.stringify(body);
 
-  const res = await fetch(url.toString(), options);
-  const data = await res.json();
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), options);
+  } catch {
+    throw new Error("Нет связи с сервером. Проверьте интернет-соединение.");
+  }
+  if (res.status === 402) throw new Error("Превышен лимит запросов. Попробуйте позже.");
+  let data: T & { error?: string };
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Сервер вернул некорректный ответ");
+  }
   if (!res.ok) throw new Error(data.error || "Ошибка сервера");
   return data;
 }
