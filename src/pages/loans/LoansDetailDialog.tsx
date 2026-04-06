@@ -148,7 +148,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "id", label: "", render: (p: LoanPayment) => (isAdmin || isManager) ? (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
         <button onClick={() => props.onEditPayment(p)} className="p-1 rounded hover:bg-muted"><Icon name="Pencil" size={14} /></button>
-        {isAdmin && <button onClick={() => props.onDeletePayment(p.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
+        {(isAdmin || isManager) && <button onClick={() => props.onDeletePayment(p.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
       </div>
     ) : null }
   ];

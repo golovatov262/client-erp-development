@@ -93,7 +93,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
     { key: "id", label: "", render: (t: SavingTransaction) => (isAdmin || isManager) && t.transaction_type !== "opening" && t.transaction_type !== "closing" ? (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
         <button onClick={() => props.onEditTx(t)} className="p-1 rounded hover:bg-muted"><Icon name="Pencil" size={14} /></button>
-        {isAdmin && <button onClick={() => props.onDeleteTx(t.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
+        {(isAdmin || isManager) && <button onClick={() => props.onDeleteTx(t.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
       </div>
     ) : null }
   ];
