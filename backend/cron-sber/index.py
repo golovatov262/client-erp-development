@@ -1481,7 +1481,7 @@ def handler(event, context):
                 return cors_json(result, 400)
             return cors_json(result)
 
-        if method == 'POST' and not action:
+        if not action:
             result = cron_fetch()
             return cors_json(result)
 
