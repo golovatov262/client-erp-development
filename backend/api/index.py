@@ -4217,10 +4217,22 @@ def handle_auth(method, body, cur, conn):
 
         row = None
         if login:
-            cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(login), pw_hash))
-            row = cur.fetchone()
+            clean_login = ''.join(c for c in login if c.isdigit())
+            if clean_login and len(clean_login) >= 10:
+                if len(clean_login) == 11 and clean_login[0] == '8':
+                    clean_login = '7' + clean_login[1:]
+                cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(clean_login), pw_hash))
+                row = cur.fetchone()
+                if not row:
+                    cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_login[-10:], pw_hash))
+                    row = cur.fetchone()
+            else:
+                cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(login), pw_hash))
+                row = cur.fetchone()
         if not row and phone:
             clean_phone = ''.join(c for c in phone if c.isdigit())
+            if len(clean_phone) == 11 and clean_phone[0] == '8':
+                clean_phone = '7' + clean_phone[1:]
             cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_phone[-10:], pw_hash))
             row = cur.fetchone()
         if not row:
