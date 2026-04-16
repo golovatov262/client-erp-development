@@ -99,16 +99,26 @@ const AdminApiKeys = () => {
         <CardContent className="p-4 text-sm space-y-2">
           <div className="font-semibold flex items-center gap-2"><Icon name="Info" size={16} />Как использовать</div>
           <div>Передавайте ключ в заголовке <code className="bg-white px-1.5 py-0.5 rounded">X-Api-Key</code></div>
-          <div className="font-mono text-xs bg-white p-2 rounded border mt-2 overflow-auto">
+          <div className="font-mono text-xs bg-white p-2 rounded border mt-2 overflow-auto space-y-0.5">
+            <div className="text-muted-foreground">— Списки и детали:</div>
             GET /?entity=external&resource=members&page=1&limit=100<br/>
             GET /?entity=external&resource=members&id=123<br/>
             GET /?entity=external&resource=loans&member_id=123&status=active<br/>
             GET /?entity=external&resource=loans&id=456<br/>
             GET /?entity=external&resource=savings&member_id=123<br/>
-            GET /?entity=external&resource=savings&id=789
+            GET /?entity=external&resource=savings&id=789<br/>
+            <div className="text-muted-foreground mt-1">— Графики платежей:</div>
+            GET /?entity=external&resource=schedule&loan_id=456<br/>
+            GET /?entity=external&resource=schedule&saving_id=789<br/>
+            GET /?entity=external&resource=schedule&member_id=123<br/>
+            <div className="text-muted-foreground mt-1">— Баланс клиента (все продукты + просрочки):</div>
+            GET /?entity=external&resource=balance&member_id=123<br/>
+            <div className="text-muted-foreground mt-1">— Статистика:</div>
+            GET /?entity=external&resource=stats<br/>
+            GET /?entity=external&resource=stats&member_id=123
           </div>
           <div className="text-xs text-muted-foreground mt-2">
-            Параметры: <b>resource</b> (members/loans/savings), <b>id</b> (получить одну запись с деталями), <b>member_id</b>, <b>status</b>, <b>page</b>, <b>limit</b> (до 500)
+            Параметры: <b>resource</b>, <b>id</b>, <b>member_id</b>, <b>loan_id</b>, <b>saving_id</b>, <b>status</b>, <b>page</b>, <b>limit</b> (до 500)
           </div>
         </CardContent>
       </Card>

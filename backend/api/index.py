@@ -6910,7 +6910,191 @@ def handle_external(method, params, body, headers, cur, conn, ip=''):
         rows = query_rows(cur, "SELECT * FROM savings %s ORDER BY id LIMIT %s OFFSET %s" % (where, limit, offset))
         return {'data': rows, 'page': page, 'limit': limit, 'total': total}
 
-    return {'_status': 400, 'error': 'Укажите resource: members, loans или savings'}
+    if resource == 'schedule':
+        loan_id = params.get('loan_id') or body.get('loan_id')
+        saving_id = params.get('saving_id') or body.get('saving_id')
+        member_id = params.get('member_id') or body.get('member_id')
+
+        if loan_id:
+            rows = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % int(loan_id))
+            return {'loan_id': int(loan_id), 'type': 'loan', 'schedule': rows}
+        if saving_id:
+            rows = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % int(saving_id))
+            return {'saving_id': int(saving_id), 'type': 'saving', 'schedule': rows}
+        if member_id:
+            loans = query_rows(cur, "SELECT id, contract_no FROM loans WHERE member_id=%s AND status IN ('active','overdue')" % int(member_id))
+            savings = query_rows(cur, "SELECT id, contract_no FROM savings WHERE member_id=%s AND status='active'" % int(member_id))
+            loan_sched = []
+            for l in loans:
+                sch = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % int(l['id']))
+                loan_sched.append({'loan_id': l['id'], 'contract_no': l['contract_no'], 'schedule': sch})
+            saving_sched = []
+            for s in savings:
+                sch = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % int(s['id']))
+                saving_sched.append({'saving_id': s['id'], 'contract_no': s['contract_no'], 'schedule': sch})
+            return {'member_id': int(member_id), 'loans': loan_sched, 'savings': saving_sched}
+        return {'_status': 400, 'error': 'Укажите loan_id, saving_id или member_id'}
+
+    if resource == 'balance':
+        member_id = params.get('member_id') or body.get('member_id')
+        if not member_id:
+            return {'_status': 400, 'error': 'Укажите member_id'}
+        mid = int(member_id)
+        member = query_one(cur, "SELECT id, member_no, CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',COALESCE(middle_name,'')) ELSE company_name END as name, phone, email, status FROM members WHERE id=%s" % mid)
+        if not member:
+            return {'_status': 404, 'error': 'Пайщик не найден'}
+
+        loans = query_rows(cur, "SELECT id, contract_no, amount, balance, rate, monthly_payment, status, start_date, end_date, org_id FROM loans WHERE member_id=%s" % mid)
+        loan_active_balance = 0.0
+        loan_overdue_balance = 0.0
+        for l in loans:
+            if l.get('status') == 'active':
+                loan_active_balance += float(l.get('balance') or 0)
+            elif l.get('status') == 'overdue':
+                loan_overdue_balance += float(l.get('balance') or 0)
+
+        overdue = query_rows(cur, """
+            SELECT ls.loan_id, l.contract_no, ls.payment_no, ls.payment_date, ls.payment_amount,
+                   ls.paid_amount, ls.overdue_days, ls.penalty_amount
+            FROM loan_schedule ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE l.member_id=%s AND ls.status='overdue'
+            ORDER BY ls.payment_date
+        """ % mid)
+
+        next_payments = query_rows(cur, """
+            SELECT ls.loan_id, l.contract_no, ls.payment_date, ls.payment_amount
+            FROM loan_schedule ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE l.member_id=%s AND ls.status='pending'
+            AND ls.payment_no = (SELECT MIN(payment_no) FROM loan_schedule WHERE loan_id=ls.loan_id AND status='pending')
+            ORDER BY ls.payment_date
+        """ % mid)
+
+        savings = query_rows(cur, """
+            SELECT s.id, s.contract_no, s.amount, s.current_balance, s.rate, s.accrued_interest, s.paid_interest,
+                   s.status, s.start_date, s.end_date, s.payout_type, s.org_id,
+                   COALESCE((SELECT SUM(da.daily_amount) FROM savings_daily_accruals da WHERE da.saving_id=s.id), 0) as total_daily_accrued
+            FROM savings s WHERE s.member_id=%s
+        """ % mid)
+        savings_balance = 0.0
+        savings_pending_interest = 0.0
+        for s in savings:
+            s['total_daily_accrued'] = float(s.get('total_daily_accrued') or 0)
+            if s.get('status') == 'active':
+                savings_balance += float(s.get('current_balance') or s.get('amount') or 0)
+                savings_pending_interest += s['total_daily_accrued'] - float(s.get('paid_interest') or 0)
+
+        shares = query_rows(cur, "SELECT id, account_no, balance, total_in, total_out, status FROM share_accounts WHERE member_id=%s" % mid)
+        shares_balance = sum(float(s.get('balance') or 0) for s in shares)
+
+        return {
+            'member': member,
+            'summary': {
+                'loan_active_balance': round(loan_active_balance, 2),
+                'loan_overdue_balance': round(loan_overdue_balance, 2),
+                'loan_total_debt': round(loan_active_balance + loan_overdue_balance, 2),
+                'overdue_payments_count': len(overdue),
+                'overdue_total': round(sum(float(o.get('payment_amount') or 0) - float(o.get('paid_amount') or 0) for o in overdue), 2),
+                'savings_balance': round(savings_balance, 2),
+                'savings_pending_interest': round(savings_pending_interest, 2),
+                'shares_balance': round(shares_balance, 2),
+                'net_position': round(savings_balance + shares_balance - loan_active_balance - loan_overdue_balance, 2),
+            },
+            'loans': loans,
+            'savings': savings,
+            'shares': shares,
+            'overdue_payments': overdue,
+            'next_payments': next_payments,
+        }
+
+    if resource == 'stats':
+        member_id = params.get('member_id') or body.get('member_id')
+        if member_id:
+            mid = int(member_id)
+            member = query_one(cur, "SELECT id, member_no, CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',COALESCE(middle_name,'')) ELSE company_name END as name, created_at FROM members WHERE id=%s" % mid)
+            if not member:
+                return {'_status': 404, 'error': 'Пайщик не найден'}
+
+            loan_stats = query_one(cur, """
+                SELECT COUNT(*) as total_count,
+                  COUNT(*) FILTER (WHERE status='active') as active_count,
+                  COUNT(*) FILTER (WHERE status='closed') as closed_count,
+                  COUNT(*) FILTER (WHERE status='overdue') as overdue_count,
+                  COALESCE(SUM(amount),0) as total_issued,
+                  COALESCE(SUM(balance) FILTER (WHERE status IN ('active','overdue')),0) as current_debt
+                FROM loans WHERE member_id=%s
+            """ % mid)
+
+            paid_stats = query_one(cur, """
+                SELECT COALESCE(SUM(lp.amount),0) as total_paid,
+                  COALESCE(SUM(lp.principal_amount),0) as total_principal_paid,
+                  COALESCE(SUM(lp.interest_amount),0) as total_interest_paid,
+                  COUNT(*) as payments_count,
+                  MAX(lp.payment_date) as last_payment_date
+                FROM loan_payments lp
+                JOIN loans l ON l.id = lp.loan_id
+                WHERE l.member_id=%s
+            """ % mid)
+
+            saving_stats = query_one(cur, """
+                SELECT COUNT(*) as total_count,
+                  COUNT(*) FILTER (WHERE status='active') as active_count,
+                  COUNT(*) FILTER (WHERE status='closed') as closed_count,
+                  COALESCE(SUM(amount) FILTER (WHERE status='active'),0) as active_principal,
+                  COALESCE(SUM(current_balance) FILTER (WHERE status='active'),0) as current_balance,
+                  COALESCE(SUM(paid_interest),0) as total_interest_paid,
+                  COALESCE(SUM(accrued_interest),0) as total_accrued
+                FROM savings WHERE member_id=%s
+            """ % mid)
+
+            return {
+                'member': member,
+                'loans': loan_stats,
+                'loan_payments': paid_stats,
+                'savings': saving_stats,
+            }
+
+        # Общая статистика по всей системе
+        members_stats = query_one(cur, """
+            SELECT COUNT(*) as total,
+              COUNT(*) FILTER (WHERE status='active') as active,
+              COUNT(*) FILTER (WHERE status='inactive') as inactive,
+              COUNT(*) FILTER (WHERE member_type='FL') as individuals,
+              COUNT(*) FILTER (WHERE member_type='UL') as companies
+            FROM members
+        """)
+        loans_stats = query_one(cur, """
+            SELECT COUNT(*) as total,
+              COUNT(*) FILTER (WHERE status='active') as active,
+              COUNT(*) FILTER (WHERE status='closed') as closed,
+              COUNT(*) FILTER (WHERE status='overdue') as overdue,
+              COALESCE(SUM(amount),0) as total_issued,
+              COALESCE(SUM(balance) FILTER (WHERE status IN ('active','overdue')),0) as current_portfolio,
+              COALESCE(AVG(rate) FILTER (WHERE status='active'),0) as avg_rate
+            FROM loans
+        """)
+        savings_stats = query_one(cur, """
+            SELECT COUNT(*) as total,
+              COUNT(*) FILTER (WHERE status='active') as active,
+              COUNT(*) FILTER (WHERE status='closed') as closed,
+              COALESCE(SUM(current_balance) FILTER (WHERE status='active'),0) as current_balance,
+              COALESCE(AVG(rate) FILTER (WHERE status='active'),0) as avg_rate
+            FROM savings
+        """)
+        overdue_stats = query_one(cur, """
+            SELECT COUNT(*) as overdue_payments_count,
+              COALESCE(SUM(payment_amount - COALESCE(paid_amount,0)),0) as overdue_total
+            FROM loan_schedule WHERE status='overdue'
+        """)
+        return {
+            'members': members_stats,
+            'loans': loans_stats,
+            'savings': savings_stats,
+            'overdue': overdue_stats,
+        }
+
+    return {'_status': 400, 'error': 'Укажите resource: members, loans, savings, schedule, balance или stats'}
 
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
