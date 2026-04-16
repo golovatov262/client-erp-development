@@ -31,5 +31,7 @@
   {"name": "Chat unauthorized", "method": "GET", "path": "/?entity=chat&action=list&token=invalid", "expectedStatus": 401},
   {"name": "Chat send unauthorized", "method": "POST", "path": "/", "body": {"entity": "chat", "action": "send", "token": "invalid", "conversation_id": 1, "body": "test"}, "expectedStatus": 401},
   {"name": "Chat create unauthorized", "method": "POST", "path": "/", "body": {"entity": "chat", "action": "create", "token": "invalid"}, "expectedStatus": 401},
-  {"name": "Sber API test", "method": "GET", "path": "/?entity=sber_test", "expectedStatus": 200, "expectedBody": {"secrets": "object"}, "bodyMatcher": "partial"}
+  {"name": "Sber API test", "method": "GET", "path": "/?entity=sber_test", "expectedStatus": 200, "expectedBody": {"secrets": "object"}, "bodyMatcher": "partial"},
+  {"name": "External requires API key", "method": "GET", "path": "/?entity=external&resource=members", "expectedStatus": 401},
+  {"name": "API keys requires auth", "method": "GET", "path": "/?entity=api_keys", "expectedStatus": 401}
 ]}

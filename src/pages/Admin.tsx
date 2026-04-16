@@ -12,6 +12,7 @@ import AdminUserManagement from "./admin/AdminUserManagement";
 import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
 import AdminNotifications from "./admin/AdminNotifications";
+import AdminApiKeys from "./admin/AdminApiKeys";
 
 type UserRow = StaffUser & { [key: string]: unknown };
 
@@ -138,6 +139,7 @@ const Admin = () => {
           <TabsTrigger value="audit">Журнал</TabsTrigger>
           <TabsTrigger value="organizations">Организации</TabsTrigger>
           <TabsTrigger value="notifications">Уведомления</TabsTrigger>
+          <TabsTrigger value="api_keys">API-ключи</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -174,6 +176,10 @@ const Admin = () => {
 
         <TabsContent value="notifications">
           <AdminNotifications />
+        </TabsContent>
+
+        <TabsContent value="api_keys">
+          <AdminApiKeys />
         </TabsContent>
       </Tabs>
 

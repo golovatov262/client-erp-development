@@ -269,6 +269,13 @@ export const api = {
       request<AuditListResult>("GET", { entity: "audit", ...params }),
   },
 
+  apiKeys: {
+    list: () => request<Array<{ id: number; key_prefix: string; name: string; is_active: boolean; created_at: string; last_used_at?: string; last_used_ip?: string; usage_count: number }>>("GET", { entity: "api_keys" }),
+    create: (name: string) => request<{ id: number; key: string; key_prefix: string; name: string; warning: string }>("POST", undefined, { entity: "api_keys", action: "create", name }),
+    toggle: (id: number) => request<{ success: boolean; is_active: boolean }>("POST", undefined, { entity: "api_keys", action: "toggle", id }),
+    delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "api_keys", action: "delete", id }),
+  },
+
   orgSettings: {
     get: () => request<OrgSettings>("GET", { entity: "org_settings" }),
     save: (settings: Partial<OrgSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "org_settings", settings }),

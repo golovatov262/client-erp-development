@@ -6778,12 +6778,144 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys'}
+
+def hash_api_key(key):
+    return hashlib.sha256(key.encode()).hexdigest()
+
+def check_api_key(headers, cur, conn, ip=''):
+    key = (headers or {}).get('X-Api-Key') or (headers or {}).get('x-api-key') or ''
+    if not key:
+        return None
+    kh = hash_api_key(key)
+    cur.execute("SELECT id, name FROM api_keys WHERE key_hash='%s' AND is_active=TRUE" % esc(kh))
+    row = cur.fetchone()
+    if not row:
+        return None
+    cur.execute("UPDATE api_keys SET last_used_at=NOW(), last_used_ip='%s', usage_count=usage_count+1 WHERE id=%s" % (esc(ip), row[0]))
+    conn.commit()
+    return {'id': row[0], 'name': row[1]}
+
+def handle_api_keys(method, params, body, staff, cur, conn):
+    if not staff or staff.get('role') != 'admin':
+        return {'_status': 403, 'error': 'Только для администраторов'}
+
+    action = params.get('action') or body.get('action', '')
+
+    if method == 'GET' or action == 'list':
+        rows = query_rows(cur, "SELECT id, key_prefix, name, is_active, created_at, last_used_at, last_used_ip, usage_count FROM api_keys ORDER BY created_at DESC")
+        return rows
+
+    if action == 'create':
+        name = body.get('name', '').strip()
+        if not name:
+            return {'error': 'Укажите название ключа'}
+        raw = secrets.token_urlsafe(32)
+        full_key = 'sk_' + raw
+        kh = hash_api_key(full_key)
+        prefix = full_key[:12]
+        cur.execute("INSERT INTO api_keys (key_hash, key_prefix, name, created_by) VALUES ('%s','%s','%s',%s) RETURNING id" % (kh, esc(prefix), esc(name), staff.get('user_id') or 'NULL'))
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return {'id': new_id, 'key': full_key, 'key_prefix': prefix, 'name': name, 'warning': 'Сохраните ключ — он больше не будет показан'}
+
+    if action == 'toggle':
+        key_id = body.get('id')
+        if not key_id:
+            return {'error': 'Укажите id ключа'}
+        cur.execute("UPDATE api_keys SET is_active = NOT is_active WHERE id=%s RETURNING is_active" % int(key_id))
+        r = cur.fetchone()
+        conn.commit()
+        return {'success': True, 'is_active': r[0] if r else False}
+
+    if action == 'delete':
+        key_id = body.get('id')
+        if not key_id:
+            return {'error': 'Укажите id ключа'}
+        cur.execute("DELETE FROM api_keys WHERE id=%s" % int(key_id))
+        conn.commit()
+        return {'success': True}
+
+    return {'error': 'Неизвестное действие'}
+
+def handle_external(method, params, body, headers, cur, conn, ip=''):
+    api_ctx = check_api_key(headers, cur, conn, ip)
+    if not api_ctx:
+        return {'_status': 401, 'error': 'Требуется API-ключ в заголовке X-Api-Key'}
+
+    resource = params.get('resource') or body.get('resource', '')
+    entity_id = params.get('id') or body.get('id')
+
+    try:
+        page = int(params.get('page', '1') or 1)
+    except Exception:
+        page = 1
+    try:
+        limit = int(params.get('limit', '100') or 100)
+    except Exception:
+        limit = 100
+    limit = max(1, min(limit, 500))
+    offset = (page - 1) * limit
+
+    if resource == 'members':
+        if entity_id:
+            m = query_one(cur, "SELECT * FROM members WHERE id=%s" % int(entity_id))
+            if not m:
+                return {'_status': 404, 'error': 'Пайщик не найден'}
+            return m
+        where = "WHERE 1=1"
+        status_f = params.get('status')
+        if status_f:
+            where += " AND status='%s'" % esc(status_f)
+        total = query_one(cur, "SELECT COUNT(*) as cnt FROM members %s" % where)['cnt']
+        rows = query_rows(cur, "SELECT * FROM members %s ORDER BY id LIMIT %s OFFSET %s" % (where, limit, offset))
+        return {'data': rows, 'page': page, 'limit': limit, 'total': total}
+
+    if resource == 'loans':
+        if entity_id:
+            loan = query_one(cur, "SELECT * FROM loans WHERE id=%s" % int(entity_id))
+            if not loan:
+                return {'_status': 404, 'error': 'Договор займа не найден'}
+            loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % int(entity_id))
+            loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % int(entity_id))
+            return loan
+        where = "WHERE 1=1"
+        status_f = params.get('status')
+        if status_f:
+            where += " AND status='%s'" % esc(status_f)
+        mid = params.get('member_id')
+        if mid:
+            where += " AND member_id=%s" % int(mid)
+        total = query_one(cur, "SELECT COUNT(*) as cnt FROM loans %s" % where)['cnt']
+        rows = query_rows(cur, "SELECT * FROM loans %s ORDER BY id LIMIT %s OFFSET %s" % (where, limit, offset))
+        return {'data': rows, 'page': page, 'limit': limit, 'total': total}
+
+    if resource == 'savings':
+        if entity_id:
+            s = query_one(cur, "SELECT * FROM savings WHERE id=%s" % int(entity_id))
+            if not s:
+                return {'_status': 404, 'error': 'Договор сбережения не найден'}
+            s['accruals'] = query_rows(cur, "SELECT * FROM savings_daily_accruals WHERE saving_id=%s ORDER BY accrual_date" % int(entity_id))
+            s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY payment_no" % int(entity_id))
+            s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY id" % int(entity_id))
+            return s
+        where = "WHERE 1=1"
+        status_f = params.get('status')
+        if status_f:
+            where += " AND status='%s'" % esc(status_f)
+        mid = params.get('member_id')
+        if mid:
+            where += " AND member_id=%s" % int(mid)
+        total = query_one(cur, "SELECT COUNT(*) as cnt FROM savings %s" % where)['cnt']
+        rows = query_rows(cur, "SELECT * FROM savings %s ORDER BY id LIMIT %s OFFSET %s" % (where, limit, offset))
+        return {'data': rows, 'page': page, 'limit': limit, 'total': total}
+
+    return {'_status': 400, 'error': 'Укажите resource: members, loans или savings'}
 
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
-        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token, X-Api-Key', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
     headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
     method = event.get('httpMethod', 'GET')
@@ -6861,6 +6993,10 @@ def handler(event, context):
                 result = {'error': 'Неизвестное cron действие'}
         elif entity == 'sber_test':
             result = handle_sber_test(params, body)
+        elif entity == 'api_keys':
+            result = handle_api_keys(method, params, body, staff, cur, conn)
+        elif entity == 'external':
+            result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 
