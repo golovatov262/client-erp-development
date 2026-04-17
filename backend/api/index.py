@@ -2029,7 +2029,12 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             return {'success': True}
 
         elif action == 'early_close':
-            sid = int(body['saving_id'])
+            sid_raw = body.get('saving_id')
+            if isinstance(sid_raw, dict):
+                sid_raw = sid_raw.get('saving_id') or sid_raw.get('id')
+            if sid_raw is None:
+                return {'error': 'Не указан saving_id'}
+            sid = int(sid_raw)
             cur.execute("SELECT amount, accrued_interest, paid_interest, current_balance FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             oa, paid, bal = Decimal(str(sv[0])), Decimal(str(sv[2])), Decimal(str(sv[3]))
@@ -2044,7 +2049,12 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'close_by_term':
             """Закрытие договора сбережений по окончании срока"""
-            sid = int(body['saving_id'])
+            sid_raw = body.get('saving_id')
+            if isinstance(sid_raw, dict):
+                sid_raw = sid_raw.get('saving_id') or sid_raw.get('id')
+            if sid_raw is None:
+                return {'error': 'Не указан saving_id'}
+            sid = int(sid_raw)
             cur.execute("SELECT amount, accrued_interest, paid_interest, current_balance, end_date, status FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             if not sv:
