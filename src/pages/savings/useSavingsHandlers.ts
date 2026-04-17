@@ -159,7 +159,7 @@ export default function useSavingsHandlers() {
     if (!detail || !confirm("Досрочно закрыть договор сбережений?")) return;
     setSaving(true);
     try {
-      await api.savings.close({ saving_id: detail.id });
+      await api.savings.earlyClose(detail.id);
       toast({ title: "Договор досрочно закрыт" });
       setShowClose(false);
       await refreshDetail();
@@ -174,7 +174,7 @@ export default function useSavingsHandlers() {
     if (!detail || !confirm("Закрыть договор по истечении срока?")) return;
     setSaving(true);
     try {
-      await api.savings.closeByTerm({ saving_id: detail.id });
+      await api.savings.closeByTerm(detail.id);
       toast({ title: "Договор закрыт по сроку" });
       setShowClose(false);
       await refreshDetail();
