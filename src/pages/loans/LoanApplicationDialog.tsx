@@ -125,25 +125,25 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
           <DialogTitle>
             {isNew ? "Новая заявка на займ" : `Заявка ${item?.application_no || ""}`}
           </DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="loan" className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="flex-wrap h-auto">
-            <TabsTrigger value="loan">Параметры займа</TabsTrigger>
-            <TabsTrigger value="borrower">Заёмщик</TabsTrigger>
-            <TabsTrigger value="income">Доходы и расходы</TabsTrigger>
-            <TabsTrigger value="family">Семья</TabsTrigger>
-            <TabsTrigger value="collateral">Обеспечение</TabsTrigger>
-            <TabsTrigger value="service">Служебное</TabsTrigger>
+        <Tabs defaultValue="loan" className="flex flex-col flex-1 min-h-0">
+          <TabsList className="flex-wrap h-auto justify-start rounded-none border-b bg-transparent px-6 py-1 gap-1 shrink-0">
+            <TabsTrigger value="loan" className="text-xs">Параметры займа</TabsTrigger>
+            <TabsTrigger value="borrower" className="text-xs">Заёмщик</TabsTrigger>
+            <TabsTrigger value="income" className="text-xs">Доходы и расходы</TabsTrigger>
+            <TabsTrigger value="family" className="text-xs">Семья</TabsTrigger>
+            <TabsTrigger value="collateral" className="text-xs">Обеспечение</TabsTrigger>
+            <TabsTrigger value="service" className="text-xs">Служебное</TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto pt-4 pr-1">
-            <TabsContent value="loan" className="grid grid-cols-2 gap-3 mt-0">
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4">
+            <TabsContent value="loan" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("Сумма займа, ₽ *", num("amount", "25 000 — 5 000 000"))}
               {field("Срок, мес. *", num("term_months", "3 — 360"), "Более 60 мес. — только ипотека")}
               {field("Вид кредитной программы", txt("loan_program"))}
@@ -168,7 +168,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               ), "Если не выбрано — пайщик создастся при одобрении")}
             </TabsContent>
 
-            <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0">
+            <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("ФИО *", txt("full_name"))}
               {field("Дата рождения *", dateF("birth_date"))}
               {field("Место рождения *", txt("birth_place", "Как в паспорте"))}
@@ -192,7 +192,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               </div>
             </TabsContent>
 
-            <TabsContent value="income" className="grid grid-cols-2 gap-3 mt-0">
+            <TabsContent value="income" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               <div className="col-span-2 text-sm font-medium">Доходы</div>
               {field("Официально подтверждённый доход *, ₽", num("official_income"))}
               {field("Вид подтверждения дохода", txt("income_confirmation", "2-НДФЛ, выписка и т.д."))}
@@ -217,7 +217,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               ))}
             </TabsContent>
 
-            <TabsContent value="family" className="grid grid-cols-2 gap-3 mt-0">
+            <TabsContent value="family" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("Семейное положение *", (
                 <Select value={form.marital_status || ""} onValueChange={v => set("marital_status", v)} disabled={!!readOnly}>
                   <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
@@ -245,7 +245,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               {field("Доход супруга(и), ₽", num("spouse_income"))}
             </TabsContent>
 
-            <TabsContent value="collateral" className="space-y-4 mt-0">
+            <TabsContent value="collateral" className="space-y-4 mt-0 pb-2">
               <div>
                 <p className="text-sm font-medium mb-2">Недвижимое имущество</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -271,7 +271,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               </div>
             </TabsContent>
 
-            <TabsContent value="service" className="grid grid-cols-2 gap-3 mt-0">
+            <TabsContent value="service" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("Статус заявки", (
                 <Select value={form.status || "new"} onValueChange={v => set("status", v)} disabled={!!readOnly}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -331,7 +331,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
           </div>
         </Tabs>
 
-        <DialogFooter className="border-t pt-3">
+        <DialogFooter className="border-t px-6 py-3 shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Закрыть</Button>
           {canEdit && !readOnly && (
             <Button onClick={handleSave} disabled={saving}>
