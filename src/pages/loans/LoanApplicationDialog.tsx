@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { LoanApplication, Member, Organization, StaffUser, toNum } from "@/lib/api";
+import api, { LoanApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
 
 type Props = {
@@ -124,6 +124,42 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
 
   const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
 
+  const fillFromMember = async (id: string | null) => {
+    const memberId = id ? Number(id) : null;
+    set("member_id", memberId);
+    if (!memberId) return;
+    try {
+      const m: MemberDetail = await api.members.get(memberId);
+      const fio = [m.last_name, m.first_name, m.middle_name].filter(Boolean).join(" ");
+      const passportSN = [m.passport_series, m.passport_number].filter(Boolean).join(" ");
+      setForm(f => ({
+        ...f,
+        member_id: memberId,
+        full_name: fio || f.full_name,
+        birth_date: m.birth_date || f.birth_date,
+        birth_place: m.birth_place || f.birth_place,
+        passport_series_number: passportSN || f.passport_series_number,
+        passport_issue_date: m.passport_issue_date || f.passport_issue_date,
+        passport_issued_by: m.passport_issued_by || f.passport_issued_by,
+        passport_division_code: m.passport_dept_code || f.passport_division_code,
+        registration_address: m.registration_address || f.registration_address,
+        mobile_phone: m.phone || f.mobile_phone,
+        email: m.email || f.email,
+        inn: m.inn || f.inn,
+        bank_account: m.bank_account || f.bank_account,
+        bik: m.bank_bik || f.bik,
+        marital_status: m.marital_status || f.marital_status,
+        spouse_name: m.spouse_fio || f.spouse_name,
+        spouse_phone: m.spouse_phone || f.spouse_phone,
+        contact_full_name: m.extra_contact_fio || f.contact_full_name,
+        contact_phone: m.extra_phone || f.contact_phone,
+      }));
+      toast({ title: "Данные пайщика подставлены", description: "Недостающие поля заполните вручную" });
+    } catch {
+      toast({ title: "Не удалось загрузить данные пайщика", variant: "destructive" });
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
@@ -162,10 +198,10 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 <MemberSearch
                   members={members}
                   value={form.member_id ? String(form.member_id) : ""}
-                  onChange={(id) => set("member_id", id ? Number(id) : null)}
+                  onChange={fillFromMember}
                   placeholder="Поиск по ФИО, номеру, ИНН, телефону..."
                 />
-              ), "Если не выбрано — пайщик создастся при одобрении")}
+              ), "При выборе поля заёмщика заполнятся автоматически")}
             </TabsContent>
 
             <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">

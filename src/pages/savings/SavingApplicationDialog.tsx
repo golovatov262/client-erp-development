@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { SavingApplication, Member, Organization, StaffUser, toNum } from "@/lib/api";
+import api, { SavingApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
 
 type Props = {
@@ -130,6 +130,44 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
   const staffUsers = users.filter(u => u.role === "admin" || u.role === "manager");
   const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
 
+  const fillFromMember = async (id: string | null) => {
+    const memberId = id ? Number(id) : null;
+    set("member_id", memberId);
+    if (!memberId) return;
+    try {
+      const m: MemberDetail = await api.members.get(memberId);
+      setForm(f => ({
+        ...f,
+        member_id: memberId,
+        last_name: m.last_name || f.last_name,
+        first_name: m.first_name || f.first_name,
+        middle_name: m.middle_name || f.middle_name,
+        birth_date: m.birth_date || f.birth_date,
+        birth_place: m.birth_place || f.birth_place,
+        inn: m.inn || f.inn,
+        passport_series: m.passport_series || f.passport_series,
+        passport_number: m.passport_number || f.passport_number,
+        passport_dept_code: m.passport_dept_code || f.passport_dept_code,
+        passport_issue_date: m.passport_issue_date || f.passport_issue_date,
+        passport_issued_by: m.passport_issued_by || f.passport_issued_by,
+        registration_address: m.registration_address || f.registration_address,
+        phone: m.phone || f.phone,
+        email: m.email || f.email,
+        telegram: m.telegram || f.telegram,
+        bank_bik: m.bank_bik || f.bank_bik,
+        bank_account: m.bank_account || f.bank_account,
+        marital_status: m.marital_status || f.marital_status,
+        spouse_fio: m.spouse_fio || f.spouse_fio,
+        spouse_phone: m.spouse_phone || f.spouse_phone,
+        extra_phone: m.extra_phone || f.extra_phone,
+        extra_contact_fio: m.extra_contact_fio || f.extra_contact_fio,
+      }));
+      toast({ title: "Данные пайщика подставлены", description: "Недостающие поля заполните вручную" });
+    } catch {
+      toast({ title: "Не удалось загрузить данные пайщика", variant: "destructive" });
+    }
+  };
+
   const field = (label: string, node: React.ReactNode, hint?: string) => (
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
@@ -204,10 +242,10 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
                 <MemberSearch
                   members={members}
                   value={form.member_id ? String(form.member_id) : ""}
-                  onChange={(id) => set("member_id", id ? Number(id) : null)}
+                  onChange={fillFromMember}
                   placeholder="Поиск по ФИО, номеру, ИНН, телефону..."
                 />
-              ), "Если не выбрано — пайщик создастся автоматически при заключении договора")}
+              ), "При выборе поля вкладчика заполнятся автоматически")}
             </TabsContent>
 
             {/* ── Данные вкладчика ── */}
