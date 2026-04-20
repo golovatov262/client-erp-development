@@ -290,7 +290,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                   <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">—</SelectItem>
-                    {users.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>)}
+                    {users.filter(u => u.role === "admin" || u.role === "manager").map(u => <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               ) : (
