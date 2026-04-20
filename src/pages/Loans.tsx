@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { toNum, Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
@@ -394,51 +395,73 @@ const Loans = () => {
     }
   };
 
+  const [tab, setTab] = useState<"loans" | "applications">("loans");
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
         title="Займы"
-        action={isAdmin || isManager ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
-      >
-        <div className="flex flex-wrap gap-2">
-          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Статус" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все статусы</SelectItem>
-              <SelectItem value="active">Активен</SelectItem>
-              <SelectItem value="overdue">Просрочен</SelectItem>
-              <SelectItem value="closed">Закрыт</SelectItem>
-              <SelectItem value="paid">Оплачен</SelectItem>
-              <SelectItem value="partial">Частично оплачен</SelectItem>
-            </SelectContent>
-          </Select>
-          {orgs.length > 0 && (
-            <Select value={filterOrg} onValueChange={setFilterOrg}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Организация" />
+        action={isAdmin || isManager ? (tab === "loans"
+          ? { label: "Новый договор", onClick: () => setShowForm(true) }
+          : { label: "Новая заявка", onClick: () => toast({ title: "Скоро", description: "Форма заявки будет добавлена после согласования полей" }) }) : undefined}
+      />
+
+      <Tabs value={tab} onValueChange={v => setTab(v as "loans" | "applications")}>
+        <TabsList>
+          <TabsTrigger value="loans">Займы</TabsTrigger>
+          <TabsTrigger value="applications">Заявки</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="loans" className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Статус" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Все организации</SelectItem>
-                {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>)}
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="active">Активен</SelectItem>
+                <SelectItem value="overdue">Просрочен</SelectItem>
+                <SelectItem value="closed">Закрыт</SelectItem>
+                <SelectItem value="paid">Оплачен</SelectItem>
+                <SelectItem value="partial">Частично оплачен</SelectItem>
               </SelectContent>
             </Select>
-          )}
-          {(filterStatus !== "all" || filterOrg !== "all") && (
-            <button onClick={() => { setFilterStatus("all"); setFilterOrg("all"); }} className="px-3 py-1 text-sm border rounded hover:bg-muted text-muted-foreground">
-              Сбросить
-            </button>
-          )}
-          <Button variant="outline" size="sm" onClick={handleExportLoans} disabled={exporting} className="gap-1.5">
-            <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
-            {exporting ? "Выгрузка..." : "Excel"}
-          </Button>
-        </div>
-      </PageHeader>
+            {orgs.length > 0 && (
+              <Select value={filterOrg} onValueChange={setFilterOrg}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Организация" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все организации</SelectItem>
+                  {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {(filterStatus !== "all" || filterOrg !== "all") && (
+              <button onClick={() => { setFilterStatus("all"); setFilterOrg("all"); }} className="px-3 py-1 text-sm border rounded hover:bg-muted text-muted-foreground">
+                Сбросить
+              </button>
+            )}
+            <Button variant="outline" size="sm" onClick={handleExportLoans} disabled={exporting} className="gap-1.5">
+              <Icon name={exporting ? "Loader2" : "FileSpreadsheet"} size={14} className={exporting ? "animate-spin" : "text-green-600"} />
+              {exporting ? "Выгрузка..." : "Excel"}
+            </Button>
+          </div>
 
-      <DataTable columns={columns} data={filtered} loading={loading} onRowClick={openDetail} />
+          <DataTable columns={columns} data={filtered} loading={loading} onRowClick={openDetail} />
+        </TabsContent>
+
+        <TabsContent value="applications">
+          <div className="border rounded-lg p-12 text-center text-muted-foreground bg-muted/20">
+            <Icon name="FileText" size={48} className="mx-auto mb-3 opacity-40" />
+            <p className="font-medium mb-1">Заявки на займы</p>
+            <p className="text-sm">Раздел будет активирован после согласования полей карточки заявки.</p>
+            <p className="text-sm mt-1">После одобрения заявки из неё автоматически создаётся договор займа.</p>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <LoansCreateDialog
         open={showForm}
