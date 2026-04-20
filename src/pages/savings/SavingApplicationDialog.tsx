@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { SavingApplication, Member, Organization, StaffUser, toNum } from "@/lib/api";
+import MemberSearch from "@/components/ui/member-search";
 
 type Props = {
   open: boolean;
@@ -200,13 +201,12 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
                 </Select>
               ))}
               {field("Привязать к пайщику (если уже есть)", (
-                <Select value={form.member_id ? String(form.member_id) : "none"} onValueChange={v => set("member_id", v === "none" ? null : Number(v))} disabled={!!readOnly}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Новый вкладчик</SelectItem>
-                    {members.slice(0, 500).map(m => <SelectItem key={m.id} value={String(m.id)}>{m.member_no} · {m.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <MemberSearch
+                  members={members}
+                  value={form.member_id ? String(form.member_id) : ""}
+                  onChange={(id) => set("member_id", id ? Number(id) : null)}
+                  placeholder="Поиск по ФИО, номеру, ИНН, телефону..."
+                />
               ), "Если не выбрано — пайщик создастся автоматически при заключении договора")}
             </TabsContent>
 
