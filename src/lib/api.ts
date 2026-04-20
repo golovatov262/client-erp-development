@@ -182,6 +182,15 @@ export const api = {
     archive: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "loan_applications", action: "delete", id }),
   },
 
+  savingApplications: {
+    list: (status?: string) => request<SavingApplication[]>("GET", { entity: "saving_applications", ...(status ? { status } : {}) }),
+    get: (id: number) => request<SavingApplication>("GET", { entity: "saving_applications", id }),
+    create: (data: Partial<SavingApplication>) => request<{ id: number; application_no: string }>("POST", undefined, { entity: "saving_applications", action: "create", ...data }),
+    update: (id: number, data: Partial<SavingApplication>) => request<{ success: boolean }>("POST", undefined, { entity: "saving_applications", action: "update", id, ...data }),
+    conclude: (id: number) => request<{ success: boolean; saving_id: number; contract_no: string }>("POST", undefined, { entity: "saving_applications", action: "conclude", id }),
+    annul: (id: number, reason: string) => request<{ success: boolean }>("POST", undefined, { entity: "saving_applications", action: "annul", id, reason }),
+  },
+
   export: {
     download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure" | "members" | "loans_list" | "savings_list", id: number | undefined, format: "xlsx" | "pdf", extra?: Record<string, string>) => {
       const params: Record<string, unknown> = { entity: "export", type, format, ...extra };
@@ -687,6 +696,56 @@ export interface LoanApplication {
   specialist_comment?: string;
 
   created_loan_id?: number | null;
+  rejection_reason?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SavingApplication {
+  id: number;
+  application_no?: string;
+  status: string;
+  member_id?: number | null;
+  member_name?: string;
+  org_id?: number | null;
+  org_short_name?: string;
+
+  amount?: number | null;
+  term_months?: number | null;
+  rate?: number | null;
+  payout_type?: string;
+
+  last_name?: string;
+  first_name?: string;
+  middle_name?: string;
+  birth_date?: string;
+  birth_place?: string;
+  inn?: string;
+  passport_series?: string;
+  passport_number?: string;
+  passport_dept_code?: string;
+  passport_issue_date?: string;
+  passport_issued_by?: string;
+  registration_address?: string;
+  phone?: string;
+  email?: string;
+  telegram?: string;
+  bank_bik?: string;
+  bank_account?: string;
+  marital_status?: string;
+  spouse_fio?: string;
+  spouse_phone?: string;
+  extra_phone?: string;
+  extra_contact_fio?: string;
+
+  curator_user_id?: number | null;
+  curator_name?: string;
+  agent_name?: string;
+  is_curator_personal?: boolean;
+  commission_amount?: number | null;
+  specialist_comment?: string;
+
+  created_saving_id?: number | null;
   rejection_reason?: string;
   created_at?: string;
   updated_at?: string;

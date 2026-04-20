@@ -7259,6 +7259,158 @@ def handle_loan_applications(method, params, body, cur, conn, staff=None, ip='')
 
     return {'error': 'Метод не поддерживается'}
 
+SAVING_APP_FIELDS = [
+    'member_id', 'org_id', 'amount', 'term_months', 'rate', 'payout_type',
+    'last_name', 'first_name', 'middle_name', 'birth_date', 'birth_place',
+    'inn', 'passport_series', 'passport_number', 'passport_dept_code',
+    'passport_issue_date', 'passport_issued_by', 'registration_address',
+    'phone', 'email', 'telegram', 'bank_bik', 'bank_account',
+    'marital_status', 'spouse_fio', 'spouse_phone', 'extra_phone', 'extra_contact_fio',
+    'curator_user_id', 'agent_name', 'commission_amount', 'specialist_comment',
+    'rejection_reason',
+]
+
+NUMERIC_SAVING_APP_FIELDS = {'member_id', 'org_id', 'term_months', 'curator_user_id',
+                              'amount', 'rate', 'commission_amount'}
+BOOL_SAVING_APP_FIELDS = {'is_curator_personal'}
+
+def _sav_sql_val(field, value):
+    if value is None or value == '':
+        return 'NULL'
+    if field in BOOL_SAVING_APP_FIELDS:
+        return 'TRUE' if str(value).lower() in ('true', '1', 'yes') else 'FALSE'
+    if field in NUMERIC_SAVING_APP_FIELDS:
+        try:
+            return str(float(str(value).replace(',', '.').replace(' ', '')))
+        except Exception:
+            return 'NULL'
+    return "'%s'" % esc(str(value))
+
+def handle_saving_applications(method, params, body, cur, conn, staff=None, ip=''):
+    if method == 'GET':
+        app_id = params.get('id')
+        if app_id:
+            app = query_one(cur, "SELECT * FROM saving_applications WHERE id=%s" % int(app_id))
+            if not app:
+                return None
+            if app.get('member_id'):
+                cur.execute("SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',COALESCE(middle_name,'')) ELSE company_name END FROM members WHERE id=%s" % app['member_id'])
+                nr = cur.fetchone()
+                app['member_name'] = nr[0] if nr else ''
+            return app
+        status_f = params.get('status')
+        where = ''
+        if status_f and status_f != 'all':
+            where = " WHERE sa.status='%s'" % esc(status_f)
+        return query_rows(cur, """
+            SELECT sa.*,
+                   CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',COALESCE(m.middle_name,''))
+                        ELSE m.company_name END as member_name,
+                   o.short_name as org_short_name,
+                   u.name as curator_name
+            FROM saving_applications sa
+            LEFT JOIN members m ON m.id=sa.member_id
+            LEFT JOIN organizations o ON o.id=sa.org_id
+            LEFT JOIN users u ON u.id=sa.curator_user_id
+            %s
+            ORDER BY sa.created_at DESC
+        """ % where)
+
+    if method == 'POST':
+        action = body.get('action', 'create')
+
+        if action == 'create':
+            user_id_val = str(staff['user_id']) if staff and staff.get('user_id') else 'NULL'
+            cols = ['status', 'created_by']
+            vals = ["'new'", user_id_val]
+            for f in SAVING_APP_FIELDS:
+                if f in body:
+                    cols.append(f)
+                    vals.append(_sav_sql_val(f, body[f]))
+            if 'is_curator_personal' in body:
+                cols.append('is_curator_personal')
+                vals.append(_sav_sql_val('is_curator_personal', body['is_curator_personal']))
+            if 'curator_user_id' not in body and user_id_val != 'NULL':
+                cols.append('curator_user_id')
+                vals.append(user_id_val)
+            cur.execute("INSERT INTO saving_applications (%s) VALUES (%s) RETURNING id" % (','.join(cols), ','.join(vals)))
+            app_id = cur.fetchone()[0]
+            app_no = 'ЗС-%06d' % app_id
+            cur.execute("UPDATE saving_applications SET application_no='%s' WHERE id=%s" % (app_no, app_id))
+            audit_log(cur, staff, 'create', 'saving_app', app_id, app_no, '', ip)
+            conn.commit()
+            return {'id': app_id, 'application_no': app_no}
+
+        if action == 'update':
+            app_id = int(body['id'])
+            updates = []
+            for f in SAVING_APP_FIELDS + ['status']:
+                if f in body:
+                    updates.append("%s=%s" % (f, _sav_sql_val(f, body[f])))
+            if 'is_curator_personal' in body:
+                updates.append("is_curator_personal=%s" % _sav_sql_val('is_curator_personal', body['is_curator_personal']))
+            if updates:
+                updates.append("updated_at=NOW()")
+                cur.execute("UPDATE saving_applications SET %s WHERE id=%s" % (','.join(updates), app_id))
+            audit_log(cur, staff, 'update', 'saving_app', app_id, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
+        if action == 'conclude':
+            app_id = int(body['id'])
+            cur.execute("SELECT * FROM saving_applications WHERE id=%s" % app_id)
+            app = cur.fetchone()
+            if not app:
+                return {'error': 'Заявка не найдена'}
+            row = dict(zip([d[0] for d in cur.description], app)) if not isinstance(app, dict) else app
+            mid = row.get('member_id')
+            if not mid:
+                ln = esc(row.get('last_name') or '')
+                fn = esc(row.get('first_name') or '')
+                mn = esc(row.get('middle_name') or '')
+                if not ln:
+                    return {'error': 'Для заключения договора укажите Фамилию вкладчика'}
+                cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(member_no FROM '[0-9]+$') AS INTEGER)),0)+1 FROM members WHERE member_no ~ '[0-9]+$'")
+                mno = 'П-%06d' % (cur.fetchone()[0] or 1)
+                phn = esc(row.get('phone') or '')
+                inn_v = esc(row.get('inn') or '')
+                addr = esc(row.get('registration_address') or '')
+                cur.execute("INSERT INTO members (member_no, member_type, last_name, first_name, middle_name, phone, inn, registration_address, status) VALUES ('%s','FL','%s','%s','%s','%s','%s','%s','active') RETURNING id" % (mno, ln, fn, mn, phn, inn_v, addr))
+                mid = cur.fetchone()[0]
+                cur.execute("UPDATE saving_applications SET member_id=%s WHERE id=%s" % (mid, app_id))
+            amt = float(row.get('amount') or 0)
+            term = int(row.get('term_months') or 0)
+            rt = float(row.get('rate') or 0)
+            pt = row.get('payout_type') or 'monthly'
+            org_id = row.get('org_id')
+            if not amt or not term or not rt:
+                return {'error': 'Для заключения договора заполните сумму, срок и ставку'}
+            sd = date.today()
+            cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)),0)+1 FROM savings WHERE contract_no ~ '^[0-9]+'")
+            nn = cur.fetchone()[0] or 1
+            cn = '%s-%s' % (nn, sd.strftime('%d%m%Y'))
+            schedule = calc_savings_schedule(amt, rt, term, sd, pt)
+            ed = add_months(sd, term)
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',0,%s) RETURNING id" % (esc(cn), mid, amt, rt, term, pt, sd.isoformat(), ed.isoformat(), amt, org_id if org_id else 'NULL'))
+            sid = cur.fetchone()[0]
+            for item in schedule:
+                cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'opening','Открытие договора. Сумма: %s руб., ставка: %s%%, срок: %s мес.')" % (sid, sd.isoformat(), amt, amt, rt, term))
+            cur.execute("UPDATE saving_applications SET status='concluded', created_saving_id=%s, updated_at=NOW() WHERE id=%s" % (sid, app_id))
+            audit_log(cur, staff, 'conclude', 'saving_app', app_id, '', 'Создан договор сбережений #%s' % sid, ip)
+            conn.commit()
+            return {'success': True, 'saving_id': sid, 'contract_no': cn}
+
+        if action == 'annul':
+            app_id = int(body['id'])
+            reason = body.get('reason', '')
+            cur.execute("UPDATE saving_applications SET status='annulled', rejection_reason='%s', updated_at=NOW() WHERE id=%s" % (esc(reason), app_id))
+            audit_log(cur, staff, 'annul', 'saving_app', app_id, '', reason, ip)
+            conn.commit()
+            return {'success': True}
+
+    return {'error': 'Метод не поддерживается'}
+
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
@@ -7304,6 +7456,8 @@ def handler(event, context):
             result = handle_shares(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loan_applications':
             result = handle_loan_applications(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'saving_applications':
+            result = handle_saving_applications(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'export':
             result = handle_export(params, cur)
         elif entity == 'users':

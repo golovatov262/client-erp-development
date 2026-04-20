@@ -2,9 +2,8 @@ import { useState } from "react";
 import PageHeader from "@/components/ui/page-header";
 import DataTable from "@/components/ui/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import Icon from "@/components/ui/icon";
-import { useToast } from "@/hooks/use-toast";
 import SavingsCreateDialog from "./savings/SavingsCreateDialog";
+import SavingApplicationsTab from "./savings/SavingApplicationsTab";
 import SavingsDetailDialog from "./savings/SavingsDetailDialog";
 import SavingsActionDialogs from "./savings/SavingsActionDialogs";
 import SavingsEditDialog from "./savings/SavingsEditDialog";
@@ -14,8 +13,8 @@ import useSavingsHandlers from "./savings/useSavingsHandlers";
 
 const Savings = () => {
   const h = useSavingsHandlers();
-  const { toast } = useToast();
   const [tab, setTab] = useState<"savings" | "applications">("savings");
+  const [openAppCreate, setOpenAppCreate] = useState(0);
 
   return (
     <div className="p-6 space-y-4">
@@ -23,7 +22,7 @@ const Savings = () => {
         title="Сбережения"
         action={h.isAdmin || h.isManager ? (tab === "savings"
           ? { label: "Новый договор", onClick: () => h.setShowForm(true) }
-          : { label: "Новая заявка", onClick: () => toast({ title: "Скоро", description: "Форма заявки будет добавлена после согласования полей" }) }) : undefined}
+          : { label: "Новая заявка", onClick: () => setOpenAppCreate(v => v + 1) }) : undefined}
       />
 
       <Tabs value={tab} onValueChange={v => setTab(v as "savings" | "applications")}>
@@ -52,12 +51,14 @@ const Savings = () => {
         </TabsContent>
 
         <TabsContent value="applications">
-          <div className="border rounded-lg p-12 text-center text-muted-foreground bg-muted/20">
-            <Icon name="FileText" size={48} className="mx-auto mb-3 opacity-40" />
-            <p className="font-medium mb-1">Заявки на сбережения</p>
-            <p className="text-sm">Раздел будет активирован после согласования полей карточки заявки.</p>
-            <p className="text-sm mt-1">После одобрения заявки из неё автоматически создаётся договор сбережений.</p>
-          </div>
+          <SavingApplicationsTab
+            members={h.members}
+            orgs={h.orgs}
+            canEdit={h.isAdmin || h.isManager}
+            openCreate={openAppCreate}
+            onConsumeOpenCreate={() => setOpenAppCreate(0)}
+            onSavingCreated={() => { setTab("savings"); }}
+          />
         </TabsContent>
       </Tabs>
 
