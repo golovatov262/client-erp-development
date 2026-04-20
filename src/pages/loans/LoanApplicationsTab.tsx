@@ -72,6 +72,7 @@ const LoanApplicationsTab = ({ members, orgs, canEdit, openCreate, onConsumeOpen
     { key: "created_at", label: "Создана", render: (i) => i.created_at ? new Date(i.created_at).toLocaleDateString("ru-RU") : "—" },
     { key: "id", label: "", render: (i) => (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+        <button className="p-1 rounded hover:bg-muted" title="Согласие на обработку ПД" onClick={() => api.export.download("loan_application", i.id, "docx")}><Icon name="FileText" size={14} className="text-blue-500" /></button>
         {canEdit && i.status === "new" && (
           <>
             <button className="p-1 rounded hover:bg-muted" title="Одобрить" onClick={() => setApproveItem(i)}><Icon name="Check" size={14} className="text-green-600" /></button>

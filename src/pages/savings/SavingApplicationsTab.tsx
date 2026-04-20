@@ -103,6 +103,9 @@ const SavingApplicationsTab = ({ members, orgs, canEdit, openCreate, onConsumeOp
     { key: "created_at", label: "Создана", render: i => i.created_at ? new Date(i.created_at).toLocaleDateString("ru-RU") : "—" },
     { key: "id", label: "", render: i => (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+        <button className="p-1 rounded hover:bg-muted" title="Согласие на обработку ПД" onClick={() => api.export.download("saving_application", i.id, "docx")}>
+          <Icon name="FileText" size={14} className="text-blue-500" />
+        </button>
         {canEdit && i.status !== "concluded" && i.status !== "annulled" && (
           <>
             <button className="p-1 rounded hover:bg-muted" title="Заключить договор" onClick={() => handleConclude(i)}>

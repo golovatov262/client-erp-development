@@ -192,7 +192,7 @@ export const api = {
   },
 
   export: {
-    download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure" | "members" | "loans_list" | "savings_list", id: number | undefined, format: "xlsx" | "pdf", extra?: Record<string, string>) => {
+    download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure" | "members" | "loans_list" | "savings_list" | "loan_application" | "saving_application", id: number | undefined, format: "xlsx" | "pdf" | "docx", extra?: Record<string, string>) => {
       const params: Record<string, unknown> = { entity: "export", type, format, ...extra };
       if (id !== undefined) params.id = id;
       const res = await request<ExportResult>("GET", params);

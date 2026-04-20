@@ -3788,10 +3788,158 @@ def handle_export(params, cur):
             data = generate_shares_xlsx(account, transactions, member_name, org)
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'share_%s.xlsx' % account.get('account_no', item_id)
+    elif export_type in ('loan_application', 'saving_application'):
+        if export_type == 'loan_application':
+            app = query_one(cur, "SELECT * FROM loan_applications WHERE id = %s" % item_id)
+            if not app:
+                return None
+            fio = (app.get('full_name') or '').strip()
+            passport_series = app.get('passport_series') or ''
+            passport_number = app.get('passport_number') or ''
+            passport_issued_by = app.get('passport_issued_by') or ''
+            passport_issue_date = app.get('passport_issue_date') or ''
+            passport_dept_code = app.get('passport_dept_code') or ''
+        else:
+            app = query_one(cur, "SELECT * FROM saving_applications WHERE id = %s" % item_id)
+            if not app:
+                return None
+            parts = [app.get('last_name') or '', app.get('first_name') or '', app.get('middle_name') or '']
+            fio = ' '.join(p for p in parts if p).strip()
+            passport_series = app.get('passport_series') or ''
+            passport_number = app.get('passport_number') or ''
+            passport_issued_by = app.get('passport_issued_by') or ''
+            passport_issue_date = app.get('passport_issue_date') or ''
+            passport_dept_code = app.get('passport_dept_code') or ''
+        data = generate_pd_consent_docx(fio, passport_series, passport_number, passport_issued_by, passport_issue_date, passport_dept_code)
+        ct = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        fn = 'pd_consent_%s.docx' % (app.get('application_no') or item_id)
     else:
         return None
 
     return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
+def generate_pd_consent_docx(fio, passport_series, passport_number, passport_issued_by, passport_issue_date, passport_dept_code):
+    from docx import Document
+    from docx.shared import Pt, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    def fmt_date(d):
+        if not d:
+            return '___'
+        try:
+            if hasattr(d, 'strftime'):
+                return d.strftime('%d.%m.%Y')
+            s = str(d)
+            parts = s.split('-')
+            if len(parts) == 3:
+                return '%s.%s.%s' % (parts[2], parts[1], parts[0])
+            return s
+        except Exception:
+            return str(d)
+
+    current_date_str = datetime.now().strftime('%d.%m.%Y')
+    passport_str = '%s %s' % (passport_series, passport_number) if passport_series or passport_number else '___'
+    issue_date_str = fmt_date(passport_issue_date)
+    dept_code_str = str(passport_dept_code) if passport_dept_code else '___'
+    issued_by_str = str(passport_issued_by) if passport_issued_by else '___'
+    fio_str = fio if fio else '___'
+
+    doc = Document()
+
+    for section in doc.sections:
+        section.top_margin = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(3)
+        section.right_margin = Cm(1.5)
+
+    style = doc.styles['Normal']
+    style.font.name = 'Times New Roman'
+    style.font.size = Pt(12)
+
+    def add_paragraph(text='', bold=False, align=WD_ALIGN_PARAGRAPH.JUSTIFY, size=12):
+        p = doc.add_paragraph()
+        p.alignment = align
+        run = p.add_run(text)
+        run.bold = bold
+        run.font.size = Pt(size)
+        run.font.name = 'Times New Roman'
+        pf = p.paragraph_format
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(4)
+        return p
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = title.add_run('Согласие на обработку персональных данных')
+    r.bold = True
+    r.font.size = Pt(14)
+    r.font.name = 'Times New Roman'
+
+    doc.add_paragraph()
+
+    intro_text = (
+        'Я, %s, Паспорт гражданина РФ %s выдан %s %s к/п %s в соответствии со ст.9 Федерального закона от 27.07.2006 '
+        '№ 152-ФЗ «О персональных данных» даю согласие на обработку моих персональных данных следующим операторам: '
+        'КПК «ЭКСПЕРТ ФИНАНС» ИНН 4307012081 (Адрес местонахождения 346500, Ростовская область, г Шахты, пр-кт Пушкина, зд. 29а ), '
+        'КПК «ФИН ФОРМУЛА» ИНН 3666209530 (Адрес местонахождения 346500, Ростовская область, г Шахты, пр-кт Пушкина, зд. 29а, помещение 1), '
+        'АССОЦИАЦИЯ «ОПОРА СЕМЬИ» ИНН 6155089669, (Адрес местонахождения 346504, Ростовская область, г Шахты, пер. Лермонтова 26а/9).'
+    ) % (fio_str, passport_str, issued_by_str, issue_date_str, dept_code_str)
+    add_paragraph(intro_text)
+
+    add_paragraph('Перечень действий с персональными данными:', bold=True)
+    add_paragraph(
+        'Обработка включает в себя сбор, запись, систематизацию, накопление, хранение, уточнение (обновление, изменение), '
+        'извлечение, использование, передачу (предоставление, доступ), обезличивание, блокирование, удаление, уничтожение '
+        'персональных данных в документальной и/или электронной форме.'
+    )
+
+    add_paragraph('Цель обработки персональных данных:', bold=True)
+    add_paragraph(
+        'Членство в вышеуказанных организациях, с целью получения финансовой взаимопомощи, а также информационной и юридической поддержки. '
+        'Определения возможности заключения договора займа/ договора поручительства / договора залога между Оператором и мной, заключения, '
+        'изменения и исполнения таких договоров, в том числе оценки Оператором рисков, связанных с заключением таких договоров (в том числе '
+        'моей благонадежности), взаимодействия со мной в случаях неисполнения и/или ненадлежащего их исполнения, осуществления информационных '
+        'рассылок и прямых контактов с помощью любых средств связи, по вопросам исполнения договоров, а также для обеспечения соблюдения '
+        'нормативных правовых актов.'
+    )
+
+    add_paragraph('Перечень сведений, на обработку которых дается согласие:', bold=True)
+    add_paragraph(
+        'фамилия, имя, отчество, дата рождения, место рождения, пол, гражданство, паспортные данные, адрес места жительства, '
+        'семейное положение, сведения о членах семьи, номер телефона, адрес электронной почты, ИНН, СНИЛС, сведения о воинском учете, '
+        'фотография, сведения об образовании, сведения о месте работы, в том числе о предыдущих, размер зарплаты, сведения о состоянии '
+        'здоровья, связанные с возможностью исполнения договоров займа/поручительства/залога'
+    )
+
+    add_paragraph('Срок, в течение которого действует согласие, а также способ его отзыва:', bold=True)
+    add_paragraph(
+        'Настоящее согласие действует с момента его подписания и в течении периода членства в организациях, которым предоставлено согласие.'
+    )
+    add_paragraph(
+        'Ознакомлен (а) что согласно ч. 2 ст. 9 Федерального закона от 27.07.2006 № 152-ФЗ «О персональных данных» согласие на обработку '
+        'персональных данных может быть отозвано мной в любой момент посредством направления соответствующего письменного заявления по адресам '
+        'регистрации Операторов, а так же понимаю, что в случае отзыва мной согласия на обработку персональных данных оператор вправе продолжить '
+        'обработку персональных данных без моего согласия при наличии оснований, указанных в пунктах 2 - 11 части 1 статьи 6, части 2 статьи 10 '
+        'и части 2 статьи 11 настоящего Федерального закона.'
+    )
+
+    doc.add_paragraph()
+
+    sig_p = doc.add_paragraph()
+    sig_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    sig_run = sig_p.add_run('___________________________  %s' % fio_str)
+    sig_run.font.size = Pt(12)
+    sig_run.font.name = 'Times New Roman'
+
+    date_p = doc.add_paragraph()
+    date_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    date_run = date_p.add_run(current_date_str)
+    date_run.font.size = Pt(12)
+    date_run.font.name = 'Times New Roman'
+
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
 
 def handle_dashboard(cur, params=None):
     params = params or {}
