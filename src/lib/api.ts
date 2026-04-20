@@ -682,9 +682,9 @@ export interface LoanApplication {
 
   curator_user_id?: number | null;
   agent_user_id?: number | null;
+  agent_name?: string;
   commission_amount?: number | null;
   specialist_comment?: string;
-  association?: string;
 
   created_loan_id?: number | null;
   rejection_reason?: string;

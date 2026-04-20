@@ -1,0 +1,1 @@
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS agent_name VARCHAR(300);

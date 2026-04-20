@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import api, { LoanApplication, Member, Organization, toNum } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import api, { LoanApplication, Member, Organization, StaffUser, toNum } from "@/lib/api";
 
 type Props = {
   open: boolean;
@@ -19,22 +20,50 @@ type Props = {
   onSaved: () => void;
 };
 
-const emptyForm: Partial<LoanApplication> = {};
+const fmt = (n: number | null | undefined) =>
+  n == null ? "" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n);
 
 const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdit, onSaved }: Props) => {
-  const [form, setForm] = useState<Partial<LoanApplication>>(emptyForm);
+  const [form, setForm] = useState<Partial<LoanApplication>>({});
+  const [users, setUsers] = useState<StaffUser[]>([]);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const { user, isAdmin } = useAuth();
+
   const isNew = !item;
   const readOnly = !canEdit || (item && (item.status === "approved" || item.status === "rejected" || item.status === "archived"));
 
   useEffect(() => {
-    if (open) setForm(item ? { ...item } : {});
-  }, [open, item]);
+    api.users.list().then(setUsers).catch(() => {});
+  }, []);
 
-  const set = <K extends keyof LoanApplication>(k: K, v: LoanApplication[K]) => setForm(f => ({ ...f, [k]: v }));
+  useEffect(() => {
+    if (open) {
+      if (item) {
+        setForm({ ...item });
+      } else {
+        setForm({ curator_user_id: user?.id ?? null });
+      }
+    }
+  }, [open, item, user]);
 
-  const numOrNull = (v: unknown) => v === "" || v == null ? null : toNum(String(v));
+  const set = <K extends keyof LoanApplication>(k: K, v: LoanApplication[K]) =>
+    setForm(f => ({ ...f, [k]: v }));
+
+  const numOrNull = (v: unknown) => (v === "" || v == null ? null : toNum(String(v)));
+
+  const agentReward = (() => {
+    const amt = Number(form.amount || 0);
+    if (!amt) return null;
+    return amt * 0.01;
+  })();
+
+  const curatorCommission = (() => {
+    const comm = Number(form.commission_amount || 0);
+    const agent = agentReward ?? 0;
+    if (!comm) return null;
+    return (comm - agent) / 2;
+  })();
 
   const handleSave = async () => {
     setSaving(true);
@@ -54,6 +83,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
         commission_amount: numOrNull(form.commission_amount),
         car_year: form.car_year ? Number(form.car_year) : null,
         children_count: form.children_count != null && form.children_count !== ("" as unknown) ? Number(form.children_count) : null,
+        curator_user_id: form.curator_user_id ? Number(form.curator_user_id) : null,
       };
       if (isNew) {
         await api.loanApplications.create(payload);
@@ -91,6 +121,8 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
     <Textarea value={(form[k] as string) || ""} onChange={e => set(k, e.target.value as never)} placeholder={placeholder} disabled={!!readOnly} rows={2} />
   );
 
+  const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
@@ -107,7 +139,6 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
             <TabsTrigger value="income">Доходы и расходы</TabsTrigger>
             <TabsTrigger value="family">Семья</TabsTrigger>
             <TabsTrigger value="collateral">Обеспечение</TabsTrigger>
-            <TabsTrigger value="docs">Документы</TabsTrigger>
             <TabsTrigger value="service">Служебное</TabsTrigger>
           </TabsList>
 
@@ -209,16 +240,6 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 </Select>
               ))}
               {field("Количество детей до 18 лет", num("children_count"))}
-              {field("Материнский капитал", (
-                <Select value={form.has_maternal_capital || ""} onValueChange={v => set("has_maternal_capital", v)} disabled={!!readOnly}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yes">Есть</SelectItem>
-                    <SelectItem value="no">Нет</SelectItem>
-                    <SelectItem value="used">Использован</SelectItem>
-                  </SelectContent>
-                </Select>
-              ))}
               {field("ФИО супруга(и)", txt("spouse_name"))}
               {field("Телефон супруга(и)", txt("spouse_phone"))}
               {field("Доход супруга(и), ₽", num("spouse_income"))}
@@ -250,15 +271,6 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               </div>
             </TabsContent>
 
-            <TabsContent value="docs" className="grid grid-cols-1 gap-3 mt-0">
-              <p className="text-sm text-muted-foreground">Ссылки на загруженные файлы (URL, разделённые запятой). Полноценная загрузка будет добавлена позже.</p>
-              {field("Скан паспорта", area("passport_files"))}
-              {field("Справка о доходах / выписка", area("income_files"))}
-              {field("Документы по залогу", area("collateral_files"))}
-              {field("Иные документы (фото объекта залога)", area("other_files"))}
-              {field("Документы поручителя", area("guarantor_files"))}
-            </TabsContent>
-
             <TabsContent value="service" className="grid grid-cols-2 gap-3 mt-0">
               {field("Статус заявки", (
                 <Select value={form.status || "new"} onValueChange={v => set("status", v)} disabled={!!readOnly}>
@@ -272,11 +284,39 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                   </SelectContent>
                 </Select>
               ))}
+
+              {field("Куратор заявки", isAdmin ? (
+                <Select value={form.curator_user_id ? String(form.curator_user_id) : "none"} onValueChange={v => set("curator_user_id", v === "none" ? null : Number(v))}>
+                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {users.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input value={curatorName} disabled />
+              ), "По умолчанию — создавший заявку. Изменить может только администратор")}
+
+              {field("Наименование агента", txt("agent_name", "ФИО или название организации"))}
+
               {field("Сумма комиссии, ₽", num("commission_amount"))}
-              {field("Ассоциация", txt("association"))}
+
+              <div className="space-y-1">
+                <Label className="text-xs">Вознаграждение агента, ₽ (1% от суммы займа)</Label>
+                <Input value={agentReward != null ? fmt(agentReward) : "—"} disabled className="bg-muted/40" />
+                <p className="text-[11px] text-muted-foreground">Рассчитывается автоматически</p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Комиссия куратора, ₽</Label>
+                <Input value={curatorCommission != null ? fmt(curatorCommission) : "—"} disabled className="bg-muted/40" />
+                <p className="text-[11px] text-muted-foreground">(Комиссия − Вознаграждение агента) / 2</p>
+              </div>
+
               <div className="col-span-2">
                 {field("Комментарий кредитного специалиста *", area("specialist_comment", "Впечатление от общения, факторы риска/положительные"))}
               </div>
+
               {item?.rejection_reason && (
                 <div className="col-span-2 p-3 bg-red-50 rounded text-sm">
                   <strong>Причина отклонения:</strong> {item.rejection_reason}

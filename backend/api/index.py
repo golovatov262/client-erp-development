@@ -7121,7 +7121,7 @@ LOAN_APP_FIELDS = [
     'other_collateral_description',
     'contact_full_name', 'contact_phone',
     'passport_files', 'income_files', 'collateral_files', 'other_files', 'guarantor_files',
-    'curator_user_id', 'agent_user_id', 'commission_amount', 'specialist_comment', 'association',
+    'curator_user_id', 'agent_user_id', 'agent_name', 'commission_amount', 'specialist_comment',
     'rejection_reason',
 ]
 
@@ -7172,12 +7172,16 @@ def handle_loan_applications(method, params, body, cur, conn, staff=None, ip='')
     if method == 'POST':
         action = body.get('action', 'create')
         if action == 'create':
+            user_id_val = str(staff['user_id']) if staff and staff.get('user_id') else 'NULL'
             cols = ['status', 'created_by']
-            vals = ["'new'", str(staff['user_id']) if staff and staff.get('user_id') else 'NULL']
+            vals = ["'new'", user_id_val]
             for f in LOAN_APP_FIELDS:
                 if f in body:
                     cols.append(f)
                     vals.append(_sql_val(f, body[f]))
+            if 'curator_user_id' not in body and user_id_val != 'NULL':
+                cols.append('curator_user_id')
+                vals.append(user_id_val)
             cur.execute("INSERT INTO loan_applications (%s) VALUES (%s) RETURNING id" % (','.join(cols), ','.join(vals)))
             app_id = cur.fetchone()[0]
             app_no = 'ЗЗ-%06d' % app_id
