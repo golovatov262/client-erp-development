@@ -16,6 +16,7 @@ import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
 import LoanReconciliationReport from "./loans/LoanReconciliationReport";
 import LoanEditDialog from "./loans/LoanEditDialog";
+import LoanApplicationsTab from "./loans/LoanApplicationsTab";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
@@ -396,6 +397,7 @@ const Loans = () => {
   };
 
   const [tab, setTab] = useState<"loans" | "applications">("loans");
+  const [openAppCreate, setOpenAppCreate] = useState(0);
 
   return (
     <div className="p-6 space-y-4">
@@ -403,7 +405,7 @@ const Loans = () => {
         title="Займы"
         action={isAdmin || isManager ? (tab === "loans"
           ? { label: "Новый договор", onClick: () => setShowForm(true) }
-          : { label: "Новая заявка", onClick: () => toast({ title: "Скоро", description: "Форма заявки будет добавлена после согласования полей" }) }) : undefined}
+          : { label: "Новая заявка", onClick: () => setOpenAppCreate(v => v + 1) }) : undefined}
       />
 
       <Tabs value={tab} onValueChange={v => setTab(v as "loans" | "applications")}>
@@ -454,12 +456,14 @@ const Loans = () => {
         </TabsContent>
 
         <TabsContent value="applications">
-          <div className="border rounded-lg p-12 text-center text-muted-foreground bg-muted/20">
-            <Icon name="FileText" size={48} className="mx-auto mb-3 opacity-40" />
-            <p className="font-medium mb-1">Заявки на займы</p>
-            <p className="text-sm">Раздел будет активирован после согласования полей карточки заявки.</p>
-            <p className="text-sm mt-1">После одобрения заявки из неё автоматически создаётся договор займа.</p>
-          </div>
+          <LoanApplicationsTab
+            members={members}
+            orgs={orgs}
+            canEdit={isAdmin || isManager}
+            openCreate={openAppCreate}
+            onConsumeOpenCreate={() => setOpenAppCreate(0)}
+            onLoanCreated={load}
+          />
         </TabsContent>
       </Tabs>
 

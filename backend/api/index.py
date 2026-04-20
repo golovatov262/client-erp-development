@@ -6788,7 +6788,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -7106,6 +7106,155 @@ def handle_external(method, params, body, headers, cur, conn, ip=''):
 
     return {'_status': 400, 'error': 'Укажите resource: members, loans, savings, schedule, balance или stats'}
 
+LOAN_APP_FIELDS = [
+    'member_id', 'org_id', 'amount', 'term_months', 'loan_program', 'collateral_types',
+    'full_name', 'birth_date', 'birth_place', 'passport_series_number', 'passport_issue_date',
+    'passport_issued_by', 'passport_division_code', 'registration_address', 'mobile_phone',
+    'email', 'inn', 'bank_account', 'bik', 'bank_name',
+    'official_income', 'income_confirmation', 'employer_inn', 'employer_name', 'position',
+    'additional_income_type', 'additional_income', 'additional_income_other',
+    'current_loans_payments', 'mandatory_expenses', 'has_active_loans',
+    'marital_status', 'has_minor_children', 'children_count', 'spouse_name', 'spouse_phone',
+    'spouse_income', 'has_maternal_capital',
+    'real_estate_type', 'cadastral_number', 'property_address', 'land_cadastral_number', 'land_address',
+    'car_brand', 'car_model', 'car_year', 'car_market_value',
+    'other_collateral_description',
+    'contact_full_name', 'contact_phone',
+    'passport_files', 'income_files', 'collateral_files', 'other_files', 'guarantor_files',
+    'curator_user_id', 'agent_user_id', 'commission_amount', 'specialist_comment', 'association',
+    'rejection_reason',
+]
+
+NUMERIC_APP_FIELDS = {'member_id', 'org_id', 'term_months', 'children_count', 'car_year',
+                      'curator_user_id', 'agent_user_id',
+                      'amount', 'official_income', 'additional_income',
+                      'current_loans_payments', 'mandatory_expenses', 'spouse_income',
+                      'car_market_value', 'commission_amount'}
+
+def _sql_val(field, value):
+    if value is None or value == '':
+        return 'NULL'
+    if field in NUMERIC_APP_FIELDS:
+        try:
+            return str(float(str(value).replace(',', '.').replace(' ', '')))
+        except Exception:
+            return 'NULL'
+    return "'%s'" % esc(str(value))
+
+def handle_loan_applications(method, params, body, cur, conn, staff=None, ip=''):
+    if method == 'GET':
+        app_id = params.get('id')
+        if app_id:
+            app = query_one(cur, "SELECT * FROM loan_applications WHERE id=%s" % int(app_id))
+            if not app:
+                return None
+            if app.get('member_id'):
+                cur.execute("SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',COALESCE(middle_name,'')) ELSE company_name END FROM members WHERE id=%s" % app['member_id'])
+                nr = cur.fetchone()
+                app['member_name'] = nr[0] if nr else ''
+            return app
+        status_f = params.get('status')
+        where = ''
+        if status_f and status_f != 'all':
+            where = " WHERE la.status='%s'" % esc(status_f)
+        return query_rows(cur, """
+            SELECT la.*,
+                   CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',COALESCE(m.middle_name,''))
+                        ELSE m.company_name END as member_name,
+                   o.short_name as org_short_name
+            FROM loan_applications la
+            LEFT JOIN members m ON m.id=la.member_id
+            LEFT JOIN organizations o ON o.id=la.org_id
+            %s
+            ORDER BY la.created_at DESC
+        """ % where)
+
+    if method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            cols = ['status', 'created_by']
+            vals = ["'new'", str(staff['user_id']) if staff and staff.get('user_id') else 'NULL']
+            for f in LOAN_APP_FIELDS:
+                if f in body:
+                    cols.append(f)
+                    vals.append(_sql_val(f, body[f]))
+            cur.execute("INSERT INTO loan_applications (%s) VALUES (%s) RETURNING id" % (','.join(cols), ','.join(vals)))
+            app_id = cur.fetchone()[0]
+            app_no = 'ЗЗ-%06d' % app_id
+            cur.execute("UPDATE loan_applications SET application_no='%s' WHERE id=%s" % (app_no, app_id))
+            audit_log(cur, staff, 'create', 'loan_app', app_id, app_no, '', ip)
+            conn.commit()
+            return {'id': app_id, 'application_no': app_no}
+
+        if action == 'update':
+            app_id = int(body['id'])
+            updates = []
+            for f in LOAN_APP_FIELDS + ['status']:
+                if f in body:
+                    updates.append("%s=%s" % (f, _sql_val(f, body[f])))
+            if updates:
+                updates.append("updated_at=NOW()")
+                cur.execute("UPDATE loan_applications SET %s WHERE id=%s" % (','.join(updates), app_id))
+            audit_log(cur, staff, 'update', 'loan_app', app_id, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
+        if action == 'approve':
+            app_id = int(body['id'])
+            rate = float(str(body.get('rate', '0')).replace(',', '.'))
+            start_date = body.get('start_date', date.today().isoformat())
+            schedule_type = body.get('schedule_type', 'annuity')
+            cur.execute("SELECT member_id, amount, term_months, full_name, mobile_phone, inn, registration_address, org_id FROM loan_applications WHERE id=%s" % app_id)
+            app = cur.fetchone()
+            if not app:
+                return {'error': 'Заявка не найдена'}
+            mid, amt, term, fio, phone, inn_v, addr, org_id = app
+            if not mid:
+                if not fio:
+                    return {'error': 'Для одобрения укажите ФИО заявителя либо привяжите пайщика'}
+                parts = (fio or '').strip().split()
+                ln = parts[0] if len(parts) > 0 else fio
+                fn = parts[1] if len(parts) > 1 else ''
+                mn = parts[2] if len(parts) > 2 else ''
+                cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(member_no FROM '[0-9]+$') AS INTEGER)),0)+1 FROM members WHERE member_no ~ '[0-9]+$'")
+                mno = 'П-%06d' % (cur.fetchone()[0] or 1)
+                cur.execute("INSERT INTO members (member_no, member_type, last_name, first_name, middle_name, phone, inn, registration_address, status) VALUES ('%s','FL','%s','%s','%s','%s','%s','%s','active') RETURNING id" % (mno, esc(ln), esc(fn), esc(mn), esc(phone or ''), esc(inn_v or ''), esc(addr or '')))
+                mid = cur.fetchone()[0]
+                cur.execute("UPDATE loan_applications SET member_id=%s WHERE id=%s" % (mid, app_id))
+            if not amt or not term or rate <= 0:
+                return {'error': 'Для одобрения заполните сумму, срок и ставку'}
+            cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)),0)+1 FROM loans WHERE contract_no ~ '^[0-9]+'")
+            nn = cur.fetchone()[0] or 1
+            sd = date.fromisoformat(start_date)
+            cn = '%s-%s' % (nn, sd.strftime('%d%m%Y'))
+            sched, monthly = (calc_annuity_schedule if schedule_type == 'annuity' else calc_end_of_term_schedule)(float(amt), rate, int(term), sd)
+            ed = add_months(sd, int(term))
+            cur.execute("INSERT INTO loans (contract_no, member_id, amount, balance, rate, term_months, schedule_type, start_date, end_date, monthly_payment, status, org_id) VALUES ('%s',%s,%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s) RETURNING id" % (esc(cn), mid, float(amt), float(amt), rate, int(term), schedule_type, sd.isoformat(), ed.isoformat(), float(monthly), org_id if org_id else 'NULL'))
+            lid = cur.fetchone()[0]
+            for item in sched:
+                cur.execute("INSERT INTO loan_schedule (loan_id, payment_no, payment_date, payment_amount, principal_amount, interest_amount, balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+            cur.execute("UPDATE loan_applications SET status='approved', created_loan_id=%s, updated_at=NOW() WHERE id=%s" % (lid, app_id))
+            audit_log(cur, staff, 'approve', 'loan_app', app_id, '', 'Создан займ #%s' % lid, ip)
+            conn.commit()
+            return {'success': True, 'loan_id': lid, 'contract_no': cn, 'monthly_payment': float(monthly)}
+
+        if action == 'reject':
+            app_id = int(body['id'])
+            reason = body.get('reason', '')
+            cur.execute("UPDATE loan_applications SET status='rejected', rejection_reason='%s', updated_at=NOW() WHERE id=%s" % (esc(reason), app_id))
+            audit_log(cur, staff, 'reject', 'loan_app', app_id, '', reason, ip)
+            conn.commit()
+            return {'success': True}
+
+        if action == 'delete':
+            app_id = int(body['id'])
+            cur.execute("UPDATE loan_applications SET status='archived', updated_at=NOW() WHERE id=%s" % app_id)
+            audit_log(cur, staff, 'archive', 'loan_app', app_id, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
+    return {'error': 'Метод не поддерживается'}
+
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
@@ -7149,6 +7298,8 @@ def handler(event, context):
             result = handle_savings(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'shares':
             result = handle_shares(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'loan_applications':
+            result = handle_loan_applications(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'export':
             result = handle_export(params, cur)
         elif entity == 'users':

@@ -171,6 +171,17 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "delete_all_transactions", account_id: accountId }),
   },
 
+  loanApplications: {
+    list: (status?: string) => request<LoanApplication[]>("GET", { entity: "loan_applications", ...(status ? { status } : {}) }),
+    get: (id: number) => request<LoanApplication>("GET", { entity: "loan_applications", id }),
+    create: (data: Partial<LoanApplication>) => request<{ id: number; application_no: string }>("POST", undefined, { entity: "loan_applications", action: "create", ...data }),
+    update: (id: number, data: Partial<LoanApplication>) => request<{ success: boolean }>("POST", undefined, { entity: "loan_applications", action: "update", id, ...data }),
+    approve: (id: number, data: { rate: number; start_date: string; schedule_type: string }) =>
+      request<{ success: boolean; loan_id: number; contract_no: string; monthly_payment: number }>("POST", undefined, { entity: "loan_applications", action: "approve", id, ...data }),
+    reject: (id: number, reason: string) => request<{ success: boolean }>("POST", undefined, { entity: "loan_applications", action: "reject", id, reason }),
+    archive: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "loan_applications", action: "delete", id }),
+  },
+
   export: {
     download: async (type: "loan" | "saving" | "share" | "saving_transactions" | "loan_certificate" | "loan_closure" | "members" | "loans_list" | "savings_list", id: number | undefined, format: "xlsx" | "pdf", extra?: Record<string, string>) => {
       const params: Record<string, unknown> = { entity: "export", type, format, ...extra };
@@ -595,6 +606,90 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+}
+
+export interface LoanApplication {
+  id: number;
+  application_no?: string;
+  status: string;
+  member_id?: number | null;
+  member_name?: string;
+  org_id?: number | null;
+  org_short_name?: string;
+
+  amount?: number | null;
+  term_months?: number | null;
+  loan_program?: string;
+  collateral_types?: string;
+
+  full_name?: string;
+  birth_date?: string;
+  birth_place?: string;
+  passport_series_number?: string;
+  passport_issue_date?: string;
+  passport_issued_by?: string;
+  passport_division_code?: string;
+  registration_address?: string;
+  mobile_phone?: string;
+  email?: string;
+  inn?: string;
+  bank_account?: string;
+  bik?: string;
+  bank_name?: string;
+
+  official_income?: number | null;
+  income_confirmation?: string;
+  employer_inn?: string;
+  employer_name?: string;
+  position?: string;
+  additional_income_type?: string;
+  additional_income?: number | null;
+  additional_income_other?: string;
+
+  current_loans_payments?: number | null;
+  mandatory_expenses?: number | null;
+  has_active_loans?: string;
+
+  marital_status?: string;
+  has_minor_children?: string;
+  children_count?: number | null;
+  spouse_name?: string;
+  spouse_phone?: string;
+  spouse_income?: number | null;
+  has_maternal_capital?: string;
+
+  real_estate_type?: string;
+  cadastral_number?: string;
+  property_address?: string;
+  land_cadastral_number?: string;
+  land_address?: string;
+
+  car_brand?: string;
+  car_model?: string;
+  car_year?: number | null;
+  car_market_value?: number | null;
+
+  other_collateral_description?: string;
+
+  contact_full_name?: string;
+  contact_phone?: string;
+
+  passport_files?: string;
+  income_files?: string;
+  collateral_files?: string;
+  other_files?: string;
+  guarantor_files?: string;
+
+  curator_user_id?: number | null;
+  agent_user_id?: number | null;
+  commission_amount?: number | null;
+  specialist_comment?: string;
+  association?: string;
+
+  created_loan_id?: number | null;
+  rejection_reason?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface LoanPayment {
