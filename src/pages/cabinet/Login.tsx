@@ -38,7 +38,7 @@ const Login = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [hasPassword, setHasPassword] = useState(false);
   const [setupToken, setSetupToken] = useState("");
-  const [debugCode, setDebugCode] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [orgs, setOrgs] = useState<{ name: string; short_name: string; inn: string }[]>([]);
   const { toast } = useToast();
@@ -62,7 +62,7 @@ const Login = () => {
         return;
       }
       setHasPassword(res.has_password);
-      if (res.debug_code) setDebugCode(res.debug_code);
+
       setStep("sms");
       toast({ title: "SMS-код отправлен" });
     } catch (e) {
@@ -246,11 +246,7 @@ const Login = () => {
                     onKeyDown={e => e.key === "Enter" && handleVerifySms()}
                   />
                   <p className="text-xs text-muted-foreground">Введите код из SMS, отправленного на {phone}</p>
-                  {debugCode && (
-                    <p className="text-xs text-primary font-medium bg-primary/10 rounded px-2 py-1">
-                      Демо-код: {debugCode}
-                    </p>
-                  )}
+
                 </div>
 
                 {hasPassword && (

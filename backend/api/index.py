@@ -14,6 +14,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import boto3
+import bcrypt
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -4038,8 +4039,61 @@ def handle_dashboard(cur, params=None):
 
     return stats
 
-def hash_password(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
+
+def verify_password(pw: str, stored_hash: str) -> bool:
+    if not pw or not stored_hash:
+        return False
+    try:
+        if stored_hash.startswith('$2b$') or stored_hash.startswith('$2a$'):
+            return bcrypt.checkpw(pw.encode('utf-8'), stored_hash.encode('utf-8'))
+        return hashlib.sha256(pw.encode()).hexdigest() == stored_hash
+    except Exception:
+        return False
+
+def needs_rehash(stored_hash: str) -> bool:
+    return bool(stored_hash) and not (stored_hash.startswith('$2b$') or stored_hash.startswith('$2a$'))
+
+MAX_ATTEMPTS = {'sms': 5, 'password': 10, 'staff': 5}
+BLOCK_MINUTES = {'sms': 15, 'password': 30, 'staff': 15}
+
+def check_rate_limit(cur, key: str, action: str) -> dict | None:
+    max_att = MAX_ATTEMPTS.get(action, 5)
+    cur.execute(
+        "SELECT attempts, blocked_until FROM auth_rate_limit WHERE key=%s",
+        (key,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    attempts, blocked_until = row
+    if blocked_until and blocked_until > datetime.now():
+        secs = int((blocked_until - datetime.now()).total_seconds())
+        mins = max(1, secs // 60)
+        return {'error': f'Слишком много попыток. Попробуйте через {mins} мин.', '_status': 429}
+    if attempts >= max_att:
+        return None
+    return None
+
+def record_failed_attempt(cur, conn, key: str, action: str):
+    max_att = MAX_ATTEMPTS.get(action, 5)
+    block_min = BLOCK_MINUTES.get(action, 15)
+    cur.execute(
+        "INSERT INTO auth_rate_limit (key, attempts, last_attempt_at) VALUES (%s, 1, NOW()) "
+        "ON CONFLICT (key) DO UPDATE SET "
+        "attempts = auth_rate_limit.attempts + 1, "
+        "last_attempt_at = NOW(), "
+        "blocked_until = CASE "
+        "  WHEN auth_rate_limit.attempts + 1 >= %s THEN NOW() + interval '%s minutes' "
+        "  ELSE NULL END",
+        (key, max_att, block_min)
+    )
+    conn.commit()
+
+def reset_rate_limit(cur, conn, key: str):
+    cur.execute("DELETE FROM auth_rate_limit WHERE key=%s", (key,))
+    conn.commit()
 
 def generate_sms_code():
     return '%06d' % (secrets.randbelow(900000) + 100000)
@@ -4086,7 +4140,12 @@ def get_staff_session(params, headers, cur):
         token = params.get('staff_token', '')
     if not token:
         return None
-    cur.execute("SELECT cs.user_id, u.name, u.role, u.login FROM client_sessions cs JOIN users u ON u.id=cs.user_id WHERE cs.token='%s' AND cs.expires_at > NOW() AND u.role IN ('admin','manager')" % esc(token))
+    cur.execute(
+        "SELECT cs.user_id, u.name, u.role, u.login FROM client_sessions cs "
+        "JOIN users u ON u.id=cs.user_id "
+        "WHERE cs.token=%s AND cs.expires_at > NOW() AND u.role IN ('admin','manager')",
+        (token,)
+    )
     row = cur.fetchone()
     if not row:
         return None
@@ -4100,18 +4159,34 @@ def handle_staff_auth(body, cur, conn, ip=''):
         password = body.get('password', '')
         if not login or not password:
             return {'error': 'Введите логин и пароль'}
-        pw_hash = hash_password(password)
-        cur.execute("SELECT id, name, role, login FROM users WHERE login='%s' AND password_hash='%s' AND role IN ('admin','manager') AND status='active'" % (esc(login), pw_hash))
+
+        rl_key = f'staff:{ip}:{login}'
+        rl = check_rate_limit(cur, rl_key, 'staff')
+        if rl:
+            return rl
+
+        cur.execute(
+            "SELECT id, name, role, login, password_hash FROM users "
+            "WHERE login=%s AND role IN ('admin','manager') AND status='active'",
+            (login,)
+        )
         row = cur.fetchone()
-        if not row:
+        if not row or not verify_password(password, row[4]):
+            record_failed_attempt(cur, conn, rl_key, 'staff')
             audit_log(cur, None, 'login_failed', 'auth', None, login, '', ip)
             conn.commit()
             return {'error': 'Неверный логин или пароль'}
-        user_id, name, role, ulogin = row
+        user_id, name, role, ulogin, stored_hash = row
+        reset_rate_limit(cur, conn, rl_key)
+        if needs_rehash(stored_hash):
+            cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_password(password), user_id))
         token = generate_token()
         expires = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
-        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
-        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        cur.execute(
+            "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+            (user_id, token, expires)
+        )
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s", (user_id,))
         staff_info = {'user_id': user_id, 'name': name, 'role': role}
         audit_log(cur, staff_info, 'login', 'auth', user_id, ulogin, '', ip)
         conn.commit()
@@ -4119,7 +4194,12 @@ def handle_staff_auth(body, cur, conn, ip=''):
 
     if action == 'check':
         token = body.get('token', '')
-        cur.execute("SELECT u.id, u.name, u.role, u.login FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW() AND u.role IN ('admin','manager')" % esc(token))
+        cur.execute(
+            "SELECT u.id, u.name, u.role, u.login FROM users u "
+            "JOIN client_sessions cs ON cs.user_id=u.id "
+            "WHERE cs.token=%s AND cs.expires_at > NOW() AND u.role IN ('admin','manager')",
+            (token,)
+        )
         row = cur.fetchone()
         if not row:
             return {'_status': 401, 'error': 'Не авторизован'}
@@ -4127,7 +4207,7 @@ def handle_staff_auth(body, cur, conn, ip=''):
 
     if action == 'logout':
         token = body.get('token', '')
-        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token=%s", (token,))
         conn.commit()
         return {'success': True}
 
@@ -4135,18 +4215,26 @@ def handle_staff_auth(body, cur, conn, ip=''):
         token = body.get('token', '')
         old_pw = body.get('old_password', '')
         new_pw = body.get('new_password', '')
-        if not new_pw or len(new_pw) < 6:
-            return {'error': 'Новый пароль не менее 6 символов'}
-        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        if not new_pw or len(new_pw) < 8:
+            return {'error': 'Новый пароль не менее 8 символов'}
+        cur.execute(
+            "SELECT cs.user_id FROM client_sessions cs WHERE cs.token=%s AND cs.expires_at > NOW()",
+            (token,)
+        )
         row = cur.fetchone()
         if not row:
             return {'_status': 401, 'error': 'Сессия истекла'}
         user_id = row[0]
-        cur.execute("SELECT password_hash FROM users WHERE id=%s" % user_id)
+        cur.execute("SELECT password_hash FROM users WHERE id=%s", (user_id,))
         cur_hash = cur.fetchone()[0]
-        if cur_hash and cur_hash != hash_password(old_pw):
+        if cur_hash and not verify_password(old_pw, cur_hash):
             return {'error': 'Неверный текущий пароль'}
-        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (hash_password(new_pw), user_id))
+        new_hash = hash_password(new_pw)
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+        cur.execute(
+            "UPDATE client_sessions SET expires_at=NOW() WHERE user_id=%s AND token!=%s",
+            (user_id, token)
+        )
         conn.commit()
         return {'success': True}
 
@@ -4178,18 +4266,21 @@ def handle_users(method, params, body, staff, cur, conn):
                 return {'error': 'Недопустимая роль'}
             if role == 'client' and not member_id:
                 return {'error': 'Для клиента необходимо указать пайщика'}
-            if not password or len(password) < 6:
-                return {'error': 'Пароль не менее 6 символов'}
-            cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
+            if not password or len(password) < 8:
+                return {'error': 'Пароль не менее 8 символов'}
+            cur.execute("SELECT id FROM users WHERE login=%s", (login,))
             if cur.fetchone():
                 return {'error': 'Логин уже занят'}
             if member_id:
-                cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client'" % int(member_id))
+                cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client'", (int(member_id),))
                 if cur.fetchone():
                     return {'error': 'У этого пайщика уже есть учётная запись'}
             pw_hash = hash_password(password)
-            mid_sql = str(int(member_id)) if member_id else 'NULL'
-            cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','%s','%s','%s','%s',%s) RETURNING id" % (esc(login), esc(name), esc(email), esc(phone), role, pw_hash, mid_sql))
+            cur.execute(
+                "INSERT INTO users (login, name, email, phone, role, password_hash, member_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (login, name, email, phone, role, pw_hash, int(member_id) if member_id else None)
+            )
             uid = cur.fetchone()[0]
             audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), 'member_id: %s' % mid_sql, '')
             conn.commit()
@@ -4198,28 +4289,36 @@ def handle_users(method, params, body, staff, cur, conn):
             uid = body.get('id')
             if not uid:
                 return {'error': 'Укажите id'}
+            ALLOWED_USER_FIELDS = {'name', 'email', 'phone', 'role', 'status', 'login'}
             updates = []
-            for f in ['name', 'email', 'phone', 'role', 'status', 'login']:
+            params_list = []
+            for f in ALLOWED_USER_FIELDS:
                 if f in body and body[f] is not None:
                     if f == 'role' and body[f] not in ('admin', 'manager', 'client'):
                         return {'error': 'Недопустимая роль'}
-                    updates.append("%s='%s'" % (f, esc(body[f])))
+                    if f == 'status' and body[f] not in ('active', 'blocked'):
+                        return {'error': 'Недопустимый статус'}
+                    updates.append(f"{f}=%s")
+                    params_list.append(body[f])
             if 'member_id' in body:
                 mid = body['member_id']
                 if mid:
-                    cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client' AND id!=%s" % (int(mid), uid))
+                    cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client' AND id!=%s", (int(mid), int(uid)))
                     if cur.fetchone():
                         return {'error': 'У этого пайщика уже есть учётная запись'}
-                    updates.append("member_id=%s" % int(mid))
+                    updates.append("member_id=%s")
+                    params_list.append(int(mid))
                 else:
                     updates.append("member_id=NULL")
             if body.get('password'):
-                if len(body['password']) < 6:
-                    return {'error': 'Пароль не менее 6 символов'}
-                updates.append("password_hash='%s'" % hash_password(body['password']))
+                if len(body['password']) < 8:
+                    return {'error': 'Пароль не менее 8 символов'}
+                updates.append("password_hash=%s")
+                params_list.append(hash_password(body['password']))
             if updates:
-                cur.execute("UPDATE users SET %s WHERE id=%s" % (', '.join(updates), uid))
-                changed = [f for f in body if f not in ('id', 'entity', 'action', 'password')]
+                params_list.append(int(uid))
+                cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=%s", params_list)
+                changed = [f for f in body if f not in ('id', 'entity', 'action', 'password') and f in ALLOWED_USER_FIELDS]
                 if body.get('password'):
                     changed.append('password')
                 audit_log(cur, staff, 'update', 'user', uid, '', ', '.join(changed), '')
@@ -4237,9 +4336,9 @@ def handle_users(method, params, body, staff, cur, conn):
             conn.commit()
             return {'success': True}
         elif action == 'bulk_create_clients':
-            default_password = body.get('password', '123456')
-            if len(default_password) < 6:
-                return {'error': 'Пароль не менее 6 символов'}
+            default_password = body.get('password', '')
+            if not default_password or len(default_password) < 8:
+                return {'error': 'Пароль не менее 8 символов'}
             pw_hash = hash_password(default_password)
             cur.execute("SELECT m.id, m.member_no, m.phone, CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name) ELSE m.company_name END as name FROM members m WHERE m.status='active' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.member_id=m.id AND u.role='client')")
             rows = cur.fetchall()
@@ -4259,10 +4358,13 @@ def handle_users(method, params, body, staff, cur, conn):
                         skipped_reasons.append('%s — нет телефона' % (mno or str(mid)))
                     continue
                 login = phone_digits
-                cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
+                cur.execute("SELECT id FROM users WHERE login=%s", (login,))
                 if cur.fetchone():
                     login = login + '_' + str(mid)
-                cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','','%s','client','%s',%s)" % (esc(login), esc(mname), esc(phone_digits), pw_hash, mid))
+                cur.execute(
+                    "INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES (%s, %s, '', %s, 'client', %s, %s)",
+                    (login, mname, phone_digits, pw_hash, mid)
+                )
                 created += 1
             if created > 0:
                 audit_log(cur, staff, 'bulk_create_clients', 'user', None, '', 'Создано: %s, пропущено: %s' % (created, skipped), '')
@@ -4270,7 +4372,7 @@ def handle_users(method, params, body, staff, cur, conn):
             return {'success': True, 'created': created, 'skipped': skipped, 'skipped_reasons': skipped_reasons, 'password': default_password}
     return {'error': 'Неизвестное действие'}
 
-def handle_auth(method, body, cur, conn):
+def handle_auth(method, body, cur, conn, ip=''):
     action = body.get('action', '')
 
     if action == 'send_sms':
@@ -4281,13 +4383,24 @@ def handle_auth(method, body, cur, conn):
         if len(clean_phone) == 11 and clean_phone[0] == '8':
             clean_phone = '7' + clean_phone[1:]
 
-        cur.execute("SELECT m.id, m.phone FROM members m WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND m.status='active'" % clean_phone[-10:])
+        rl_key = f'sms:{ip}:{clean_phone[-10:]}'
+        rl = check_rate_limit(cur, rl_key, 'sms')
+        if rl:
+            return rl
+
+        cur.execute(
+            "SELECT m.id, m.phone FROM members m WHERE "
+            "REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE %s "
+            "AND m.status='active'",
+            ('%' + clean_phone[-10:] + '%',)
+        )
         member = cur.fetchone()
         if not member:
+            record_failed_attempt(cur, conn, rl_key, 'sms')
             return {'error': 'Пайщик с таким номером не найден. Обратитесь в КПК.'}
 
         member_id = member[0]
-        cur.execute("SELECT id, password_hash FROM users WHERE member_id=%s AND role='client'" % member_id)
+        cur.execute("SELECT id, password_hash FROM users WHERE member_id=%s AND role='client'", (member_id,))
         user_row = cur.fetchone()
 
         code = generate_sms_code()
@@ -4296,12 +4409,18 @@ def handle_auth(method, body, cur, conn):
         if user_row:
             user_id = user_row[0]
             has_password = bool(user_row[1])
-            cur.execute("UPDATE users SET sms_code='%s', sms_code_expires='%s' WHERE id=%s" % (code, expires, user_id))
+            cur.execute("UPDATE users SET sms_code=%s, sms_code_expires=%s WHERE id=%s", (code, expires, user_id))
         else:
-            cur.execute("SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name) ELSE company_name END FROM members WHERE id=%s" % member_id)
+            cur.execute(
+                "SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name) ELSE company_name END FROM members WHERE id=%s",
+                (member_id,)
+            )
             name_row = cur.fetchone()
             uname = name_row[0] if name_row else 'Клиент'
-            cur.execute("INSERT INTO users (member_id, name, email, phone, role, sms_code, sms_code_expires) VALUES (%s,'%s','','%s','client','%s','%s') RETURNING id" % (member_id, esc(uname), esc(phone), code, expires))
+            cur.execute(
+                "INSERT INTO users (member_id, name, email, phone, role, sms_code, sms_code_expires) VALUES (%s, %s, '', %s, 'client', %s, %s) RETURNING id",
+                (member_id, uname, phone, code, expires)
+            )
             user_id = cur.fetchone()[0]
             has_password = False
 
@@ -4316,53 +4435,77 @@ def handle_auth(method, body, cur, conn):
         code = body.get('code', '').strip()
         clean_phone = ''.join(c for c in phone if c.isdigit())
 
-        cur.execute("SELECT u.id, u.password_hash, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.sms_code='%s' AND u.sms_code_expires > NOW()" % (clean_phone[-10:], esc(code)))
+        rl_key = f'verify:{ip}:{clean_phone[-10:]}'
+        rl = check_rate_limit(cur, rl_key, 'sms')
+        if rl:
+            return rl
+
+        cur.execute(
+            "SELECT u.id, u.password_hash, u.name, u.member_id FROM users u "
+            "JOIN members m ON m.id=u.member_id "
+            "WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE %s "
+            "AND u.role='client' AND u.sms_code=%s AND u.sms_code_expires > NOW()",
+            ('%' + clean_phone[-10:] + '%', code)
+        )
         row = cur.fetchone()
         if not row:
+            record_failed_attempt(cur, conn, rl_key, 'sms')
             return {'error': 'Неверный код или код истёк'}
 
+        reset_rate_limit(cur, conn, rl_key)
         user_id, pw_hash, name, member_id = row[0], row[1], row[2], row[3]
         has_password = bool(pw_hash)
 
-        cur.execute("UPDATE users SET sms_code=NULL, sms_code_expires=NULL WHERE id=%s" % user_id)
+        cur.execute("UPDATE users SET sms_code=NULL, sms_code_expires=NULL WHERE id=%s", (user_id,))
 
         if has_password:
             token = generate_token()
             expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-            cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
-            cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+            cur.execute(
+                "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+                (user_id, token, expires)
+            )
+            cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s", (user_id,))
             conn.commit()
             return {'success': True, 'has_password': True, 'authenticated': True, 'token': token, 'user': {'name': name, 'member_id': member_id}}
         else:
             temp_token = generate_token()
             expires = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
-            cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, temp_token, expires))
+            cur.execute(
+                "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+                (user_id, temp_token, expires)
+            )
             conn.commit()
             return {'success': True, 'has_password': False, 'setup_token': temp_token}
 
     elif action == 'set_password':
         token = body.get('setup_token') or body.get('token', '')
         password = body.get('password', '')
-        if not password or len(password) < 6:
-            return {'error': 'Пароль должен быть не менее 6 символов'}
+        if not password or len(password) < 8:
+            return {'error': 'Пароль должен быть не менее 8 символов'}
 
-        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        cur.execute(
+            "SELECT cs.user_id FROM client_sessions cs WHERE cs.token=%s AND cs.expires_at > NOW()",
+            (token,)
+        )
         row = cur.fetchone()
         if not row:
             return {'error': 'Сессия истекла, повторите авторизацию'}
 
         user_id = row[0]
         pw_hash = hash_password(password)
-        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (pw_hash, user_id))
-
-        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (pw_hash, user_id))
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE user_id=%s", (user_id,))
 
         new_token = generate_token()
         expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, new_token, expires))
-        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        cur.execute(
+            "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+            (user_id, new_token, expires)
+        )
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s", (user_id,))
 
-        cur.execute("SELECT name, member_id FROM users WHERE id=%s" % user_id)
+        cur.execute("SELECT name, member_id FROM users WHERE id=%s", (user_id,))
         ur = cur.fetchone()
         conn.commit()
         return {'success': True, 'token': new_token, 'user': {'name': ur[0], 'member_id': ur[1]}}
@@ -4371,36 +4514,71 @@ def handle_auth(method, body, cur, conn):
         phone = body.get('phone', '').strip()
         login = body.get('login', '').strip()
         password = body.get('password', '')
-        pw_hash = hash_password(password)
 
-        row = None
+        rl_key = f'password:{ip}:{login or phone}'
+        rl = check_rate_limit(cur, rl_key, 'password')
+        if rl:
+            return rl
+
+        candidate = None
         if login:
             clean_login = ''.join(c for c in login if c.isdigit())
             if clean_login and len(clean_login) >= 10:
                 if len(clean_login) == 11 and clean_login[0] == '8':
                     clean_login = '7' + clean_login[1:]
-                cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(clean_login), pw_hash))
-                row = cur.fetchone()
-                if not row:
-                    cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_login[-10:], pw_hash))
-                    row = cur.fetchone()
+                cur.execute(
+                    "SELECT u.id, u.name, u.member_id, u.password_hash FROM users u "
+                    "WHERE u.login=%s AND u.role='client' AND u.status='active'",
+                    (clean_login,)
+                )
+                candidate = cur.fetchone()
+                if not candidate:
+                    cur.execute(
+                        "SELECT u.id, u.name, u.member_id, u.password_hash FROM users u "
+                        "JOIN members m ON m.id=u.member_id "
+                        "WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE %s "
+                        "AND u.role='client' AND u.status='active'",
+                        ('%' + clean_login[-10:] + '%',)
+                    )
+                    candidate = cur.fetchone()
             else:
-                cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(login), pw_hash))
-                row = cur.fetchone()
-        if not row and phone:
+                cur.execute(
+                    "SELECT u.id, u.name, u.member_id, u.password_hash FROM users u "
+                    "WHERE u.login=%s AND u.role='client' AND u.status='active'",
+                    (login,)
+                )
+                candidate = cur.fetchone()
+        if not candidate and phone:
             clean_phone = ''.join(c for c in phone if c.isdigit())
             if len(clean_phone) == 11 and clean_phone[0] == '8':
                 clean_phone = '7' + clean_phone[1:]
-            cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_phone[-10:], pw_hash))
-            row = cur.fetchone()
-        if not row:
+            cur.execute(
+                "SELECT u.id, u.name, u.member_id, u.password_hash FROM users u "
+                "JOIN members m ON m.id=u.member_id "
+                "WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE %s "
+                "AND u.role='client' AND u.status='active'",
+                ('%' + clean_phone[-10:] + '%',)
+            )
+            candidate = cur.fetchone()
+
+        if not candidate or not verify_password(password, candidate[3]):
+            record_failed_attempt(cur, conn, rl_key, 'password')
             return {'error': 'Неверный логин/телефон или пароль'}
 
-        user_id, name, member_id = row
+        reset_rate_limit(cur, conn, rl_key)
+        user_id, name, member_id, stored_hash = candidate
+
+        if needs_rehash(stored_hash):
+            new_hash = hash_password(password)
+            cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+
         token = generate_token()
         expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
-        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        cur.execute(
+            "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+            (user_id, token, expires)
+        )
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s", (user_id,))
         conn.commit()
         return {'success': True, 'token': token, 'user': {'name': name, 'member_id': member_id}}
 
@@ -4408,27 +4586,35 @@ def handle_auth(method, body, cur, conn):
         token = body.get('token', '')
         old_pw = body.get('old_password', '')
         new_pw = body.get('new_password', '')
-        if not new_pw or len(new_pw) < 6:
-            return {'error': 'Новый пароль должен быть не менее 6 символов'}
+        if not new_pw or len(new_pw) < 8:
+            return {'error': 'Новый пароль должен быть не менее 8 символов'}
 
-        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        cur.execute(
+            "SELECT cs.user_id FROM client_sessions cs WHERE cs.token=%s AND cs.expires_at > NOW()",
+            (token,)
+        )
         row = cur.fetchone()
         if not row:
             return {'error': 'Сессия истекла'}
         user_id = row[0]
 
-        cur.execute("SELECT password_hash FROM users WHERE id=%s" % user_id)
+        cur.execute("SELECT password_hash FROM users WHERE id=%s", (user_id,))
         cur_hash = cur.fetchone()[0]
-        if cur_hash and cur_hash != hash_password(old_pw):
+        if cur_hash and not verify_password(old_pw, cur_hash):
             return {'error': 'Неверный текущий пароль'}
 
-        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (hash_password(new_pw), user_id))
+        new_hash = hash_password(new_pw)
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+        cur.execute(
+            "UPDATE client_sessions SET expires_at=NOW() WHERE user_id=%s AND token!=%s",
+            (user_id, token)
+        )
         conn.commit()
         return {'success': True}
 
     elif action == 'logout':
         token = body.get('token', '')
-        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token=%s", (token,))
         conn.commit()
         return {'success': True}
 
@@ -7621,7 +7807,7 @@ def handler(event, context):
         elif entity == 'staff_auth':
             result = handle_staff_auth(body, cur, conn, src_ip)
         elif entity == 'auth':
-            result = handle_auth(method, body, cur, conn)
+            result = handle_auth(method, body, cur, conn, src_ip)
         elif entity == 'cabinet':
             result = handle_cabinet(method, params, body, ev_headers, cur, conn)
         elif entity == 'push':

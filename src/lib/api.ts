@@ -7,7 +7,7 @@ const API_URL = funcUrls.api;
 type Params = Record<string, string | number | undefined>;
 
 function getStaffToken(): string {
-  return localStorage.getItem("staff_token") || "";
+  return sessionStorage.getItem("staff_token") || "";
 }
 
 async function request<T>(method: string, params?: Params, body?: unknown): Promise<T> {

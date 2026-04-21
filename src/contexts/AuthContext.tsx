@@ -32,7 +32,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("staff_token");
+    const token = sessionStorage.getItem("staff_token");
     if (!token) {
       setLoading(false);
       return;
@@ -43,13 +43,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (res.success && res.user) {
           setUser(res.user);
         } else {
-          localStorage.removeItem("staff_token");
-          localStorage.removeItem("staff_user");
+          sessionStorage.removeItem("staff_token");
         }
       })
       .catch(() => {
-        localStorage.removeItem("staff_token");
-        localStorage.removeItem("staff_user");
+        sessionStorage.removeItem("staff_token");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -57,19 +55,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (loginVal: string, password: string) => {
     const res = await api.staffAuth.login(loginVal, password);
     if (res.token && res.user) {
-      localStorage.setItem("staff_token", res.token);
-      localStorage.setItem("staff_user", JSON.stringify(res.user));
+      sessionStorage.setItem("staff_token", res.token);
       setUser(res.user);
     }
   };
 
   const logout = async () => {
-    const token = localStorage.getItem("staff_token");
+    const token = sessionStorage.getItem("staff_token");
     if (token) {
       try { await api.staffAuth.logout(token); } catch { /* skip */ }
     }
-    localStorage.removeItem("staff_token");
-    localStorage.removeItem("staff_user");
+    sessionStorage.removeItem("staff_token");
     setUser(null);
   };
 
