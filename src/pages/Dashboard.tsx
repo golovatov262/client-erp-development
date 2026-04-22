@@ -161,55 +161,40 @@ const Dashboard = () => {
             <h2 className="text-lg font-semibold">Просроченные займы</h2>
             <Badge variant="destructive" className="ml-1">{overdueList.length}</Badge>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {overdueList.map((item: OverdueLoanItem) => (
-              <Card
+          <div className="border border-red-200 rounded-lg overflow-hidden">
+            {overdueList.map((item: OverdueLoanItem, idx: number) => (
+              <div
                 key={item.loan_id}
-                className="p-4 border-red-200 bg-red-50/50 hover:shadow-md transition-shadow cursor-pointer"
+                className={`flex items-center gap-3 px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors ${idx !== overdueList.length - 1 ? "border-b border-red-100" : ""}`}
                 onClick={() => navigate(`/office/loans?open=${item.loan_id}`)}
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="font-semibold text-sm">{item.member_name}</div>
-                    <div className="text-xs text-muted-foreground">Договор {item.contract_no}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm truncate">{item.member_name}</span>
+                    {item.org_name && !selectedOrg && (
+                      <span className="text-xs text-muted-foreground hidden sm:inline">· {item.org_name}</span>
+                    )}
                   </div>
-                  {item.overdue_days > 0 && (
-                    <Badge variant="destructive" className="text-xs">
-                      {item.overdue_days} дн.
-                    </Badge>
-                  )}
+                  <div className="text-xs text-muted-foreground">Договор {item.contract_no}{item.overdue_since ? ` · с ${formatDate(item.overdue_since)}` : ""}</div>
                 </div>
-                <div className="space-y-1.5 mt-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Остаток долга</span>
-                    <span className="font-medium">{formatMoney(item.balance)}</span>
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="text-right hidden sm:block">
+                    <div className="text-sm font-medium">{formatMoney(item.balance)}</div>
+                    {item.overdue_amount > 0 && (
+                      <div className="text-xs text-red-600">{formatMoney(item.overdue_amount)} просрочка</div>
+                    )}
                   </div>
-                  {item.overdue_amount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-red-600">Сумма просрочки</span>
-                      <span className="font-medium text-red-600">{formatMoney(item.overdue_amount)}</span>
-                    </div>
-                  )}
                   {item.penalty_total > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-red-600">Пени</span>
-                      <span className="font-medium text-red-600">{formatMoney(item.penalty_total)}</span>
+                    <div className="text-right hidden md:block">
+                      <div className="text-xs text-muted-foreground">Пени</div>
+                      <div className="text-xs text-red-600 font-medium">{formatMoney(item.penalty_total)}</div>
                     </div>
                   )}
-                  {item.overdue_since && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Просрочка с</span>
-                      <span className="text-muted-foreground">{formatDate(item.overdue_since)}</span>
-                    </div>
-                  )}
-                  {item.org_name && !selectedOrg && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Организация</span>
-                      <span className="text-muted-foreground">{item.org_name}</span>
-                    </div>
+                  {item.overdue_days > 0 && (
+                    <Badge variant="destructive" className="text-xs shrink-0">{item.overdue_days} дн.</Badge>
                   )}
                 </div>
-              </Card>
+              </div>
             ))}
           </div>
         </div>
