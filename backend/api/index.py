@@ -596,7 +596,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             return query_rows(cur, """
                 SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type,
                        l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
-                       l.org_id,
+                       l.org_id, l.holiday_start, l.holiday_months, l.holiday_end,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                             ELSE m.company_name END as member_name, m.id as member_id,
                        o.name as org_name, o.short_name as org_short_name
@@ -1287,6 +1287,117 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             conn.commit()
             return {'success': True, 'schedule': ns, 'monthly_payment': m, 'new_end_date': new_ed.isoformat(), 'new_balance': final_balance}
+
+        elif action == 'set_holiday':
+            lid = int(body['loan_id'])
+            holiday_start_str = body.get('holiday_start', '')
+            holiday_months = int(body.get('holiday_months', 0))
+
+            cur.execute(
+                "SELECT id, contract_no, amount, rate, term_months, schedule_type, start_date, end_date, balance, status FROM loans WHERE id=%s",
+                (lid,)
+            )
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            loan_id, contract_no, amount, rate, term_months, schedule_type, start_date, end_date, balance, status = lr
+            start_date = date.fromisoformat(str(start_date))
+            end_date = date.fromisoformat(str(end_date))
+
+            if status == 'closed':
+                return {'error': 'Нельзя установить каникулы для закрытого договора'}
+
+            if holiday_months == 0:
+                cur.execute(
+                    "UPDATE loans SET holiday_start=NULL, holiday_months=0, holiday_end=NULL, status=CASE WHEN status='holiday' THEN 'active' ELSE status END, updated_at=NOW() WHERE id=%s",
+                    (lid,)
+                )
+                cur.execute("SELECT id, payment_date FROM loan_schedule WHERE loan_id=%s AND status='holiday' ORDER BY payment_no", (lid,))
+                holiday_rows = cur.fetchall()
+                cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status='holiday'", (lid,))
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s", (lid,))
+                existing_count = cur.fetchone()[0]
+                cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='holiday_pending'", (lid,))
+                recalc_loan_schedule_statuses(cur, lid)
+                audit_log(cur, staff, 'cancel_holiday', 'loan', lid, contract_no, 'Кредитные каникулы отменены', ip)
+                conn.commit()
+                return {'success': True, 'message': 'Кредитные каникулы отменены'}
+
+            if not holiday_start_str:
+                return {'error': 'Укажите дату начала каникул'}
+            if holiday_months < 1 or holiday_months > 12:
+                return {'error': 'Количество месяцев каникул: от 1 до 12'}
+
+            holiday_start = date.fromisoformat(holiday_start_str)
+            holiday_end = add_months(holiday_start, holiday_months)
+
+            if holiday_start < start_date:
+                return {'error': 'Дата начала каникул не может быть раньше даты выдачи займа'}
+
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('holiday', 'holiday_pending')", (lid,))
+
+            cur.execute(
+                "SELECT id, payment_no, payment_date, payment_amount, principal_amount, interest_amount, balance_after, status, paid_amount FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no",
+                (lid,)
+            )
+            all_rows = cur.fetchall()
+
+            holiday_payment_nos = []
+            for row in all_rows:
+                s_id, pay_no, pay_date, pay_amount, principal, interest, balance_after, s_status, paid_amount = row
+                pay_date = date.fromisoformat(str(pay_date))
+                if holiday_start <= pay_date < holiday_end and s_status in ('pending', 'overdue'):
+                    holiday_payment_nos.append(pay_no)
+                    cur.execute("UPDATE loan_schedule SET status='holiday' WHERE id=%s", (s_id,))
+
+            balance_before_holiday = None
+            for row in all_rows:
+                s_id, pay_no, pay_date, pay_amount, principal, interest, balance_after, s_status, paid_amount = row
+                pay_date_d = date.fromisoformat(str(pay_date))
+                if pay_date_d < holiday_start and s_status in ('paid', 'partial'):
+                    balance_before_holiday = float(row[6])
+
+            if balance_before_holiday is None:
+                balance_before_holiday = float(balance)
+
+            cur.execute(
+                "SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s",
+                (lid,)
+            )
+            max_no_row = cur.fetchone()
+            max_pay_no = int(max_no_row[0]) if max_no_row and max_no_row[0] else 0
+
+            new_end_date = add_months(end_date, holiday_months)
+
+            fn = calc_annuity_schedule if schedule_type == 'annuity' else calc_end_of_term_schedule
+            extended_schedule, new_monthly = fn(balance_before_holiday, float(rate), holiday_months, holiday_end)
+
+            for i, item in enumerate(extended_schedule):
+                cur.execute(
+                    "INSERT INTO loan_schedule (loan_id, payment_no, payment_date, payment_amount, principal_amount, interest_amount, balance_after, status) VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')",
+                    (lid, max_pay_no + i + 1, item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after'])
+                )
+
+            cur.execute(
+                "UPDATE loans SET holiday_start=%s, holiday_months=%s, holiday_end=%s, end_date=%s, term_months=%s, status='holiday', updated_at=NOW() WHERE id=%s",
+                (holiday_start.isoformat(), holiday_months, holiday_end.isoformat(), new_end_date.isoformat(), term_months + holiday_months, lid)
+            )
+
+            recalc_loan_schedule_statuses(cur, lid)
+
+            audit_log(cur, staff, 'set_holiday', 'loan', lid, contract_no,
+                'Кредитные каникулы: %s мес. с %s по %s. Срок продлён до %s' % (
+                    holiday_months, holiday_start.isoformat(), holiday_end.isoformat(), new_end_date.isoformat()
+                ), ip)
+            conn.commit()
+            return {
+                'success': True,
+                'holiday_start': holiday_start.isoformat(),
+                'holiday_end': holiday_end.isoformat(),
+                'new_end_date': new_end_date.isoformat(),
+                'holiday_months': holiday_months,
+                'extended_schedule': extended_schedule,
+            }
 
 def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes=None):
     rc_list = []

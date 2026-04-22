@@ -5,6 +5,8 @@ import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -81,6 +83,8 @@ const Loans = () => {
   const [showReconciliation, setShowReconciliation] = useState(false);
   const [showEditLoan, setShowEditLoan] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showHoliday, setShowHoliday] = useState(false);
+  const [holidayForm, setHolidayForm] = useState({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: "3" });
   const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
@@ -384,6 +388,45 @@ const Loans = () => {
     }
   };
 
+  const handleHoliday = async () => {
+    if (!detail) return;
+    const months = parseInt(holidayForm.holiday_months);
+    if (!months || months < 1 || months > 12) {
+      toast({ title: "Укажите количество месяцев от 1 до 12", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.loans.setHoliday({ loan_id: detail.id, holiday_start: holidayForm.holiday_start, holiday_months: months });
+      toast({ title: "Кредитные каникулы установлены", description: `До ${res.holiday_end}, срок продлён до ${res.new_end_date}` });
+      setShowHoliday(false);
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelHoliday = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.loans.cancelHoliday(detail.id);
+      toast({ title: "Кредитные каникулы отменены" });
+      setShowHoliday(false);
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleExportLoans = async () => {
     setExporting(true);
     try {
@@ -496,6 +539,10 @@ const Loans = () => {
         onReconciliation={() => setShowReconciliation(true)}
         onFixSchedule={handleFixSchedule}
         onEditLoan={() => setShowEditLoan(true)}
+        onHoliday={() => {
+          setHolidayForm({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: detail?.holiday_months ? String(detail.holiday_months) : "3" });
+          setShowHoliday(true);
+        }}
       />
 
       {detail && (
@@ -559,6 +606,52 @@ const Loans = () => {
         overpayOptions={overpayOptions}
         overpayInfo={overpayInfo}
       />
+
+      <Dialog open={showHoliday} onOpenChange={setShowHoliday}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Icon name="Umbrella" size={18} />
+              Кредитные каникулы
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              В период каникул проценты и платежи не начисляются. После окончания каникул срок займа продлевается на указанное количество месяцев с начислением процентов.
+            </p>
+            <div className="space-y-2">
+              <Label>Дата начала каникул</Label>
+              <Input type="date" value={holidayForm.holiday_start} onChange={e => setHolidayForm(f => ({ ...f, holiday_start: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Количество месяцев (1–12)</Label>
+              <Select value={holidayForm.holiday_months} onValueChange={v => setHolidayForm(f => ({ ...f, holiday_months: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
+                    <SelectItem key={m} value={String(m)}>{m} {m === 1 ? "месяц" : m < 5 ? "месяца" : "месяцев"}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {detail?.holiday_start && (
+              <div className="text-xs text-muted-foreground bg-muted px-3 py-2 rounded">
+                Текущие каникулы: {detail.holiday_start} — {detail.holiday_end} ({detail.holiday_months} мес.)
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            {detail?.holiday_start && (
+              <Button variant="outline" onClick={handleCancelHoliday} disabled={saving} className="text-red-600 border-red-200 hover:bg-red-50">
+                Отменить каникулы
+              </Button>
+            )}
+            <Button onClick={handleHoliday} disabled={saving}>
+              {saving ? "Сохранение..." : "Установить каникулы"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

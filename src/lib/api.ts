@@ -111,6 +111,10 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "recalc_statuses", loan_id: loanId }),
     reconciliationReport: (loanId: number) =>
       request<ReconciliationReport>("GET", { entity: "loans", action: "reconciliation_report", id: loanId }),
+    setHoliday: (data: { loan_id: number; holiday_start: string; holiday_months: number }) =>
+      request<{ success: boolean; holiday_start: string; holiday_end: string; new_end_date: string; holiday_months: number; extended_schedule: ScheduleItem[] }>("POST", undefined, { entity: "loans", action: "set_holiday", ...data }),
+    cancelHoliday: (loanId: number) =>
+      request<{ success: boolean; message: string }>("POST", undefined, { entity: "loans", action: "set_holiday", loan_id: loanId, holiday_months: 0 }),
   },
 
   savings: {
@@ -598,6 +602,9 @@ export interface Loan {
   org_id?: number;
   org_name?: string;
   org_short_name?: string;
+  holiday_start?: string;
+  holiday_months?: number;
+  holiday_end?: string;
 }
 
 export interface ScheduleItem {

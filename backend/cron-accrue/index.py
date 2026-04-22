@@ -127,6 +127,33 @@ def check_overdue_loans(cur, check_date):
             restored += 1
         cur.execute("UPDATE loan_schedule SET status='pending', overdue_days=0 WHERE loan_id=%s AND status='overdue'" % loan_id)
 
+    cur.execute("""
+        UPDATE loan_schedule
+        SET status='pending', overdue_days=0
+        FROM loans l
+        WHERE loan_schedule.loan_id = l.id
+          AND l.holiday_end IS NOT NULL
+          AND l.holiday_end > DATE '%s'
+          AND loan_schedule.payment_date >= l.holiday_start
+          AND loan_schedule.payment_date < l.holiday_end
+          AND loan_schedule.status IN ('pending', 'overdue')
+    """ % check_date)
+
+    cur.execute("""
+        UPDATE loans SET status='holiday', updated_at=NOW()
+        WHERE holiday_start IS NOT NULL
+          AND holiday_end IS NOT NULL
+          AND DATE '%s' >= holiday_start
+          AND DATE '%s' < holiday_end
+          AND status IN ('active', 'overdue')
+    """ % (check_date, check_date))
+
+    cur.execute("""
+        UPDATE loans SET status='active', updated_at=NOW()
+        WHERE status='holiday'
+          AND (holiday_end IS NULL OR DATE '%s' >= holiday_end)
+    """ % check_date)
+
     return {
         'checked_date': check_date,
         'marked_overdue': marked_overdue,
@@ -144,8 +171,10 @@ def accrue_penalties(cur, check_date):
         JOIN loans l ON l.id = ls.loan_id
         WHERE ls.status = 'overdue'
           AND l.status = 'overdue'
+          AND l.status != 'holiday'
+          AND (l.holiday_end IS NULL OR DATE '%s' >= l.holiday_end)
           AND ls.payment_date < '%s'
-    """ % check_date)
+    """ % (check_date, check_date))
     rows = cur.fetchall()
 
     total_penalty = Decimal('0')

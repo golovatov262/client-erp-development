@@ -14,11 +14,12 @@ import { useToast } from "@/hooks/use-toast";
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 
-const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
+const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", holiday: "Кредитные каникулы", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
 const statusVariant = (s: string) => {
   if (s === "active" || s === "paid") return "default";
   if (s === "overdue") return "destructive";
   if (s === "partial") return "warning";
+  if (s === "holiday") return "secondary";
   return "secondary";
 };
 
@@ -40,6 +41,7 @@ interface LoansDetailDialogProps {
   onReconciliation: () => void;
   onFixSchedule: () => void;
   onEditLoan: () => void;
+  onHoliday: () => void;
 }
 
 const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
@@ -170,6 +172,14 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Ежемесячный платёж</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.monthly_payment)}</div></CardContent></Card>
         </div>
 
+        {detail.status === "holiday" && detail.holiday_start && detail.holiday_end && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+            <Icon name="Umbrella" size={16} className="text-blue-600 shrink-0" />
+            <span className="text-blue-800 font-medium">Кредитные каникулы:</span>
+            <span className="text-blue-700">{fmtDate(detail.holiday_start)} — {fmtDate(detail.holiday_end)} ({detail.holiday_months} мес.)</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div className="grid md:grid-cols-4 gap-2 text-sm flex-1">
             <div><span className="text-muted-foreground">Ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
@@ -186,11 +196,17 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
         {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
-            {(detail.status === "active" || detail.status === "overdue") && (
+            {(detail.status === "active" || detail.status === "overdue" || detail.status === "holiday") && (
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
-                <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
-                <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
+                {(detail.status === "active" || detail.status === "overdue") && <>
+                  <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
+                  <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
+                  <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
+                </>}
+                <Button size="sm" variant="outline" onClick={props.onHoliday}>
+                  <Icon name="Umbrella" size={14} className="mr-1" />
+                  {detail.status === "holiday" ? "Изменить каникулы" : "Кредитные каникулы"}
+                </Button>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
