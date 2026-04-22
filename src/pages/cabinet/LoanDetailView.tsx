@@ -10,6 +10,12 @@ import { useToast } from "@/hooks/use-toast";
 import api, { LoanDetail, ScheduleItem } from "@/lib/api";
 import { fmt, fmtDate, statusLabel, statusVariant, MobileRow } from "./cabinet-utils";
 
+const isHolidayRow = (r: ScheduleItem) => r.status === "holiday";
+const isExtendedRow = (loan: LoanDetail, r: ScheduleItem) => {
+  if (!loan.holiday_end) return false;
+  return r.payment_date >= loan.holiday_end && r.status === "pending";
+};
+
 const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
   const [certFrom, setCertFrom] = useState(loan.start_date || "");
   const [certTo, setCertTo] = useState(new Date().toISOString().slice(0, 10));
@@ -45,6 +51,20 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
 
   return (
     <div className="space-y-4">
+
+      {loan.status === "holiday" && loan.holiday_start && loan.holiday_end && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <Icon name="Umbrella" size={18} className="text-blue-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-blue-800">Кредитные каникулы</div>
+            <div className="text-xs text-blue-700 mt-0.5">
+              Действуют с <span className="font-medium">{fmtDate(loan.holiday_start)}</span> по <span className="font-medium">{fmtDate(loan.holiday_end)}</span> ({loan.holiday_months} мес.)
+            </div>
+            <div className="text-xs text-blue-600 mt-1">В этот период платежи не взимаются и просрочка не начисляется. После окончания каникул срок займа продлён.</div>
+          </div>
+        </div>
+      )}
+
       <div className="hidden sm:grid grid-cols-5 gap-3">
         <div><div className="text-xs text-muted-foreground">Сумма</div><div className="text-sm font-medium">{fmt(loan.amount)}</div></div>
         <div><div className="text-xs text-muted-foreground">Ставка</div><div className="text-sm font-medium">{loan.rate}%</div></div>
@@ -68,6 +88,12 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
         </TabsList>
 
         <TabsContent value="schedule" className="mt-3">
+          {loan.holiday_start && (
+            <div className="flex flex-wrap gap-3 text-xs mb-2">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-blue-100 border border-blue-300 inline-block" />Каникулы — платежи не взимаются</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-50 border border-emerald-200 inline-block" />Продлённый период после каникул</span>
+            </div>
+          )}
           <div className="hidden sm:block overflow-x-auto max-h-96 overflow-y-auto border rounded-lg">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 sticky top-0"><tr className="text-xs text-muted-foreground">
@@ -76,40 +102,68 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
                 <th className="text-right py-2 px-3">Проценты</th><th className="text-right py-2 px-3">Остаток</th>
                 <th className="text-center py-2 px-3">Статус</th>
               </tr></thead>
-              <tbody>{loan.schedule.map((r: ScheduleItem) => (
-                <tr key={r.payment_no} className="border-t hover:bg-muted/30">
-                  <td className="py-2 px-3">{r.payment_no}</td>
-                  <td className="py-2 px-3">{fmtDate(r.payment_date)}</td>
-                  <td className="py-2 px-3 text-right font-medium">{fmt(r.payment_amount)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(r.principal_amount)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(r.interest_amount)}</td>
-                  <td className="py-2 px-3 text-right">{fmt(r.balance_after)}</td>
-                  <td className="py-2 px-3 text-center">
-                    <Badge variant={statusVariant(r.status || "pending") as "default"|"destructive"|"secondary"} className="text-xs">
-                      {statusLabel[r.status || "pending"] || r.status}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}</tbody>
+              <tbody>{loan.schedule.map((r: ScheduleItem) => {
+                const holiday = isHolidayRow(r);
+                const extended = isExtendedRow(loan, r);
+                return (
+                  <tr key={r.payment_no} className={`border-t ${holiday ? "bg-blue-50/60" : extended ? "bg-emerald-50/40" : "hover:bg-muted/30"}`}>
+                    <td className="py-2 px-3 text-muted-foreground">{r.payment_no}</td>
+                    <td className="py-2 px-3">
+                      <div className="flex items-center gap-1.5">
+                        {holiday && <Icon name="Umbrella" size={12} className="text-blue-500 shrink-0" />}
+                        {fmtDate(r.payment_date)}
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 text-right font-medium">{holiday ? <span className="text-blue-400 text-xs">—</span> : fmt(r.payment_amount)}</td>
+                    <td className="py-2 px-3 text-right">{holiday ? "—" : fmt(r.principal_amount)}</td>
+                    <td className="py-2 px-3 text-right">{holiday ? "—" : fmt(r.interest_amount)}</td>
+                    <td className="py-2 px-3 text-right">{fmt(r.balance_after)}</td>
+                    <td className="py-2 px-3 text-center">
+                      {holiday ? (
+                        <span className="text-xs text-blue-500 font-medium">Каникулы</span>
+                      ) : (
+                        <Badge variant={statusVariant(r.status || "pending") as "default"|"destructive"|"secondary"} className="text-xs">
+                          {statusLabel[r.status || "pending"] || r.status}
+                        </Badge>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}</tbody>
             </table>
           </div>
           <div className="sm:hidden space-y-2 max-h-[60vh] overflow-y-auto">
-            {loan.schedule.map((r: ScheduleItem) => (
-              <Card key={r.payment_no} className="p-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs text-muted-foreground">#{r.payment_no} · {fmtDate(r.payment_date)}</span>
-                  <Badge variant={statusVariant(r.status || "pending") as "default"|"destructive"|"secondary"} className="text-xs">
-                    {statusLabel[r.status || "pending"] || r.status}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
-                  <MobileRow label="Платёж" value={fmt(r.payment_amount)} />
-                  <MobileRow label="Осн. долг" value={fmt(r.principal_amount)} />
-                  <MobileRow label="Проценты" value={fmt(r.interest_amount)} />
-                  <MobileRow label="Остаток" value={fmt(r.balance_after)} />
-                </div>
-              </Card>
-            ))}
+            {loan.schedule.map((r: ScheduleItem) => {
+              const holiday = isHolidayRow(r);
+              const extended = isExtendedRow(loan, r);
+              return (
+                <Card key={r.payment_no} className={`p-3 ${holiday ? "border-blue-200 bg-blue-50/50" : extended ? "border-emerald-200 bg-emerald-50/30" : ""}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      {holiday && <Icon name="Umbrella" size={12} className="text-blue-500" />}
+                      #{r.payment_no} · {fmtDate(r.payment_date)}
+                    </span>
+                    {holiday ? (
+                      <span className="text-xs text-blue-500 font-medium">Каникулы</span>
+                    ) : (
+                      <Badge variant={statusVariant(r.status || "pending") as "default"|"destructive"|"secondary"} className="text-xs">
+                        {statusLabel[r.status || "pending"] || r.status}
+                      </Badge>
+                    )}
+                  </div>
+                  {holiday ? (
+                    <p className="text-xs text-blue-600">Платёж не взимается в период каникул</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                      <MobileRow label="Платёж" value={fmt(r.payment_amount)} />
+                      <MobileRow label="Осн. долг" value={fmt(r.principal_amount)} />
+                      <MobileRow label="Проценты" value={fmt(r.interest_amount)} />
+                      <MobileRow label="Остаток" value={fmt(r.balance_after)} />
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
           </div>
         </TabsContent>
 

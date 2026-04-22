@@ -4761,6 +4761,7 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
         loans = query_rows(cur, """
             SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type, l.start_date, l.end_date,
                    l.monthly_payment, l.balance, l.status, l.org_id,
+                   l.holiday_start, l.holiday_months, l.holiday_end,
                    o.name as org_name, o.short_name as org_short_name
             FROM loans l LEFT JOIN organizations o ON o.id=l.org_id
             WHERE l.member_id=%s ORDER BY l.created_at DESC

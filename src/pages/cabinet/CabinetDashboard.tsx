@@ -99,7 +99,13 @@ const CabinetDashboard = ({ data, userName, onOpenLoan, onOpenSaving }: CabinetD
               <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
               <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
             </div>
-            {(() => {
+            {loan.status === "holiday" && loan.holiday_start && loan.holiday_end ? (
+              <div className="mt-3 px-3 py-2 rounded-lg flex items-center gap-2 text-sm bg-blue-50 text-blue-700 border border-blue-200">
+                <Icon name="Umbrella" size={16} className="shrink-0" />
+                <span>Каникулы до <span className="font-bold">{fmtDate(loan.holiday_end)}</span></span>
+                <span className="text-xs ml-auto text-blue-500">{loan.holiday_months} мес.</span>
+              </div>
+            ) : (() => {
               const next = getNextPaymentInfo(loan);
               if (!next) return null;
               const urgent = next.daysLeft <= 3;
