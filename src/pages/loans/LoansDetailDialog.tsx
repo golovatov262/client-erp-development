@@ -14,12 +14,12 @@ import { useToast } from "@/hooks/use-toast";
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 
-const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", holiday: "Кредитные каникулы", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
+const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", holiday: "Кредитные каникулы", holiday_pending: "Кредитные каникулы", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
 const statusVariant = (s: string) => {
   if (s === "active" || s === "paid") return "default";
   if (s === "overdue") return "destructive";
   if (s === "partial") return "warning";
-  if (s === "holiday") return "secondary";
+  if (s === "holiday" || s === "holiday_pending") return "secondary";
   return "secondary";
 };
 
