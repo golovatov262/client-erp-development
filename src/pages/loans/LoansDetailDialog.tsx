@@ -196,19 +196,19 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
         {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
-            {(detail.status === "active" || detail.status === "overdue" || detail.status === "holiday") && (
-              <div className="flex flex-wrap gap-2">
-                {(detail.status === "active" || detail.status === "overdue") && <>
-                  <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
-                  <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
-                  <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
-                </>}
+            <div className="flex flex-wrap gap-2">
+              {(detail.status === "active" || detail.status === "overdue") && <>
+                <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
+                <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
+                <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
+              </>}
+              {(detail.status === "active" || detail.status === "overdue" || detail.status === "holiday") && (
                 <Button size="sm" variant="outline" onClick={props.onHoliday}>
                   <Icon name="Umbrella" size={14} className="mr-1" />
                   {detail.status === "holiday" ? "Изменить каникулы" : "Кредитные каникулы"}
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={props.onReconciliation}>
                 <Icon name="FileSearch" size={14} className="mr-1" />Сверка платежей

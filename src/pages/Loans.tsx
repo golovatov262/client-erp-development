@@ -22,7 +22,7 @@ import LoanApplicationsTab from "./loans/LoanApplicationsTab";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
-const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
+const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", holiday: "Кредитные каникулы", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
 const statusVariant = (s: string) => {
   if (s === "active" || s === "paid") return "default";
   if (s === "overdue") return "destructive";
