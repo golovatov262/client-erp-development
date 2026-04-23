@@ -192,7 +192,7 @@ def refresh_loan_overdue_status(cur, lid):
     """ % lid)
 
 def recalc_loan_schedule_statuses(cur, lid):
-    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s" % lid)
+    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
     cur.execute("SELECT id, payment_date, amount, manual_distribution, principal_part, interest_part, penalty_part FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
     for pay in payments:
@@ -212,6 +212,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             cur.execute("""
                 SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
+                AND status NOT IN ('holiday', 'holiday_pending')
                 ORDER BY payment_no, id
             """ % lid)
             unpaid_rows = cur.fetchall()
@@ -249,6 +250,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             cur.execute("""
                 SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
+                AND status NOT IN ('holiday', 'holiday_pending')
                 ORDER BY payment_no, id
             """ % lid)
             unpaid_rows = cur.fetchall()
