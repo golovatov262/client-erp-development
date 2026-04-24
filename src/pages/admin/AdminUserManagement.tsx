@@ -57,7 +57,7 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
   const [saving, setSaving] = useState(false);
   const [showClientForm, setShowClientForm] = useState(false);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-  const [bulkPassword, setBulkPassword] = useState("123456");
+  const [bulkPassword, setBulkPassword] = useState("12345678");
   const [bulkResult, setBulkResult] = useState<{ created: number; skipped: number; skipped_reasons: string[]; password: string } | null>(null);
   const [form, setForm] = useState({ login: "", name: "", role: "manager", password: "", email: "", phone: "" });
   const [clientForm, setClientForm] = useState({ login: "", name: "", password: "", phone: "", member_id: "" });
@@ -267,8 +267,8 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
               </div>
               <div>
                 <Label>Пароль по умолчанию</Label>
-                <Input value={bulkPassword} onChange={e => setBulkPassword(e.target.value)} placeholder="123456" />
-                <p className="text-xs text-muted-foreground mt-1">Минимум 6 символов. Пайщики смогут сменить пароль в личном кабинете.</p>
+                <Input value={bulkPassword} onChange={e => setBulkPassword(e.target.value)} placeholder="12345678" />
+                <p className="text-xs text-muted-foreground mt-1">Минимум 8 символов. Пайщики смогут сменить пароль в личном кабинете.</p>
               </div>
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
                 Пайщики без указанного телефона будут пропущены.
@@ -305,7 +305,7 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
             {!bulkResult ? (
               <>
                 <Button variant="outline" onClick={() => setShowBulkConfirm(false)} disabled={saving}>Отмена</Button>
-                <Button onClick={handleBulkCreate} disabled={saving || bulkPassword.length < 6}>
+                <Button onClick={handleBulkCreate} disabled={saving || bulkPassword.length < 8}>
                   {saving && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
                   Создать
                 </Button>
