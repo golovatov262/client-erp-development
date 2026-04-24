@@ -4395,7 +4395,7 @@ def handle_users(method, params, body, staff, cur, conn):
                 (login, name, email, phone, role, pw_hash, int(member_id) if member_id else None)
             )
             uid = cur.fetchone()[0]
-            audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), 'member_id: %s' % mid_sql, '')
+            audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), 'member_id: %s' % (member_id or ''), '')
             conn.commit()
             return {'id': uid, 'login': login}
         elif action == 'update':
