@@ -38,7 +38,7 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
   } catch {
     throw new Error("Сервер вернул некорректный ответ");
   }
-  if (!res.ok) throw new Error(data.error || "Ошибка сервера");
+  if (!res.ok || data.error) throw new Error(data.error || "Ошибка сервера");
   return data;
 }
 

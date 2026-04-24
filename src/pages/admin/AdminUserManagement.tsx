@@ -64,6 +64,7 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
   const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "", member_id: "" as string });
   const [staffSearch, setStaffSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
+  const [clientError, setClientError] = useState("");
 
   const filterUsers = (list: UserRow[], query: string) => {
     if (!query.trim()) return list;
@@ -93,11 +94,14 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
 
   const handleCreateClient = async () => {
     if (!clientForm.login || !clientForm.name || !clientForm.password || !clientForm.member_id) return;
+    setClientError("");
     setSaving(true);
     try {
       await onCreateClient(clientForm);
       setShowClientForm(false);
       setClientForm({ login: "", name: "", password: "", phone: "", member_id: "" });
+    } catch (e: unknown) {
+      setClientError(e instanceof Error ? e.message : "Ошибка при создании клиента");
     } finally {
       setSaving(false);
     }
@@ -200,7 +204,7 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showClientForm} onOpenChange={setShowClientForm}>
+      <Dialog open={showClientForm} onOpenChange={v => { setShowClientForm(v); if (!v) setClientError(""); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Новый клиент</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -208,9 +212,13 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
             <div><Label>Логин</Label><Input value={clientForm.login} onChange={e => setClientForm({ ...clientForm, login: e.target.value })} /></div>
             <div><Label>Имя</Label><Input value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} /></div>
             <div><Label>Телефон</Label><Input value={clientForm.phone} onChange={e => setClientForm({ ...clientForm, phone: e.target.value })} /></div>
-            <div><Label>Пароль</Label><Input type="password" value={clientForm.password} onChange={e => setClientForm({ ...clientForm, password: e.target.value })} /></div>
+            <div>
+              <Label>Пароль <span className="text-xs text-muted-foreground">(минимум 8 символов)</span></Label>
+              <Input type="password" value={clientForm.password} onChange={e => setClientForm({ ...clientForm, password: e.target.value })} />
+            </div>
+            {clientError && <p className="text-sm text-destructive">{clientError}</p>}
           </div>
-          <DialogFooter><Button onClick={handleCreateClient} disabled={saving || !clientForm.login || !clientForm.name || !clientForm.password || !clientForm.member_id}>Создать</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleCreateClient} disabled={saving || !clientForm.login || !clientForm.name || clientForm.password.length < 8 || !clientForm.member_id}>Создать</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
