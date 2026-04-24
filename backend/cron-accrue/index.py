@@ -26,8 +26,6 @@ def handler(event, context):
     try:
         accrual_date = body.get('date', date.today().isoformat())
 
-        cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
-
         cur.execute("SELECT id, current_balance, rate, start_date, end_date FROM savings WHERE status='active'")
         savings_rows = cur.fetchall()
         count = 0
