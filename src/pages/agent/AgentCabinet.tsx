@@ -27,7 +27,7 @@ const MONTHS_RU = ["Январь", "Февраль", "Март", "Апрель",
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 
 function formatMonth(iso: string) {
-  const d = new Date(iso);
+  const d = new Date(iso + "-02");
   return `${MONTHS_RU[d.getMonth()]} ${d.getFullYear()}`;
 }
 
@@ -124,58 +124,29 @@ function LoginPage({ onLogin }: { onLogin: (token: string, name: string) => void
   );
 }
 
-export default function AgentCabinet() {
-  const [token, setToken] = useState(() => localStorage.getItem("agent_token") || "");
-  const [agentName, setAgentName] = useState(() => localStorage.getItem("agent_name") || "");
+function AgentDashboard({ token, agentName, onLogout }: { token: string; agentName: string; onLogout: () => void }) {
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [leadsTab, setLeadsTab] = useState("all");
   const [month, setMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   });
-  function handleLogin(t: string, name: string) {
-    setToken(t);
-    setAgentName(name);
-    localStorage.setItem("agent_token", t);
-    localStorage.setItem("agent_name", name);
-  }
 
-  function handleLogout() {
-    setToken("");
-    setAgentName("");
-    localStorage.removeItem("agent_token");
-    localStorage.removeItem("agent_name");
-  }
-
-  const { data: stats } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["ac-stats", token],
     queryFn: () => api.agentCabinet.stats(token),
-    enabled: !!token,
     retry: false,
-    throwOnError: false,
   });
 
-  const { data: leads } = useQuery({
+  const { data: leads, isLoading: leadsLoading } = useQuery({
     queryKey: ["ac-leads", token],
     queryFn: () => api.agentCabinet.leads(token),
-    enabled: !!token,
     retry: false,
-    throwOnError: false,
   });
 
-  const { data: report } = useQuery({
-    queryKey: ["ac-report", token, month],
-    queryFn: () => api.agentCabinet.monthReport(token, month),
-    enabled: !!token,
-    retry: false,
-    throwOnError: false,
+  const reportMut = useMutation({
+    mutationFn: () => api.agentCabinet.monthReport(token, month),
   });
-
-
-
-  if (!token) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
 
   const filteredLeads = leads?.filter(l => leadsTab === "all" || l.status === leadsTab);
 
@@ -191,7 +162,7 @@ export default function AgentCabinet() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground hidden sm:block">{agentName}</span>
-            <Button size="sm" variant="ghost" onClick={handleLogout}>
+            <Button size="sm" variant="ghost" onClick={onLogout}>
               <Icon name="LogOut" size={16} />
             </Button>
           </div>
@@ -199,7 +170,11 @@ export default function AgentCabinet() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {stats && (
+        {statsLoading ? (
+          <div className="flex justify-center py-4">
+            <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
+          </div>
+        ) : stats ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-background border rounded-xl p-4">
               <div className="text-2xl font-bold">{stats.total_leads}</div>
@@ -218,10 +193,10 @@ export default function AgentCabinet() {
               <div className="text-xs text-muted-foreground mt-1">К выплате</div>
             </div>
           </div>
-        )}
+        ) : null}
 
         <Tabs defaultValue="leads">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <TabsList>
               <TabsTrigger value="leads">Мои заявки</TabsTrigger>
               <TabsTrigger value="report">Отчёт</TabsTrigger>
@@ -235,7 +210,7 @@ export default function AgentCabinet() {
 
           <TabsContent value="leads" className="mt-4 space-y-3">
             <div className="flex gap-2 flex-wrap">
-              {["all", "new", "processing", "member", "rejected"].map(s => (
+              {(["all", "new", "processing", "member", "rejected"] as const).map(s => (
                 <button key={s}
                   className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${leadsTab === s ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
                   onClick={() => setLeadsTab(s)}>
@@ -247,7 +222,11 @@ export default function AgentCabinet() {
               ))}
             </div>
 
-            {!filteredLeads?.length ? (
+            {leadsLoading ? (
+              <div className="flex justify-center py-8">
+                <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
+              </div>
+            ) : !filteredLeads?.length ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Icon name="FileText" size={40} className="mx-auto mb-3 opacity-30" />
                 <p className="text-sm">Заявок нет</p>
@@ -276,9 +255,7 @@ export default function AgentCabinet() {
                         </div>
                       </div>
                       {lead.status === "member" && (
-                        <div className="flex-shrink-0 text-green-600 font-bold text-sm">
-                          +5 000 ₽
-                        </div>
+                        <div className="flex-shrink-0 text-green-600 font-bold text-sm">+5 000 ₽</div>
                       )}
                     </div>
                   </div>
@@ -288,36 +265,43 @@ export default function AgentCabinet() {
           </TabsContent>
 
           <TabsContent value="report" className="mt-4 space-y-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <label className="text-sm font-medium">Месяц:</label>
               <Input type="month" className="w-44"
                 value={month.slice(0, 7)}
                 onChange={e => setMonth(e.target.value + "-01")}
               />
+              <Button size="sm" onClick={() => reportMut.mutate()} disabled={reportMut.isPending}>
+                {reportMut.isPending ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : null}
+                Показать
+              </Button>
             </div>
 
-            {!report || !report.rows.length ? (
+            {reportMut.isPending ? (
+              <div className="flex justify-center py-8">
+                <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
+              </div>
+            ) : !reportMut.data || !reportMut.data.rows?.length ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Icon name="BarChart3" size={40} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm">За этот месяц данных нет</p>
+                <p className="text-sm">Нажмите «Показать» для загрузки отчёта</p>
               </div>
             ) : (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-background border rounded-xl p-4 text-center">
-                    <div className="text-3xl font-bold">{report.members_count}</div>
+                    <div className="text-3xl font-bold">{reportMut.data.members_count}</div>
                     <div className="text-xs text-muted-foreground mt-1">Пайщиков за {formatMonth(month)}</div>
                   </div>
                   <div className="bg-background border rounded-xl p-4 text-center">
-                    <div className="text-2xl font-bold text-green-600">{fmt(report.total)}</div>
+                    <div className="text-2xl font-bold text-green-600">{fmt(reportMut.data.total)}</div>
                     <div className="text-xs text-muted-foreground mt-1">Вознаграждение</div>
                   </div>
                   <div className="bg-background border rounded-xl p-4 text-center">
-                    <div className="text-2xl font-bold text-orange-600">{fmt(report.total_bonus)}</div>
+                    <div className="text-2xl font-bold text-orange-600">{fmt(reportMut.data.total_bonus)}</div>
                     <div className="text-xs text-muted-foreground mt-1">Бонус за объём</div>
                   </div>
                 </div>
-
                 <div className="bg-background border rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-muted">
@@ -328,7 +312,7 @@ export default function AgentCabinet() {
                       </tr>
                     </thead>
                     <tbody>
-                      {report.rows.map(r => (
+                      {reportMut.data.rows.map(r => (
                         <tr key={r.id} className="border-t">
                           <td className="p-3">{r.lead_org_name || "—"}</td>
                           <td className="p-3 text-right font-medium">{fmt(r.total_amount)}</td>
@@ -342,20 +326,6 @@ export default function AgentCabinet() {
                     </tbody>
                   </table>
                 </div>
-
-                {report.history && report.history.length > 0 && (
-                  <div>
-                    <h3 className="font-medium text-sm mb-2">История по месяцам</h3>
-                    <div className="flex gap-2 flex-wrap">
-                      {report.history.map(h => (
-                        <div key={h.month} className="bg-background border rounded-lg p-3 text-center min-w-[80px]">
-                          <div className="font-bold text-lg">{h.count}</div>
-                          <div className="text-xs text-muted-foreground">{h.month?.slice(0, 7)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </TabsContent>
@@ -410,4 +380,29 @@ export default function AgentCabinet() {
       </Dialog>
     </div>
   );
+}
+
+export default function AgentCabinet() {
+  const [token, setToken] = useState(() => localStorage.getItem("agent_token") || "");
+  const [agentName, setAgentName] = useState(() => localStorage.getItem("agent_name") || "");
+
+  function handleLogin(t: string, name: string) {
+    setToken(t);
+    setAgentName(name);
+    localStorage.setItem("agent_token", t);
+    localStorage.setItem("agent_name", name);
+  }
+
+  function handleLogout() {
+    setToken("");
+    setAgentName("");
+    localStorage.removeItem("agent_token");
+    localStorage.removeItem("agent_name");
+  }
+
+  if (!token) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  return <AgentDashboard token={token} agentName={agentName} onLogout={handleLogout} />;
 }
