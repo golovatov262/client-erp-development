@@ -444,13 +444,13 @@ export const api = {
   agentCabinet: {
     login: (login: string, password: string) =>
       request<{ success: boolean; token: string; agent: { id: number; name: string; login: string } }>("POST", undefined, { entity: "agent_auth", login, password }),
-    stats: (token: string) => requestAgent<AgentStats>("GET", { entity: "agent_cabinet", action: "stats" }, token),
-    leads: (token: string, status?: string) => requestAgent<AgentLead[]>("GET", { entity: "agent_cabinet", action: "my_leads", status }, token),
+    stats: (token: string) => request<AgentStats>("GET", { entity: "agent_cabinet", action: "stats", token }),
+    leads: (token: string, status?: string) => request<AgentLead[]>("GET", { entity: "agent_cabinet", action: "my_leads", token, status }),
     createLead: (token: string, data: { org_name: string; inn: string; phone?: string; email?: string; contact_name?: string; comment?: string }) =>
-      requestAgent<{ id: number; success: boolean }>("POST", undefined, { entity: "agent_cabinet", action: "create_lead", ...data }, token),
+      request<{ id: number; success: boolean }>("POST", undefined, { entity: "agent_cabinet", action: "create_lead", token, ...data }),
     monthReport: (token: string, month: string) =>
-      requestAgent<AgentMonthReport>("POST", undefined, { entity: "agent_cabinet", action: "month_report", month }, token),
-    profile: (token: string) => requestAgent<AgentProfile>("GET", { entity: "agent_cabinet", action: "profile" }, token),
+      request<AgentMonthReport>("POST", undefined, { entity: "agent_cabinet", action: "month_report", token, month }),
+    profile: (token: string) => request<AgentProfile>("GET", { entity: "agent_cabinet", action: "profile", token }),
   },
 };
 

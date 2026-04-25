@@ -7869,11 +7869,13 @@ def calc_agent_bonus(members_count):
         return 5000
     return 0
 
-def get_agent_session(params, headers, cur):
+def get_agent_session(params, headers, cur, body=None):
     """Проверка сессии агента по токену."""
     token = (headers or {}).get('X-Agent-Token') or (headers or {}).get('x-agent-token', '')
     if not token:
-        token = params.get('agent_token', '')
+        token = params.get('token', '') or params.get('agent_token', '')
+    if not token and body:
+        token = body.get('token', '')
     if not token:
         return None
     cur.execute(
@@ -8152,7 +8154,7 @@ def handle_agent_rewards(method, params, body, cur, conn, staff, ip=''):
 
 def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
     """Личный кабинет агента."""
-    agent = get_agent_session(params, ev_headers, cur)
+    agent = get_agent_session(params, ev_headers, cur, body)
     action = body.get('action') or params.get('action', '')
 
     if action == 'login':
