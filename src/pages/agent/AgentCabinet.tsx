@@ -8,8 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import Icon from "@/components/ui/icon";
 
-function fmt(n: number) {
-  return n.toLocaleString("ru-RU") + " ₽";
+function fmt(n: number | undefined | null) {
+  return (Number(n) || 0).toLocaleString("ru-RU") + " ₽";
 }
 
 function statusBadge(status: string) {
