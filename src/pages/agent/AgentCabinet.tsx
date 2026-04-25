@@ -133,8 +133,6 @@ export default function AgentCabinet() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   });
-  const qc = useQueryClient();
-
   function handleLogin(t: string, name: string) {
     setToken(t);
     setAgentName(name);
@@ -154,6 +152,7 @@ export default function AgentCabinet() {
     queryFn: () => api.agentCabinet.stats(token),
     enabled: !!token,
     retry: false,
+    throwOnError: false,
   });
 
   const { data: leads } = useQuery({
@@ -161,6 +160,7 @@ export default function AgentCabinet() {
     queryFn: () => api.agentCabinet.leads(token),
     enabled: !!token,
     retry: false,
+    throwOnError: false,
   });
 
   const { data: report } = useQuery({
@@ -168,6 +168,7 @@ export default function AgentCabinet() {
     queryFn: () => api.agentCabinet.monthReport(token, month),
     enabled: !!token,
     retry: false,
+    throwOnError: false,
   });
 
 

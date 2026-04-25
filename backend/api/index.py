@@ -7879,15 +7879,15 @@ def get_agent_session(params, headers, cur, body=None):
     if not token:
         return None
     cur.execute(
-        "SELECT cs.user_id, a.name, a.login, a.id FROM client_sessions cs "
-        "JOIN agents a ON a.id=cs.user_id "
-        "WHERE cs.token=%s AND cs.expires_at > NOW() AND a.status='active'",
+        "SELECT s.agent_id, a.name, a.login FROM agent_sessions s "
+        "JOIN agents a ON a.id=s.agent_id "
+        "WHERE s.token=%s AND s.expires_at > NOW() AND a.status='active'",
         (token,)
     )
     row = cur.fetchone()
     if not row:
         return None
-    return {'user_id': row[0], 'name': row[1], 'login': row[2], 'agent_id': row[3]}
+    return {'agent_id': row[0], 'name': row[1], 'login': row[2]}
 
 def handle_agent_auth(body, cur, conn, ip):
     """Авторизация агента в личном кабинете."""
@@ -7907,7 +7907,7 @@ def handle_agent_auth(body, cur, conn, ip):
     token = generate_token()
     expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
     cur.execute(
-        "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+        "INSERT INTO agent_sessions (agent_id, token, expires_at) VALUES (%s, %s, %s)",
         (agent_id, token, expires)
     )
     conn.commit()
