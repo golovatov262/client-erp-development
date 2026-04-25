@@ -10,6 +10,33 @@ function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
 
+async function requestAgent<T>(method: string, params?: Params, body?: unknown, agentToken?: string): Promise<T> {
+  const url = new URL(API_URL);
+  if (params) {
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined) url.searchParams.set(key, String(val));
+    });
+  }
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  if (agentToken) hdrs["X-Agent-Token"] = agentToken;
+  const options: RequestInit = { method, headers: hdrs };
+  if (body) options.body = JSON.stringify(body);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), options);
+  } catch {
+    throw new Error("Нет связи с сервером.");
+  }
+  let data: T & { error?: string };
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Сервер вернул некорректный ответ");
+  }
+  if (!res.ok || data.error) throw new Error(data.error || "Ошибка сервера");
+  return data;
+}
+
 async function request<T>(method: string, params?: Params, body?: unknown): Promise<T> {
   const url = new URL(API_URL);
   if (params) {
@@ -387,6 +414,43 @@ export const api = {
     staffReopen: (conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "reopen", conversation_id: conversationId }),
     toggleAi: (conversationId: number, enabled: boolean) => request<{ success: boolean; ai_enabled: boolean }>("POST", undefined, { entity: "chat", action: "toggle_ai", conversation_id: conversationId, enabled }),
     assign: (conversationId: number, staffId: number | null) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "assign", conversation_id: conversationId, staff_id: staffId }),
+  },
+
+  agents: {
+    list: () => request<AgentItem[]>("GET", { entity: "agents" }),
+    get: (id: number) => request<AgentItem>("GET", { entity: "agents", id }),
+    create: (data: { name: string; phone?: string; email?: string; login: string; password: string }) =>
+      request<{ id: number; name: string }>("POST", undefined, { entity: "agents", action: "create", ...data }),
+    update: (data: { id: number; name?: string; phone?: string; email?: string; login?: string; password?: string; status?: string }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "agents", action: "update", ...data }),
+    block: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "agents", action: "delete", id }),
+  },
+
+  agentLeads: {
+    list: (agentId?: number, status?: string) => request<AgentLead[]>("GET", { entity: "agent_leads", agent_id: agentId, status }),
+    create: (data: { agent_id: number; org_name: string; inn: string; phone?: string; email?: string; contact_name?: string; comment?: string }) =>
+      request<{ id: number }>("POST", undefined, { entity: "agent_leads", action: "create", ...data }),
+    process: (data: { id: number; status: string; member_id?: number; reject_reason?: string }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "agent_leads", action: "process", ...data }),
+  },
+
+  agentRewards: {
+    list: (agentId?: number, month?: string) => request<AgentReward[]>("GET", { entity: "agent_rewards", agent_id: agentId, month }),
+    markPaid: (id: number, note?: string) => request<{ success: boolean }>("POST", undefined, { entity: "agent_rewards", action: "mark_paid", id, note }),
+    monthReport: (agentId: number, month: string) =>
+      request<AgentMonthReport>("POST", undefined, { entity: "agent_rewards", action: "month_report", agent_id: agentId, month }),
+  },
+
+  agentCabinet: {
+    login: (login: string, password: string) =>
+      request<{ success: boolean; token: string; agent: { id: number; name: string; login: string } }>("POST", undefined, { entity: "agent_auth", login, password }),
+    stats: (token: string) => requestAgent<AgentStats>("GET", { entity: "agent_cabinet", action: "stats" }, token),
+    leads: (token: string, status?: string) => requestAgent<AgentLead[]>("GET", { entity: "agent_cabinet", action: "my_leads", status }, token),
+    createLead: (token: string, data: { org_name: string; inn: string; phone?: string; email?: string; contact_name?: string; comment?: string }) =>
+      requestAgent<{ id: number; success: boolean }>("POST", undefined, { entity: "agent_cabinet", action: "create_lead", ...data }, token),
+    monthReport: (token: string, month: string) =>
+      requestAgent<AgentMonthReport>("POST", undefined, { entity: "agent_cabinet", action: "month_report", month }, token),
+    profile: (token: string) => requestAgent<AgentProfile>("GET", { entity: "agent_cabinet", action: "profile" }, token),
   },
 };
 
@@ -1433,6 +1497,82 @@ export interface BankImapStatus {
     last_sync_status: string;
     last_sync_error: string;
   }[];
+}
+
+export interface AgentItem {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  login: string;
+  status: string;
+  created_at: string;
+  members_count: number;
+  total_paid: number;
+}
+
+export interface AgentLead {
+  id: number;
+  agent_id: number;
+  agent_name?: string;
+  org_name: string;
+  inn: string;
+  phone: string;
+  email: string;
+  contact_name: string;
+  comment: string;
+  status: string;
+  member_id: number | null;
+  reject_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  processed_at: string | null;
+}
+
+export interface AgentReward {
+  id: number;
+  agent_id: number;
+  agent_name: string;
+  lead_id: number;
+  member_id: number | null;
+  reward_month: string;
+  base_amount: number;
+  bonus_amount: number;
+  total_amount: number;
+  status: string;
+  paid_at: string | null;
+  note: string | null;
+  created_at: string;
+  lead_org_name: string;
+}
+
+export interface AgentMonthReport {
+  rows: AgentReward[];
+  members_count: number;
+  total_base?: number;
+  total_bonus: number;
+  total: number;
+  history?: { month: string; count: number }[];
+}
+
+export interface AgentStats {
+  total_leads: number;
+  new: number;
+  processing: number;
+  members: number;
+  rejected: number;
+  total_earned: number;
+  pending_amount: number;
+}
+
+export interface AgentProfile {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  login: string;
+  status: string;
+  created_at: string;
 }
 
 export default api;

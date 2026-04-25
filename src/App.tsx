@@ -17,6 +17,8 @@ import BankStatements from "@/pages/BankStatements";
 import Login from "@/pages/Login";
 import CabinetLogin from "@/pages/cabinet/Login";
 import Cabinet from "@/pages/cabinet/Cabinet";
+import AgentCabinet from "@/pages/agent/AgentCabinet";
+import Agents from "@/pages/Agents";
 import NotFound from "@/pages/NotFound";
 import Icon from "@/components/ui/icon";
 
@@ -38,6 +40,7 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/" element={<CabinetLogin />} />
       <Route path="/cabinet" element={<Cabinet />} />
+      <Route path="/agent" element={<AgentCabinet />} />
       <Route path="/office/login" element={user ? <Navigate to="/office" replace /> : <Login />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/office" element={<Dashboard />} />
@@ -48,6 +51,7 @@ const AppRoutes = () => {
         <Route path="/office/reports" element={<Reports />} />
         <Route path="/office/chats" element={<Chats />} />
         <Route path="/office/bank" element={<BankStatements />} />
+        <Route path="/office/agents" element={<Agents />} />
         <Route path="/office/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<NotFound />} />

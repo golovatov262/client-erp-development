@@ -7236,7 +7236,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -7859,6 +7859,403 @@ def handle_saving_applications(method, params, body, cur, conn, staff=None, ip='
 
     return {'error': 'Метод не поддерживается'}
 
+def calc_agent_bonus(members_count):
+    """Расчёт бонуса агента за количество пайщиков в месяц."""
+    if members_count >= 20:
+        return 20000
+    elif members_count >= 10:
+        return 10000
+    elif members_count >= 5:
+        return 5000
+    return 0
+
+def get_agent_session(params, headers, cur):
+    """Проверка сессии агента по токену."""
+    token = (headers or {}).get('X-Agent-Token') or (headers or {}).get('x-agent-token', '')
+    if not token:
+        token = params.get('agent_token', '')
+    if not token:
+        return None
+    cur.execute(
+        "SELECT cs.user_id, a.name, a.login, a.id FROM client_sessions cs "
+        "JOIN agents a ON a.id=cs.user_id "
+        "WHERE cs.token=%s AND cs.expires_at > NOW() AND a.status='active'",
+        (token,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {'user_id': row[0], 'name': row[1], 'login': row[2], 'agent_id': row[3]}
+
+def handle_agent_auth(body, cur, conn, ip):
+    """Авторизация агента в личном кабинете."""
+    login = body.get('login', '').strip()
+    password = body.get('password', '')
+    if not login or not password:
+        return {'_status': 400, 'error': 'Укажите логин и пароль'}
+    cur.execute("SELECT id, name, password_hash, status FROM agents WHERE login='%s'" % esc(login))
+    row = cur.fetchone()
+    if not row:
+        return {'_status': 400, 'error': 'Неверный логин или пароль'}
+    agent_id, name, pw_hash, status = row
+    if status != 'active':
+        return {'_status': 400, 'error': 'Аккаунт заблокирован'}
+    if not verify_password(password, pw_hash):
+        return {'_status': 400, 'error': 'Неверный логин или пароль'}
+    token = generate_token()
+    expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute(
+        "INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)",
+        (agent_id, token, expires)
+    )
+    conn.commit()
+    return {'success': True, 'token': token, 'agent': {'id': agent_id, 'name': name, 'login': login}}
+
+def handle_agents(method, params, body, cur, conn, staff, ip=''):
+    """Управление агентами (только для admin/manager)."""
+    if method == 'GET':
+        agent_id = params.get('id')
+        if agent_id:
+            cur.execute(
+                "SELECT a.id, a.name, a.phone, a.email, a.login, a.status, a.created_at, "
+                "COUNT(DISTINCT al.id) FILTER (WHERE al.status='member') as members_count, "
+                "COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.status='paid'), 0) as total_paid "
+                "FROM agents a "
+                "LEFT JOIN agent_leads al ON al.agent_id=a.id "
+                "LEFT JOIN agent_rewards ar ON ar.agent_id=a.id "
+                "WHERE a.id=%s GROUP BY a.id" % int(agent_id)
+            )
+        else:
+            cur.execute(
+                "SELECT a.id, a.name, a.phone, a.email, a.login, a.status, a.created_at, "
+                "COUNT(DISTINCT al.id) FILTER (WHERE al.status='member') as members_count, "
+                "COALESCE(SUM(ar.total_amount) FILTER (WHERE ar.status='paid'), 0) as total_paid "
+                "FROM agents a "
+                "LEFT JOIN agent_leads al ON al.agent_id=a.id "
+                "LEFT JOIN agent_rewards ar ON ar.agent_id=a.id "
+                "GROUP BY a.id ORDER BY a.created_at DESC"
+            )
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        if params.get('id'):
+            if not rows:
+                return None
+            return {cols[i]: serialize(rows[0][i]) for i in range(len(cols))}
+        return [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in rows]
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            name = body.get('name', '').strip()
+            phone = body.get('phone', '').strip()
+            email = body.get('email', '').strip()
+            login = body.get('login', '').strip()
+            password = body.get('password', '')
+            if not name or not login or not password:
+                return {'error': 'Укажите ФИО, логин и пароль'}
+            if len(password) < 8:
+                return {'error': 'Пароль должен содержать минимум 8 символов'}
+            pw_hash = hash_password(password)
+            cur.execute(
+                "INSERT INTO agents (name, phone, email, login, password_hash) "
+                "VALUES ('%s', '%s', '%s', '%s', '%s') RETURNING id" % (
+                    esc(name), esc(phone), esc(email), esc(login), esc(pw_hash)
+                )
+            )
+            agent_id = cur.fetchone()[0]
+            audit_log(cur, staff, 'create', 'agent', agent_id, name, '', ip)
+            conn.commit()
+            return {'id': agent_id, 'name': name}
+
+        elif action == 'update':
+            agent_id = int(body.get('id', 0))
+            fields = []
+            for f in ('name', 'phone', 'email', 'login', 'status'):
+                if f in body:
+                    fields.append("%s='%s'" % (f, esc(str(body[f]))))
+            if 'password' in body and body['password']:
+                if len(body['password']) < 8:
+                    return {'error': 'Пароль должен содержать минимум 8 символов'}
+                fields.append("password_hash='%s'" % esc(hash_password(body['password'])))
+            if not fields:
+                return {'error': 'Нет данных для обновления'}
+            cur.execute("UPDATE agents SET %s, updated_at=NOW() WHERE id=%s" % (', '.join(fields), agent_id))
+            audit_log(cur, staff, 'update', 'agent', agent_id, '', ', '.join(fields), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete':
+            agent_id = int(body.get('id', 0))
+            cur.execute("UPDATE agents SET status='blocked', updated_at=NOW() WHERE id=%s" % agent_id)
+            audit_log(cur, staff, 'block', 'agent', agent_id, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
+    return {'error': 'Метод не поддерживается'}
+
+def handle_agent_leads(method, params, body, cur, conn, staff, ip=''):
+    """Управление заявками агентов."""
+    if method == 'GET':
+        agent_id = params.get('agent_id')
+        status = params.get('status')
+        conditions = []
+        if agent_id:
+            conditions.append("al.agent_id=%s" % int(agent_id))
+        if status:
+            conditions.append("al.status='%s'" % esc(status))
+        where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+        cur.execute(
+            "SELECT al.id, al.agent_id, a.name as agent_name, al.org_name, al.inn, "
+            "al.phone, al.email, al.contact_name, al.comment, al.status, "
+            "al.member_id, al.reject_reason, al.created_at, al.processed_at, "
+            "al.updated_at "
+            "FROM agent_leads al JOIN agents a ON a.id=al.agent_id %s ORDER BY al.created_at DESC" % where
+        )
+        cols = [d[0] for d in cur.description]
+        return [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            agent_id = int(body.get('agent_id', 0))
+            org_name = body.get('org_name', '').strip()
+            inn = body.get('inn', '').strip()
+            phone = body.get('phone', '').strip()
+            email = body.get('email', '').strip()
+            contact_name = body.get('contact_name', '').strip()
+            comment = body.get('comment', '').strip()
+            if not org_name or not inn:
+                return {'error': 'Укажите наименование и ИНН'}
+            cur.execute(
+                "INSERT INTO agent_leads (agent_id, org_name, inn, phone, email, contact_name, comment) "
+                "VALUES (%s, '%s', '%s', '%s', '%s', '%s', '%s') RETURNING id" % (
+                    agent_id, esc(org_name), esc(inn), esc(phone), esc(email), esc(contact_name), esc(comment)
+                )
+            )
+            lead_id = cur.fetchone()[0]
+            audit_log(cur, staff, 'create', 'agent_lead', lead_id, org_name, 'agent_id: %s' % agent_id, ip)
+            conn.commit()
+            return {'id': lead_id}
+
+        elif action == 'process':
+            lead_id = int(body.get('id', 0))
+            status = body.get('status', '')
+            if status not in ('processing', 'member', 'rejected'):
+                return {'error': 'Недопустимый статус'}
+            member_id = body.get('member_id')
+            reject_reason = body.get('reject_reason', '')
+            if status == 'member' and not member_id:
+                return {'error': 'Укажите ID пайщика'}
+            cur.execute("SELECT agent_id, org_name FROM agent_leads WHERE id=%s" % lead_id)
+            lead_row = cur.fetchone()
+            if not lead_row:
+                return {'error': 'Заявка не найдена'}
+            agent_id, org_name = lead_row
+            mid_clause = ('member_id=%s, ' % int(member_id)) if member_id else ''
+            rr_clause = ("reject_reason='%s', " % esc(reject_reason)) if reject_reason else ''
+            cur.execute(
+                "UPDATE agent_leads SET status='%s', %s%s"
+                "processed_by_user_id=%s, processed_at=NOW(), updated_at=NOW() WHERE id=%s" % (
+                    esc(status), mid_clause, rr_clause,
+                    staff['user_id'] if staff else 'NULL', lead_id
+                )
+            )
+            if status == 'member' and member_id:
+                reward_month = date.today().replace(day=1)
+                cur.execute(
+                    "SELECT COUNT(*) FROM agent_leads "
+                    "WHERE agent_id=%s AND status='member' "
+                    "AND DATE_TRUNC('month', processed_at)=DATE_TRUNC('month', NOW())" % agent_id
+                )
+                month_count = cur.fetchone()[0]
+                base = 5000
+                bonus = calc_agent_bonus(month_count)
+                total = base + (bonus if month_count in (5, 10, 20) else 0)
+                cur.execute(
+                    "INSERT INTO agent_rewards (agent_id, lead_id, member_id, reward_month, base_amount, bonus_amount, total_amount) "
+                    "VALUES (%s, %s, %s, '%s', %s, %s, %s) RETURNING id" % (
+                        agent_id, lead_id, int(member_id),
+                        reward_month.isoformat(), base, bonus if month_count in (5, 10, 20) else 0, total
+                    )
+                )
+                reward_id = cur.fetchone()[0]
+                audit_log(cur, staff, 'create', 'agent_reward', reward_id,
+                          'agent_id:%s lead_id:%s' % (agent_id, lead_id),
+                          'total:%s' % total, ip)
+            audit_log(cur, staff, 'update', 'agent_lead', lead_id, org_name, 'status->%s' % status, ip)
+            conn.commit()
+            return {'success': True}
+
+    return {'error': 'Метод не поддерживается'}
+
+def handle_agent_rewards(method, params, body, cur, conn, staff, ip=''):
+    """Управление вознаграждениями агентов."""
+    if method == 'GET':
+        agent_id = params.get('agent_id')
+        reward_month = params.get('month')
+        conditions = []
+        if agent_id:
+            conditions.append("ar.agent_id=%s" % int(agent_id))
+        if reward_month:
+            conditions.append("ar.reward_month='%s'" % esc(reward_month))
+        where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+        cur.execute(
+            "SELECT ar.id, ar.agent_id, a.name as agent_name, ar.lead_id, ar.member_id, "
+            "ar.reward_month, ar.base_amount, ar.bonus_amount, ar.total_amount, "
+            "ar.status, ar.paid_at, ar.note, ar.created_at, "
+            "al.org_name as lead_org_name "
+            "FROM agent_rewards ar "
+            "JOIN agents a ON a.id=ar.agent_id "
+            "LEFT JOIN agent_leads al ON al.id=ar.lead_id "
+            "%s ORDER BY ar.reward_month DESC, ar.created_at DESC" % where
+        )
+        cols = [d[0] for d in cur.description]
+        return [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+
+    elif method == 'POST':
+        action = body.get('action', '')
+        if action == 'mark_paid':
+            reward_id = int(body.get('id', 0))
+            note = body.get('note', '')
+            cur.execute(
+                "UPDATE agent_rewards SET status='paid', paid_at=NOW(), note='%s' WHERE id=%s" % (esc(note), reward_id)
+            )
+            audit_log(cur, staff, 'update', 'agent_reward', reward_id, '', 'status->paid', ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'month_report':
+            agent_id = int(body.get('agent_id', 0))
+            month = body.get('month', date.today().replace(day=1).isoformat())
+            cur.execute(
+                "SELECT ar.id, ar.lead_id, ar.member_id, ar.base_amount, ar.bonus_amount, "
+                "ar.total_amount, ar.status, ar.paid_at, al.org_name, al.inn "
+                "FROM agent_rewards ar "
+                "LEFT JOIN agent_leads al ON al.id=ar.lead_id "
+                "WHERE ar.agent_id=%s AND ar.reward_month='%s' "
+                "ORDER BY ar.created_at" % (agent_id, esc(month))
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+            total_base = sum(float(r['base_amount']) for r in rows)
+            total_bonus = sum(float(r['bonus_amount']) for r in rows)
+            total = sum(float(r['total_amount']) for r in rows)
+            return {
+                'rows': rows,
+                'members_count': len(rows),
+                'total_base': total_base,
+                'total_bonus': total_bonus,
+                'total': total
+            }
+
+    return {'error': 'Метод не поддерживается'}
+
+def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
+    """Личный кабинет агента."""
+    agent = get_agent_session(params, ev_headers, cur)
+    action = body.get('action') or params.get('action', '')
+
+    if action == 'login':
+        return handle_agent_auth(body, cur, conn, '')
+
+    if not agent:
+        return {'_status': 401, 'error': 'Требуется авторизация агента'}
+
+    agent_id = agent['agent_id']
+
+    if action == 'profile':
+        cur.execute("SELECT id, name, phone, email, login, status, created_at FROM agents WHERE id=%s" % agent_id)
+        cols = [d[0] for d in cur.description]
+        row = cur.fetchone()
+        return {cols[i]: serialize(row[i]) for i in range(len(cols))} if row else None
+
+    elif action == 'my_leads' or method == 'GET':
+        status = params.get('status') or body.get('status')
+        cond = "WHERE al.agent_id=%s" % agent_id
+        if status:
+            cond += " AND al.status='%s'" % esc(status)
+        cur.execute(
+            "SELECT al.id, al.org_name, al.inn, al.phone, al.email, al.contact_name, "
+            "al.comment, al.status, al.reject_reason, al.created_at, al.updated_at "
+            "FROM agent_leads al %s ORDER BY al.created_at DESC" % cond
+        )
+        cols = [d[0] for d in cur.description]
+        return [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+
+    elif action == 'create_lead':
+        org_name = body.get('org_name', '').strip()
+        inn = body.get('inn', '').strip()
+        phone = body.get('phone', '').strip()
+        email = body.get('email', '').strip()
+        contact_name = body.get('contact_name', '').strip()
+        comment = body.get('comment', '').strip()
+        if not org_name or not inn:
+            return {'error': 'Укажите наименование и ИНН'}
+        cur.execute(
+            "INSERT INTO agent_leads (agent_id, org_name, inn, phone, email, contact_name, comment) "
+            "VALUES (%s, '%s', '%s', '%s', '%s', '%s', '%s') RETURNING id" % (
+                agent_id, esc(org_name), esc(inn), esc(phone), esc(email), esc(contact_name), esc(comment)
+            )
+        )
+        lead_id = cur.fetchone()[0]
+        conn.commit()
+        return {'id': lead_id, 'success': True}
+
+    elif action == 'month_report':
+        month = body.get('month') or params.get('month') or date.today().replace(day=1).isoformat()
+        cur.execute(
+            "SELECT ar.id, ar.base_amount, ar.bonus_amount, ar.total_amount, "
+            "ar.status, ar.paid_at, al.org_name, al.inn, ar.reward_month "
+            "FROM agent_rewards ar "
+            "LEFT JOIN agent_leads al ON al.id=ar.lead_id "
+            "WHERE ar.agent_id=%s AND ar.reward_month='%s' "
+            "ORDER BY ar.created_at" % (agent_id, esc(month))
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+        total = sum(float(r['total_amount']) for r in rows)
+        total_bonus = sum(float(r['bonus_amount']) for r in rows)
+        cur.execute(
+            "SELECT DATE_TRUNC('month', processed_at) as m, COUNT(*) as cnt "
+            "FROM agent_leads WHERE agent_id=%s AND status='member' "
+            "AND processed_at IS NOT NULL "
+            "GROUP BY m ORDER BY m DESC LIMIT 12" % agent_id
+        )
+        history = [{'month': r[0].isoformat() if r[0] else None, 'count': r[1]} for r in cur.fetchall()]
+        return {
+            'rows': rows,
+            'members_count': len(rows),
+            'total': total,
+            'total_bonus': total_bonus,
+            'history': history
+        }
+
+    elif action == 'stats':
+        cur.execute(
+            "SELECT COUNT(*) as total, "
+            "COUNT(*) FILTER (WHERE status='new') as new_count, "
+            "COUNT(*) FILTER (WHERE status='processing') as processing_count, "
+            "COUNT(*) FILTER (WHERE status='member') as member_count, "
+            "COUNT(*) FILTER (WHERE status='rejected') as rejected_count "
+            "FROM agent_leads WHERE agent_id=%s" % agent_id
+        )
+        row = cur.fetchone()
+        cur.execute(
+            "SELECT COALESCE(SUM(total_amount),0) as total_earned, "
+            "COALESCE(SUM(total_amount) FILTER (WHERE status='pending'),0) as pending_amount "
+            "FROM agent_rewards WHERE agent_id=%s" % agent_id
+        )
+        rrow = cur.fetchone()
+        return {
+            'total_leads': row[0], 'new': row[1], 'processing': row[2],
+            'members': row[3], 'rejected': row[4],
+            'total_earned': float(rrow[0]),
+            'pending_amount': float(rrow[1])
+        }
+
+    return {'error': 'Неизвестное действие'}
+
+
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
@@ -7948,6 +8345,16 @@ def handler(event, context):
             result = handle_api_keys(method, params, body, staff, cur, conn)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
+        elif entity == 'agents':
+            result = handle_agents(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'agent_leads':
+            result = handle_agent_leads(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'agent_rewards':
+            result = handle_agent_rewards(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'agent_cabinet':
+            result = handle_agent_cabinet(method, params, body, ev_headers, cur, conn)
+        elif entity == 'agent_auth':
+            result = handle_agent_auth(body, cur, conn, src_ip)
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 

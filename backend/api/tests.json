@@ -33,5 +33,10 @@
   {"name": "Chat create unauthorized", "method": "POST", "path": "/", "body": {"entity": "chat", "action": "create", "token": "invalid"}, "expectedStatus": 401},
   {"name": "Sber API test", "method": "GET", "path": "/?entity=sber_test", "expectedStatus": 200, "expectedBody": {"secrets": "object"}, "bodyMatcher": "partial"},
   {"name": "External requires API key", "method": "GET", "path": "/?entity=external&resource=members", "expectedStatus": 401},
-  {"name": "API keys requires auth", "method": "GET", "path": "/?entity=api_keys", "expectedStatus": 401}
+  {"name": "API keys requires auth", "method": "GET", "path": "/?entity=api_keys", "expectedStatus": 401},
+  {"name": "Agents requires auth", "method": "GET", "path": "/?entity=agents", "expectedStatus": 401},
+  {"name": "Agent leads requires auth", "method": "GET", "path": "/?entity=agent_leads", "expectedStatus": 401},
+  {"name": "Agent rewards requires auth", "method": "GET", "path": "/?entity=agent_rewards", "expectedStatus": 401},
+  {"name": "Agent auth wrong creds", "method": "POST", "path": "/", "body": {"entity": "agent_auth", "login": "notexist", "password": "wrongpass"}, "expectedStatus": 400},
+  {"name": "Agent cabinet unauthorized", "method": "GET", "path": "/?entity=agent_cabinet&action=stats", "expectedStatus": 401}
 ]}
