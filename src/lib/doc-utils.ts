@@ -69,7 +69,7 @@ export function openPrintWindow(title: string, bodyHtml: string) {
     body { margin:0; font-family:"Times New Roman",serif; font-size:12pt; color:#000; }
     table { border-collapse:collapse; width:100%; }
     td { padding:3pt 4pt; vertical-align:top; }
-    .page-break { page-break-after:always; border-top:1px dashed #ccc; margin:24pt 0; }
+    .page-break { page-break-after:always; display:block; height:0; margin:0; border:none; }
     .center { text-align:center; }
     .bold { font-weight:bold; }
     .justify { text-align:justify; }
