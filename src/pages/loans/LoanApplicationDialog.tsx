@@ -637,19 +637,22 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 <Input value={curatorName} disabled />
               ), "По умолчанию — создавший заявку. Изменить может только администратор")}
 
-              <div className="col-span-2 flex items-center gap-3 py-1">
+              {field("Сумма комиссии, ₽", num("commission_amount"))}
+
+              <div className="space-y-1">
+                <Label className="text-xs">Комиссия куратора, ₽</Label>
+                <Input value={curatorCommission != null ? fmt(curatorCommission) : "—"} disabled className="bg-muted/40" />
+                <p className="text-[11px] text-muted-foreground">(Комиссия − Вознаграждение агента) / 2</p>
+              </div>
+
+              <div className="col-span-2 flex items-center gap-3 py-1 border-t pt-3 mt-1">
                 <input
                   type="checkbox"
                   id="is_agent_application_loan"
                   checked={!!form.is_agent_application}
                   onChange={e => {
                     const checked = e.target.checked;
-                    setForm(f => ({
-                      ...f,
-                      is_agent_application: checked,
-                      agent_name: checked ? f.agent_name : "",
-                      commission_amount: checked ? f.commission_amount : null,
-                    }));
+                    setForm(f => ({ ...f, is_agent_application: checked, agent_name: checked ? f.agent_name : "" }));
                   }}
                   disabled={!!readOnly}
                   className="h-4 w-4 rounded border-gray-300"
@@ -662,16 +665,10 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               {!!form.is_agent_application && (
                 <>
                   {field("Наименование агента", txt("agent_name", "ФИО или название организации"))}
-                  {field("Сумма комиссии, ₽", num("commission_amount"))}
                   <div className="space-y-1">
                     <Label className="text-xs">Вознаграждение агента, ₽ (1% от суммы займа)</Label>
                     <Input value={agentReward != null ? fmt(agentReward) : "—"} disabled className="bg-muted/40" />
                     <p className="text-[11px] text-muted-foreground">Рассчитывается автоматически</p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Комиссия куратора, ₽</Label>
-                    <Input value={curatorCommission != null ? fmt(curatorCommission) : "—"} disabled className="bg-muted/40" />
-                    <p className="text-[11px] text-muted-foreground">(Комиссия − Вознаграждение агента) / 2</p>
                   </div>
                 </>
               )}
