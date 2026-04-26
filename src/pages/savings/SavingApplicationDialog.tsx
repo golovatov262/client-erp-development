@@ -13,6 +13,7 @@ import MemberSearch from "@/components/ui/member-search";
 import DadataSuggest from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
 import dadata, { DadataAddressSuggestion, DadataFmsUnitSuggestion, DadataPartySuggestion } from "@/lib/dadata";
+import { SavingApplicationDocButtons } from "./SavingApplicationPrintForm";
 
 type Props = {
   open: boolean;
@@ -646,6 +647,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
 
         <DialogFooter className="border-t px-6 py-3 shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Закрыть</Button>
+          {!isNew && <SavingApplicationDocButtons item={form as SavingApplication} />}
           {canEdit && !readOnly && (
             <Button onClick={handleSave} disabled={saving}>
               {saving ? "Сохраняем..." : (isNew ? "Создать заявку" : "Сохранить")}
