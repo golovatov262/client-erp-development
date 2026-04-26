@@ -78,11 +78,7 @@ function buildBody(item: SavingApplication): string {
 <p style="margin-top:24pt">___________________________&nbsp;&nbsp;${fullName}</p>
 <p>${currentDate}</p>
 
-<br/><br/><br/><br/><br/>
-
-<div class="page-break"></div>
-
-<p class="center bold" style="margin-top:0">Согласие на обработку персональных данных</p>
+<p class="center bold page-break">Согласие на обработку персональных данных</p>
 
 <p class="justify">
   Я, <b>${fullName}</b>, дата рождения ${birthDate}, место рождения ${birthPlace},

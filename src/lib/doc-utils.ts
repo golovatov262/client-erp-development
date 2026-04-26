@@ -31,7 +31,7 @@ export function buildHtmlDoc(title: string, bodyHtml: string): string {
     }
     table { border-collapse: collapse; width: 100%; }
     td { padding: 3pt 4pt; vertical-align: top; }
-    .page-break { page-break-after: always; mso-special-character: line-break; }
+    .page-break { page-break-before: always; mso-break-type: page-break; }
     b, strong { font-weight: bold; }
     .center { text-align: center; }
     .bold { font-weight: bold; }
@@ -69,7 +69,7 @@ export function openPrintWindow(title: string, bodyHtml: string) {
     body { margin:0; font-family:"Times New Roman",serif; font-size:12pt; color:#000; }
     table { border-collapse:collapse; width:100%; }
     td { padding:3pt 4pt; vertical-align:top; }
-    .page-break { page-break-after:always; display:block; height:0; margin:0; border:none; }
+    .page-break { page-break-before: always; }
     .center { text-align:center; }
     .bold { font-weight:bold; }
     .justify { text-align:justify; }

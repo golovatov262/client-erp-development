@@ -89,7 +89,7 @@ function buildBody(item: LoanApplication): string {
 
   /* ── Документ 2: Согласие на кредитные отчёты ── */
   const doc2 = `
-<p class="center bold">Согласие на получение кредитных отчетов из бюро кредитных историй</p>
+<p class="center bold page-break">Согласие на получение кредитных отчетов из бюро кредитных историй</p>
 
 <p class="justify">В соответствии с Федеральным законом № 218-ФЗ «О кредитных историях»,</p>
 
@@ -114,7 +114,7 @@ ${signRow}`;
 
   /* ── Документ 3: Согласие на обработку персональных данных ── */
   const doc3 = `
-<p class="center bold">Согласие на обработку персональных данных</p>
+<p class="center bold page-break">Согласие на обработку персональных данных</p>
 
 <p class="justify">
   Я, <b>${fullName}</b>, дата рождения ${birthDate}, место рождения ${birthPlace},
@@ -142,13 +142,7 @@ ${signRow}`;
 </p>
 ${signRow}`;
 
-  return `
-${doc1}
-<div class="page-break"></div>
-${doc2}
-<div class="page-break"></div>
-${doc3}
-`;
+  return `${doc1}${doc2}${doc3}`;
 }
 
 export function LoanApplicationDocButtons({ item }: Props) {
