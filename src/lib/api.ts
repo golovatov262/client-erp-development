@@ -763,6 +763,7 @@ export interface LoanApplication {
 
   curator_user_id?: number | null;
   agent_user_id?: number | null;
+  is_agent_application?: boolean;
   agent_name?: string;
   commission_amount?: number | null;
   specialist_comment?: string;
@@ -813,6 +814,7 @@ export interface SavingApplication {
 
   curator_user_id?: number | null;
   curator_name?: string;
+  is_agent_application?: boolean;
   agent_name?: string;
   is_curator_personal?: boolean;
   commission_amount?: number | null;

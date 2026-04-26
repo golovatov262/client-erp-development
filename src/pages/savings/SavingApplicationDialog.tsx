@@ -570,13 +570,38 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
                 <Input value={curatorName} disabled />
               ), "По умолчанию — создавший заявку. Изменить может только администратор")}
 
-              {field("Наименование агента", txt("agent_name", "ФИО или название организации"))}
-
-              <div className="space-y-1">
-                <Label className="text-xs">Вознаграждение агента, ₽ (1% от суммы, мин. 1 000, макс. 10 000)</Label>
-                <Input value={agentReward != null ? fmtNum(agentReward) : "—"} disabled className="bg-muted/40" />
-                <p className="text-[11px] text-muted-foreground">Рассчитывается автоматически</p>
+              <div className="col-span-2 flex items-center gap-3 py-1">
+                <input
+                  type="checkbox"
+                  id="is_agent_application_saving"
+                  checked={!!form.is_agent_application}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setForm(f => ({
+                      ...f,
+                      is_agent_application: checked,
+                      agent_name: checked ? f.agent_name : "",
+                      commission_amount: checked ? f.commission_amount : null,
+                    }));
+                  }}
+                  disabled={!!readOnly}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <label htmlFor="is_agent_application_saving" className="text-sm font-medium cursor-pointer">
+                  Заявка от агента
+                </label>
               </div>
+
+              {!!form.is_agent_application && (
+                <>
+                  {field("Наименование агента", txt("agent_name", "ФИО или название организации"))}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Вознаграждение агента, ₽ (1% от суммы, мин. 1 000, макс. 10 000)</Label>
+                    <Input value={agentReward != null ? fmtNum(agentReward) : "—"} disabled className="bg-muted/40" />
+                    <p className="text-[11px] text-muted-foreground">Рассчитывается автоматически</p>
+                  </div>
+                </>
+              )}
 
               <div className="col-span-2 flex items-center gap-3 py-1">
                 <input

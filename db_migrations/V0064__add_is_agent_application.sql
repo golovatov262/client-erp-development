@@ -1,0 +1,2 @@
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS is_agent_application boolean NOT NULL DEFAULT false;
+ALTER TABLE saving_applications ADD COLUMN IF NOT EXISTS is_agent_application boolean NOT NULL DEFAULT false;
