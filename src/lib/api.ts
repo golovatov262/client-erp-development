@@ -692,6 +692,7 @@ export interface LoanApplication {
   id: number;
   application_no?: string;
   status: string;
+  borrower_type?: string;
   member_id?: number | null;
   member_name?: string;
   org_id?: number | null;
@@ -776,6 +777,7 @@ export interface SavingApplication {
   id: number;
   application_no?: string;
   status: string;
+  borrower_type?: string;
   member_id?: number | null;
   member_name?: string;
   org_id?: number | null;

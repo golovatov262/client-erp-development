@@ -10,6 +10,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { LoanApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
+import DadataSuggest from "@/components/ui/dadata-suggest";
+import MaskedInput from "@/components/ui/masked-input";
+import dadata, { DadataAddressSuggestion, DadataFmsUnitSuggestion, DadataPartySuggestion } from "@/lib/dadata";
 
 type Props = {
   open: boolean;
@@ -33,6 +36,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
 
   const isNew = !item;
   const readOnly = !canEdit || (item && (item.status === "approved" || item.status === "rejected" || item.status === "archived"));
+  const isFl = (form.borrower_type || "fl") === "fl";
 
   useEffect(() => {
     api.users.list().then(setUsers).catch(() => {});
@@ -43,7 +47,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
       if (item) {
         setForm({ ...item });
       } else {
-        setForm({ curator_user_id: user?.id ?? null });
+        setForm({ curator_user_id: user?.id ?? null, borrower_type: "fl" });
       }
     }
   }, [open, item, user]);
@@ -122,6 +126,16 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
     <Textarea value={(form[k] as string) || ""} onChange={e => set(k, e.target.value as never)} placeholder={placeholder} disabled={!!readOnly} rows={2} />
   );
 
+  const masked = (k: keyof LoanApplication, mask: string, placeholder?: string) => (
+    <MaskedInput
+      mask={mask}
+      value={String(form[k] || "")}
+      onChange={v => set(k, v as never)}
+      placeholder={placeholder}
+      disabled={!!readOnly}
+    />
+  );
+
   const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
 
   const fillFromMember = async (id: string | null) => {
@@ -164,22 +178,44 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
-          <DialogTitle>
-            {isNew ? "Новая заявка на займ" : `Заявка ${item?.application_no || ""}`}
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-4">
+            <DialogTitle>
+              {isNew ? "Новая заявка на займ" : `Заявка ${item?.application_no || ""}`}
+            </DialogTitle>
+            <div className="flex items-center gap-1 rounded-lg border p-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => !readOnly && set("borrower_type", "fl")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${isFl ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                disabled={!!readOnly}
+              >
+                Физлицо
+              </button>
+              <button
+                type="button"
+                onClick={() => !readOnly && set("borrower_type", "ul")}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${!isFl ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                disabled={!!readOnly}
+              >
+                Юрлицо / ИП
+              </button>
+            </div>
+          </div>
         </DialogHeader>
 
         <Tabs defaultValue="loan" className="flex flex-col flex-1 min-h-0">
           <TabsList className="flex-wrap h-auto justify-start rounded-none border-b bg-transparent px-6 py-1 gap-1 shrink-0">
             <TabsTrigger value="loan" className="text-xs">Параметры займа</TabsTrigger>
-            <TabsTrigger value="borrower" className="text-xs">Заёмщик</TabsTrigger>
-            <TabsTrigger value="income" className="text-xs">Доходы и расходы</TabsTrigger>
-            <TabsTrigger value="family" className="text-xs">Семья</TabsTrigger>
+            <TabsTrigger value="borrower" className="text-xs">{isFl ? "Заёмщик" : "Организация / ИП"}</TabsTrigger>
+            {isFl && <TabsTrigger value="income" className="text-xs">Доходы и расходы</TabsTrigger>}
+            {isFl && <TabsTrigger value="family" className="text-xs">Семья</TabsTrigger>}
             <TabsTrigger value="collateral" className="text-xs">Обеспечение</TabsTrigger>
             <TabsTrigger value="service" className="text-xs">Служебное</TabsTrigger>
           </TabsList>
 
           <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4">
+
+            {/* ── Параметры займа ── */}
             <TabsContent value="loan" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("Сумма займа, ₽ *", num("amount", "25 000 — 5 000 000"))}
               {field("Срок, мес. *", num("term_months", "3 — 360"), "Более 60 мес. — только ипотека")}
@@ -204,92 +240,359 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               ), "При выборе поля заёмщика заполнятся автоматически")}
             </TabsContent>
 
-            <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">
-              {field("ФИО *", txt("full_name"))}
-              {field("Дата рождения *", dateF("birth_date"))}
-              {field("Место рождения *", txt("birth_place", "Как в паспорте"))}
-              {field("Паспорт (серия номер) *", txt("passport_series_number", "99 99 999999"))}
-              {field("Дата выдачи паспорта *", dateF("passport_issue_date"))}
-              {field("Кем выдан *", txt("passport_issued_by"))}
-              {field("Код подразделения *", txt("passport_division_code", "999-999"))}
-              {field("Адрес регистрации *", txt("registration_address"))}
-              {field("Мобильный телефон *", txt("mobile_phone", "+7 ..."))}
-              {field("Email", txt("email"))}
-              {field("ИНН *", txt("inn"))}
-              {field("Расчётный счёт *", txt("bank_account"))}
-              {field("БИК *", txt("bik"))}
-              {field("Наименование банка *", txt("bank_name"))}
-              <div className="col-span-2 border-t pt-3 mt-2">
-                <p className="text-sm font-medium mb-2">Дополнительный контакт</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {field("ФИО контакта", txt("contact_full_name"))}
-                  {field("Телефон контакта", txt("contact_phone"))}
+            {/* ── Заёмщик ФЛ ── */}
+            {isFl && (
+              <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">
+                {field("ФИО *", txt("full_name"))}
+                {field("Дата рождения *", dateF("birth_date"))}
+                {field("Место рождения *", txt("birth_place", "Как в паспорте"))}
+                {field("Паспорт (серия и номер) *", (
+                  <MaskedInput
+                    mask="99 99 999999"
+                    value={String(form.passport_series_number || "")}
+                    onChange={v => set("passport_series_number", v as never)}
+                    placeholder="__ __ ______"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Дата выдачи паспорта *", dateF("passport_issue_date"))}
+                {field("Кем выдан *", (
+                  <DadataSuggest<DadataFmsUnitSuggestion>
+                    value={form.passport_issued_by || ""}
+                    onChange={v => set("passport_issued_by", v as never)}
+                    onSelect={item => {
+                      set("passport_issued_by", item.value as never);
+                      if (item.data?.code) set("passport_division_code", item.data.code as never);
+                    }}
+                    fetchSuggestions={dadata.suggestFmsUnit}
+                    renderSuggestion={s => (
+                      <div>
+                        <div className="font-medium text-xs">{s.value}</div>
+                        {s.data?.code && <div className="text-[11px] text-muted-foreground">{s.data.code}</div>}
+                      </div>
+                    )}
+                    getSuggestionValue={s => s.value}
+                    placeholder="Начните вводить название подразделения..."
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Код подразделения *", (
+                  <MaskedInput
+                    mask="999-999"
+                    value={String(form.passport_division_code || "")}
+                    onChange={v => set("passport_division_code", v as never)}
+                    placeholder="___-___"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Адрес регистрации *", (
+                  <DadataSuggest<DadataAddressSuggestion>
+                    value={form.registration_address || ""}
+                    onChange={v => set("registration_address", v as never)}
+                    onSelect={item => set("registration_address", item.unrestricted_value as never)}
+                    fetchSuggestions={dadata.suggestAddress}
+                    renderSuggestion={s => s.value}
+                    getSuggestionValue={s => s.unrestricted_value}
+                    placeholder="Начните вводить адрес..."
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Мобильный телефон *", (
+                  <MaskedInput
+                    mask="+9 (999) 999-99-99"
+                    value={String(form.mobile_phone || "")}
+                    onChange={v => set("mobile_phone", v as never)}
+                    placeholder="+7 (___) ___-__-__"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Email", (
+                  <Input
+                    type="email"
+                    value={form.email || ""}
+                    onChange={e => set("email", e.target.value as never)}
+                    placeholder="example@mail.ru"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("ИНН *", (
+                  <MaskedInput
+                    mask="999999999999"
+                    value={String(form.inn || "")}
+                    onChange={v => set("inn", v as never)}
+                    placeholder="12 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Расчётный счёт *", (
+                  <MaskedInput
+                    mask="99999999999999999999"
+                    value={String(form.bank_account || "")}
+                    onChange={v => set("bank_account", v as never)}
+                    placeholder="20 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("БИК *", (
+                  <MaskedInput
+                    mask="999999999"
+                    value={String(form.bik || "")}
+                    onChange={v => set("bik", v as never)}
+                    placeholder="9 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Наименование банка *", txt("bank_name"))}
+                <div className="col-span-2 border-t pt-3 mt-2">
+                  <p className="text-sm font-medium mb-2">Дополнительный контакт</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {field("ФИО контакта", txt("contact_full_name"))}
+                    {field("Телефон контакта", (
+                      <MaskedInput
+                        mask="+9 (999) 999-99-99"
+                        value={String(form.contact_phone || "")}
+                        onChange={v => set("contact_phone", v as never)}
+                        placeholder="+7 (___) ___-__-__"
+                        disabled={!!readOnly}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </TabsContent>
+              </TabsContent>
+            )}
 
-            <TabsContent value="income" className="grid grid-cols-2 gap-3 mt-0 pb-2">
-              <div className="col-span-2 text-sm font-medium">Доходы</div>
-              {field("Официально подтверждённый доход *, ₽", num("official_income"))}
-              {field("Вид подтверждения дохода", txt("income_confirmation", "2-НДФЛ, выписка и т.д."))}
-              {field("ИНН работодателя *", txt("employer_inn"))}
-              {field("Наименование работодателя", txt("employer_name"))}
-              {field("Занимаемая должность *", txt("position"))}
-              {field("Вид доп. дохода", txt("additional_income_type"))}
-              {field("Сумма доп. дохода, ₽", num("additional_income"))}
-              {field("Иной доп. доход (описание)", txt("additional_income_other"))}
+            {/* ── Заёмщик ЮЛ/ИП ── */}
+            {!isFl && (
+              <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">
+                {field("Наименование организации / ФИО ИП *", (
+                  <DadataSuggest<DadataPartySuggestion>
+                    value={form.full_name || ""}
+                    onChange={v => set("full_name", v as never)}
+                    onSelect={s => {
+                      setForm(f => ({
+                        ...f,
+                        full_name: s.data?.name?.full_with_opf || s.value,
+                        inn: s.data?.inn || f.inn,
+                        employer_inn: s.data?.inn || f.employer_inn,
+                        employer_name: s.data?.name?.short_with_opf || f.employer_name,
+                        registration_address: s.data?.address?.unrestricted_value || f.registration_address,
+                      }));
+                    }}
+                    fetchSuggestions={dadata.suggestParty}
+                    renderSuggestion={s => (
+                      <div>
+                        <div className="font-medium text-xs">{s.data?.name?.short_with_opf || s.value}</div>
+                        <div className="text-[11px] text-muted-foreground">ИНН: {s.data?.inn} {s.data?.address?.value ? `• ${s.data.address.value}` : ""}</div>
+                      </div>
+                    )}
+                    getSuggestionValue={s => s.data?.name?.full_with_opf || s.value}
+                    placeholder="Введите название или ИНН..."
+                    disabled={!!readOnly}
+                  />
+                ), "Начните вводить — данные подтянутся из реестра")}
+                {field("ИНН *", (
+                  <MaskedInput
+                    mask="9999999999999"
+                    value={String(form.inn || "")}
+                    onChange={v => set("inn", v as never)}
+                    placeholder="10 или 12 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Юридический / фактический адрес *", (
+                  <DadataSuggest<DadataAddressSuggestion>
+                    value={form.registration_address || ""}
+                    onChange={v => set("registration_address", v as never)}
+                    onSelect={item => set("registration_address", item.unrestricted_value as never)}
+                    fetchSuggestions={dadata.suggestAddress}
+                    renderSuggestion={s => s.value}
+                    getSuggestionValue={s => s.unrestricted_value}
+                    placeholder="Начните вводить адрес..."
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("ФИО руководителя / ИП", txt("employer_name", "Иванов Иван Иванович"))}
+                {field("Телефон *", (
+                  <MaskedInput
+                    mask="+9 (999) 999-99-99"
+                    value={String(form.mobile_phone || "")}
+                    onChange={v => set("mobile_phone", v as never)}
+                    placeholder="+7 (___) ___-__-__"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Email", (
+                  <Input
+                    type="email"
+                    value={form.email || ""}
+                    onChange={e => set("email", e.target.value as never)}
+                    placeholder="example@mail.ru"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Расчётный счёт *", (
+                  <MaskedInput
+                    mask="99999999999999999999"
+                    value={String(form.bank_account || "")}
+                    onChange={v => set("bank_account", v as never)}
+                    placeholder="20 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("БИК *", (
+                  <MaskedInput
+                    mask="999999999"
+                    value={String(form.bik || "")}
+                    onChange={v => set("bik", v as never)}
+                    placeholder="9 цифр"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Наименование банка", txt("bank_name"))}
+                <div className="col-span-2 border-t pt-3 mt-2">
+                  <p className="text-sm font-medium mb-2">Контактное лицо</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {field("ФИО контакта", txt("contact_full_name"))}
+                    {field("Телефон контакта", (
+                      <MaskedInput
+                        mask="+9 (999) 999-99-99"
+                        value={String(form.contact_phone || "")}
+                        onChange={v => set("contact_phone", v as never)}
+                        placeholder="+7 (___) ___-__-__"
+                        disabled={!!readOnly}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+            )}
 
-              <div className="col-span-2 text-sm font-medium border-t pt-3 mt-2">Расходы</div>
-              {field("Выплаты по текущим кредитам, ₽ *", num("current_loans_payments"))}
-              {field("Обязательные расходы, ₽ *", num("mandatory_expenses"), "Коммуналка, авто и прочее")}
-              {field("Есть действующие кредиты *", (
-                <Select value={form.has_active_loans || ""} onValueChange={v => set("has_active_loans", v)} disabled={!!readOnly}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yes">Да</SelectItem>
-                    <SelectItem value="no">Нет</SelectItem>
-                  </SelectContent>
-                </Select>
-              ))}
-            </TabsContent>
+            {/* ── Доходы и расходы (только ФЛ) ── */}
+            {isFl && (
+              <TabsContent value="income" className="grid grid-cols-2 gap-3 mt-0 pb-2">
+                <div className="col-span-2 text-sm font-medium">Доходы</div>
+                {field("Официально подтверждённый доход *, ₽", num("official_income"))}
+                {field("Вид подтверждения дохода", txt("income_confirmation", "2-НДФЛ, выписка и т.д."))}
+                {field("ИНН работодателя *", (
+                  <DadataSuggest<DadataPartySuggestion>
+                    value={form.employer_inn || ""}
+                    onChange={v => set("employer_inn", v as never)}
+                    onSelect={s => {
+                      set("employer_inn", (s.data?.inn || "") as never);
+                      set("employer_name", (s.data?.name?.short_with_opf || s.value) as never);
+                    }}
+                    fetchSuggestions={dadata.suggestParty}
+                    renderSuggestion={s => (
+                      <div>
+                        <div className="font-medium text-xs">{s.data?.name?.short_with_opf || s.value}</div>
+                        <div className="text-[11px] text-muted-foreground">ИНН: {s.data?.inn}</div>
+                      </div>
+                    )}
+                    getSuggestionValue={s => s.data?.inn || ""}
+                    placeholder="Введите ИНН или название работодателя..."
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Наименование работодателя", txt("employer_name"))}
+                {field("Занимаемая должность *", txt("position"))}
+                {field("Вид доп. дохода", txt("additional_income_type"))}
+                {field("Сумма доп. дохода, ₽", num("additional_income"))}
+                {field("Иной доп. доход (описание)", txt("additional_income_other"))}
 
-            <TabsContent value="family" className="grid grid-cols-2 gap-3 mt-0 pb-2">
-              {field("Семейное положение *", (
-                <Select value={form.marital_status || ""} onValueChange={v => set("marital_status", v)} disabled={!!readOnly}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single">Холост / Не замужем</SelectItem>
-                    <SelectItem value="married">В браке</SelectItem>
-                    <SelectItem value="divorced">В разводе</SelectItem>
-                    <SelectItem value="widowed">Вдовец / Вдова</SelectItem>
-                    <SelectItem value="civil">Гражданский брак</SelectItem>
-                  </SelectContent>
-                </Select>
-              ))}
-              {field("Дети до 18 лет *", (
-                <Select value={form.has_minor_children || ""} onValueChange={v => set("has_minor_children", v)} disabled={!!readOnly}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yes">Есть</SelectItem>
-                    <SelectItem value="no">Нет</SelectItem>
-                  </SelectContent>
-                </Select>
-              ))}
-              {field("Количество детей до 18 лет", num("children_count"))}
-              {field("ФИО супруга(и)", txt("spouse_name"))}
-              {field("Телефон супруга(и)", txt("spouse_phone"))}
-              {field("Доход супруга(и), ₽", num("spouse_income"))}
-            </TabsContent>
+                <div className="col-span-2 text-sm font-medium border-t pt-3 mt-2">Расходы</div>
+                {field("Выплаты по текущим кредитам, ₽ *", num("current_loans_payments"))}
+                {field("Обязательные расходы, ₽ *", num("mandatory_expenses"), "Коммуналка, авто и прочее")}
+                {field("Есть действующие кредиты *", (
+                  <Select value={form.has_active_loans || ""} onValueChange={v => set("has_active_loans", v)} disabled={!!readOnly}>
+                    <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Да</SelectItem>
+                      <SelectItem value="no">Нет</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ))}
+              </TabsContent>
+            )}
 
+            {/* ── Семья (только ФЛ) ── */}
+            {isFl && (
+              <TabsContent value="family" className="grid grid-cols-2 gap-3 mt-0 pb-2">
+                {field("Семейное положение *", (
+                  <Select value={form.marital_status || ""} onValueChange={v => set("marital_status", v)} disabled={!!readOnly}>
+                    <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">Холост / Не замужем</SelectItem>
+                      <SelectItem value="married">В браке</SelectItem>
+                      <SelectItem value="divorced">В разводе</SelectItem>
+                      <SelectItem value="widowed">Вдовец / Вдова</SelectItem>
+                      <SelectItem value="civil">Гражданский брак</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ))}
+                {field("Дети до 18 лет *", (
+                  <Select value={form.has_minor_children || ""} onValueChange={v => set("has_minor_children", v)} disabled={!!readOnly}>
+                    <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Есть</SelectItem>
+                      <SelectItem value="no">Нет</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ))}
+                {field("Количество детей до 18 лет", num("children_count"))}
+                {field("ФИО супруга(и)", txt("spouse_name"))}
+                {field("Телефон супруга(и)", (
+                  <MaskedInput
+                    mask="+9 (999) 999-99-99"
+                    value={String(form.spouse_phone || "")}
+                    onChange={v => set("spouse_phone", v as never)}
+                    placeholder="+7 (___) ___-__-__"
+                    disabled={!!readOnly}
+                  />
+                ))}
+                {field("Доход супруга(и), ₽", num("spouse_income"))}
+              </TabsContent>
+            )}
+
+            {/* ── Обеспечение ── */}
             <TabsContent value="collateral" className="space-y-4 mt-0 pb-2">
               <div>
                 <p className="text-sm font-medium mb-2">Недвижимое имущество</p>
                 <div className="grid grid-cols-2 gap-3">
                   {field("Вид недвижимости", txt("real_estate_type"))}
-                  {field("Кадастровый номер", txt("cadastral_number", "99:99:9999999:99"))}
-                  {field("Адрес залогового объекта", txt("property_address"))}
+                  {field("Кадастровый номер", (
+                    <MaskedInput
+                      mask="99:99:9999999:99"
+                      value={String(form.cadastral_number || "")}
+                      onChange={v => set("cadastral_number", v as never)}
+                      placeholder="__:__:_______:__"
+                      disabled={!!readOnly}
+                    />
+                  ))}
+                  {field("Адрес залогового объекта", (
+                    <DadataSuggest<DadataAddressSuggestion>
+                      value={form.property_address || ""}
+                      onChange={v => set("property_address", v as never)}
+                      onSelect={item => set("property_address", item.unrestricted_value as never)}
+                      fetchSuggestions={dadata.suggestAddress}
+                      renderSuggestion={s => s.value}
+                      getSuggestionValue={s => s.unrestricted_value}
+                      placeholder="Начните вводить адрес..."
+                      disabled={!!readOnly}
+                    />
+                  ))}
                   {field("Кадастровый номер земли", txt("land_cadastral_number"))}
-                  {field("Адрес земельного участка", txt("land_address"))}
+                  {field("Адрес земельного участка", (
+                    <DadataSuggest<DadataAddressSuggestion>
+                      value={form.land_address || ""}
+                      onChange={v => set("land_address", v as never)}
+                      onSelect={item => set("land_address", item.unrestricted_value as never)}
+                      fetchSuggestions={dadata.suggestAddress}
+                      renderSuggestion={s => s.value}
+                      getSuggestionValue={s => s.unrestricted_value}
+                      placeholder="Начните вводить адрес..."
+                      disabled={!!readOnly}
+                    />
+                  ))}
                 </div>
               </div>
               <div className="border-t pt-3">
@@ -307,6 +610,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               </div>
             </TabsContent>
 
+            {/* ── Служебное ── */}
             <TabsContent value="service" className="grid grid-cols-2 gap-3 mt-0 pb-2">
               {field("Статус заявки", (
                 <Select value={form.status || "new"} onValueChange={v => set("status", v)} disabled={!!readOnly}>

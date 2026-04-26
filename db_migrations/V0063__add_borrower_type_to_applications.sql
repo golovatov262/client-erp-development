@@ -1,0 +1,2 @@
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS borrower_type VARCHAR(10) NOT NULL DEFAULT 'fl';
+ALTER TABLE saving_applications ADD COLUMN IF NOT EXISTS borrower_type VARCHAR(10) NOT NULL DEFAULT 'fl';
