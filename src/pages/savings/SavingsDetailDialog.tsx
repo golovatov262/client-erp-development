@@ -7,7 +7,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import Icon from "@/components/ui/icon";
 import DataTable, { Column } from "@/components/ui/data-table";
-import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem } from "@/lib/api";
+import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem, Organization } from "@/lib/api";
+import { QRCodeSVG } from "qrcode.react";
+import { buildPaymentQRString } from "@/lib/payment-qr";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -28,6 +30,7 @@ interface SavingsDetailDialogProps {
   detail: SavingDetail | null;
   isAdmin: boolean;
   isManager: boolean;
+  orgs?: Organization[];
   txFilterState: "all" | "transactions" | "accruals";
   setTxFilterState: (v: "all" | "transactions" | "accruals") => void;
   onDeposit: () => void;
@@ -44,6 +47,41 @@ interface SavingsDetailDialogProps {
   onClearAccruals: () => void;
   onEdit: () => void;
 }
+
+const SavingDepositQR = ({ detail, orgs }: { detail: SavingDetail; orgs?: Organization[] }) => {
+  const [showQR, setShowQR] = useState(false);
+  if (detail.status !== "active" || !detail.org_id || !orgs) return null;
+  const org = orgs.find(o => o.id === detail.org_id);
+  if (!org || !org.rs || !org.bik || !org.bank_name) return null;
+  const qrString = buildPaymentQRString({
+    name: org.name,
+    personalAcc: org.rs,
+    bankName: org.bank_name,
+    bik: org.bik,
+    corrAcc: org.ks || "",
+    payeeINN: org.inn || "",
+    kpp: org.kpp || "",
+    lastName: detail.member_name,
+    purpose: `Пополнение сбережений по договору ${detail.contract_no}. ${detail.member_name}`,
+  });
+  return (
+    <div className="mt-2">
+      <button
+        className="flex items-center gap-1.5 text-xs text-primary hover:underline py-1"
+        onClick={() => setShowQR(!showQR)}
+      >
+        <Icon name="QrCode" size={13} />
+        {showQR ? "Скрыть QR" : "QR для пополнения"}
+      </button>
+      {showQR && (
+        <div className="mt-2 p-3 bg-white rounded-lg border flex flex-col items-center gap-2">
+          <QRCodeSVG value={qrString} size={160} level="M" />
+          <div className="text-xs text-muted-foreground text-center">Отсканируйте в мобильном банке</div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const groupAccrualsByMonth = (accruals: DailyAccrual[]): MonthGroup[] => {
   const map = new Map<string, DailyAccrual[]>();
@@ -122,7 +160,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
 
         <div className="grid md:grid-cols-3 gap-4">
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Сумма вклада</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.amount)}</div></CardContent></Card>
-          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Текущий остаток</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.current_balance)}</div></CardContent></Card>
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Текущий остаток</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.current_balance)}</div><SavingDepositQR detail={detail} orgs={props.orgs} /></CardContent></Card>
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Начислено %</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-green-600">{fmt(detail.accrued_interest)}</div></CardContent></Card>
         </div>
 

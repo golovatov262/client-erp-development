@@ -529,6 +529,7 @@ const Loans = () => {
         detail={detail}
         isAdmin={isAdmin}
         isManager={isManager}
+        orgs={orgs}
         onPayment={() => setShowPayment(true)}
         onEarlyRepay={() => setShowEarly(true)}
         onModify={() => setShowModify(true)}

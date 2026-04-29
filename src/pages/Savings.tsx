@@ -79,6 +79,7 @@ const Savings = () => {
         detail={h.detail}
         isAdmin={h.isAdmin}
         isManager={h.isManager}
+        orgs={h.orgs}
         txFilterState={h.txFilterState}
         setTxFilterState={h.setTxFilterState}
         onDeposit={() => h.setShowDeposit(true)}

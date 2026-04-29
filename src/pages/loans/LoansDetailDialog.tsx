@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
 import DataTable, { Column } from "@/components/ui/data-table";
-import api, { LoanDetail, LoanPayment, ScheduleItem } from "@/lib/api";
+import api, { LoanDetail, LoanPayment, ScheduleItem, Organization } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { QRCodeSVG } from "qrcode.react";
+import { buildPaymentQRString } from "@/lib/payment-qr";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -29,6 +31,7 @@ interface LoansDetailDialogProps {
   detail: LoanDetail | null;
   isAdmin: boolean;
   isManager: boolean;
+  orgs?: Organization[];
   onPayment: () => void;
   onEarlyRepay: () => void;
   onModify: () => void;
@@ -117,6 +120,42 @@ const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
   );
 };
 
+const LoanPaymentQR = ({ detail, orgs }: { detail: LoanDetail; orgs?: Organization[] }) => {
+  const [showQR, setShowQR] = useState(false);
+  if (detail.status === "closed" || !detail.org_id || !orgs) return null;
+  const org = orgs.find(o => o.id === detail.org_id);
+  if (!org || !org.rs || !org.bik || !org.bank_name) return null;
+  const qrString = buildPaymentQRString({
+    name: org.name,
+    personalAcc: org.rs,
+    bankName: org.bank_name,
+    bik: org.bik,
+    corrAcc: org.ks || "",
+    payeeINN: org.inn || "",
+    kpp: org.kpp || "",
+    lastName: detail.member_name,
+    purpose: `Оплата займа по договору ${detail.contract_no}. ${detail.member_name}`,
+    sum: detail.monthly_payment,
+  });
+  return (
+    <div className="mt-2">
+      <button
+        className="flex items-center gap-1.5 text-xs text-primary hover:underline py-1"
+        onClick={() => setShowQR(!showQR)}
+      >
+        <Icon name="QrCode" size={13} />
+        {showQR ? "Скрыть QR" : "QR для оплаты"}
+      </button>
+      {showQR && (
+        <div className="mt-2 p-3 bg-white rounded-lg border flex flex-col items-center gap-2">
+          <QRCodeSVG value={qrString} size={160} level="M" />
+          <div className="text-xs text-muted-foreground text-center">Отсканируйте в мобильном банке</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
   const { open, onOpenChange, detail, isAdmin, isManager } = props;
 
@@ -169,7 +208,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
         <div className="grid md:grid-cols-3 gap-4">
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Сумма займа</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.amount)}</div></CardContent></Card>
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Остаток</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.balance)}</div></CardContent></Card>
-          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Ежемесячный платёж</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.monthly_payment)}</div></CardContent></Card>
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Ежемесячный платёж</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.monthly_payment)}</div><LoanPaymentQR detail={detail} orgs={props.orgs} /></CardContent></Card>
         </div>
 
         {detail.status === "holiday" && detail.holiday_start && detail.holiday_end && (
