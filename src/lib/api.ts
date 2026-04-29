@@ -414,6 +414,8 @@ export const api = {
     staffReopen: (conversationId: number) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "reopen", conversation_id: conversationId }),
     toggleAi: (conversationId: number, enabled: boolean) => request<{ success: boolean; ai_enabled: boolean }>("POST", undefined, { entity: "chat", action: "toggle_ai", conversation_id: conversationId, enabled }),
     assign: (conversationId: number, staffId: number | null) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "assign", conversation_id: conversationId, staff_id: staffId }),
+    editMessage: (messageId: number, body: string, token?: string) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "edit_message", message_id: messageId, body, ...(token ? { token } : {}) }),
+    deleteMessage: (messageId: number, token?: string) => request<{ success: boolean }>("POST", undefined, { entity: "chat", action: "delete_message", message_id: messageId, ...(token ? { token } : {}) }),
   },
 
   agents: {
@@ -1356,6 +1358,7 @@ export interface ChatMessage {
   body: string;
   read_at: string | null;
   created_at: string;
+  edited_at: string | null;
   sender_name: string;
 }
 

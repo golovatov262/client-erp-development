@@ -28,6 +28,9 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
   const [showSidebar, setShowSidebar] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -86,7 +89,7 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
     setText("");
     const optimistic: ChatMessage = {
       id: Date.now(), sender_type: "client", sender_id: null,
-      body, read_at: null, created_at: new Date().toISOString(), sender_name: "",
+      body, read_at: null, created_at: new Date().toISOString(), edited_at: null, sender_name: "",
     };
     setMessages((prev) => [...prev, optimistic]);
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }), 50);
@@ -95,7 +98,7 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
       if (res.ai_reply) {
         setMessages((prev) => [
           ...prev,
-          { id: res.ai_reply!.id, sender_type: "ai", sender_id: null, body: res.ai_reply!.body, read_at: null, created_at: res.ai_reply!.created_at, sender_name: "ИИ-помощник" },
+          { id: res.ai_reply!.id, sender_type: "ai", sender_id: null, body: res.ai_reply!.body, read_at: null, created_at: res.ai_reply!.created_at, edited_at: null, sender_name: "ИИ-помощник" },
         ]);
         setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }), 50);
       }
@@ -118,6 +121,35 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
       } catch (e) { console.error(e); }
     } else {
       handleSend(q);
+    }
+  };
+
+  const handleEditStart = (m: ChatMessage) => {
+    setEditingId(m.id);
+    setEditText(m.body);
+  };
+
+  const handleEditSave = async (msgId: number) => {
+    const body = editText.trim();
+    if (!body || !activeConvId) return;
+    setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, body, edited_at: new Date().toISOString() } : m));
+    setEditingId(null);
+    try {
+      await api.chat.editMessage(msgId, body, token);
+    } catch (e) {
+      console.error(e);
+      if (activeConvId) loadMessages(activeConvId);
+    }
+  };
+
+  const handleDelete = async (msgId: number) => {
+    setMessages((prev) => prev.filter((m) => m.id !== msgId));
+    try {
+      await api.chat.deleteMessage(msgId, token);
+      loadConversations();
+    } catch (e) {
+      console.error(e);
+      if (activeConvId) loadMessages(activeConvId);
     }
   };
 
@@ -220,18 +252,53 @@ const CabinetChat = ({ open, onClose }: CabinetChatProps) => {
                   {messages.map((m) => {
                     const isMe = m.sender_type === "client";
                     const isAi = m.sender_type === "ai";
+                    const isEditing = editingId === m.id;
                     return (
-                      <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${isMe ? "bg-primary text-white" : isAi ? "bg-violet-50 border border-violet-200" : "bg-muted"}`}>
-                          {!isMe && (
-                            <div className={`text-[10px] font-medium mb-1 ${isAi ? "text-violet-600" : "text-muted-foreground"}`}>
-                              {isAi ? "ИИ-помощник" : m.sender_name || "Менеджер"}
+                      <div
+                        key={m.id}
+                        className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                        onMouseEnter={() => setHoveredId(m.id)}
+                        onMouseLeave={() => setHoveredId(null)}
+                      >
+                        <div className="flex flex-col gap-0.5 max-w-[80%]">
+                          <div className={`rounded-2xl px-3.5 py-2.5 ${isMe ? "bg-primary text-white" : isAi ? "bg-violet-50 border border-violet-200" : "bg-muted"}`}>
+                            {!isMe && (
+                              <div className={`text-[10px] font-medium mb-1 ${isAi ? "text-violet-600" : "text-muted-foreground"}`}>
+                                {isAi ? "ИИ-помощник" : m.sender_name || "Менеджер"}
+                              </div>
+                            )}
+                            {isEditing ? (
+                              <div className="flex gap-1.5 items-end">
+                                <textarea
+                                  className="text-sm bg-white/20 text-white rounded p-1 resize-none w-full min-h-[56px] outline-none border border-white/30"
+                                  value={editText}
+                                  onChange={(e) => setEditText(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(m.id); } if (e.key === "Escape") setEditingId(null); }}
+                                  autoFocus
+                                />
+                                <div className="flex flex-col gap-1 shrink-0">
+                                  <button onClick={() => handleEditSave(m.id)} className="p-1 rounded bg-white/20 hover:bg-white/30 text-white"><Icon name="Check" size={13} /></button>
+                                  <button onClick={() => setEditingId(null)} className="p-1 rounded bg-white/20 hover:bg-white/30 text-white"><Icon name="X" size={13} /></button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm whitespace-pre-wrap">{m.body}</div>
+                            )}
+                            <div className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1 ${isMe ? "text-white/60" : "text-muted-foreground/60"}`}>
+                              {m.edited_at && <span className="italic">изм.</span>}
+                              {new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                          {isMe && hoveredId === m.id && !isEditing && (
+                            <div className="flex gap-1 justify-end px-1">
+                              <button onClick={() => handleEditStart(m)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Редактировать">
+                                <Icon name="Pencil" size={11} />
+                              </button>
+                              <button onClick={() => handleDelete(m.id)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-red-500 transition-colors" title="Удалить">
+                                <Icon name="Trash2" size={11} />
+                              </button>
                             </div>
                           )}
-                          <div className="text-sm whitespace-pre-wrap">{m.body}</div>
-                          <div className={`text-[10px] mt-1 text-right ${isMe ? "text-white/60" : "text-muted-foreground/60"}`}>
-                            {new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                          </div>
                         </div>
                       </div>
                     );

@@ -14,10 +14,14 @@ const Chats = () => {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "open" | "closed">("all");
+  const [filter, setFilter] = useState<"all" | "open" | "closed">("open");
   const [search, setSearch] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -66,7 +70,7 @@ const Chats = () => {
     setText("");
     const optimistic: ChatMessage = {
       id: Date.now(), sender_type: "staff", sender_id: null,
-      body, read_at: null, created_at: new Date().toISOString(), sender_name: "",
+      body, read_at: null, created_at: new Date().toISOString(), edited_at: null, sender_name: "",
     };
     setMessages((prev) => [...prev, optimistic]);
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }), 50);
@@ -102,6 +106,35 @@ const Chats = () => {
       await api.chat.toggleAi(convId, enabled);
       loadConversations();
     } catch (e) { console.error(e); }
+  };
+
+  const handleEditStart = (m: ChatMessage) => {
+    setEditingId(m.id);
+    setEditText(m.body);
+  };
+
+  const handleEditSave = async (msgId: number) => {
+    const body = editText.trim();
+    if (!body || !activeConvId) return;
+    setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, body, edited_at: new Date().toISOString() } : m));
+    setEditingId(null);
+    try {
+      await api.chat.editMessage(msgId, body);
+    } catch (e) {
+      console.error(e);
+      if (activeConvId) loadMessages(activeConvId);
+    }
+  };
+
+  const handleDelete = async (msgId: number) => {
+    setMessages((prev) => prev.filter((m) => m.id !== msgId));
+    try {
+      await api.chat.deleteMessage(msgId);
+      loadConversations();
+    } catch (e) {
+      console.error(e);
+      if (activeConvId) loadMessages(activeConvId);
+    }
   };
 
   const filtered = conversations.filter((c) => {
@@ -220,16 +253,52 @@ const Chats = () => {
                   {messages.map((m) => {
                     const isClient = m.sender_type === "client";
                     const isAi = m.sender_type === "ai";
+                    const isStaff = m.sender_type === "staff";
+                    const isEditing = editingId === m.id;
                     return (
-                      <div key={m.id} className={`flex ${isClient ? "justify-start" : "justify-end"}`}>
-                        <div className={`max-w-[70%] rounded-2xl px-3.5 py-2.5 ${isClient ? "bg-muted" : isAi ? "bg-violet-50 border border-violet-200" : "bg-primary text-white"}`}>
-                          <div className={`text-[10px] font-medium mb-1 ${isClient ? "text-muted-foreground" : isAi ? "text-violet-600" : "text-white/70"}`}>
-                            {isClient ? "Пайщик" : isAi ? "ИИ-помощник" : m.sender_name || "Менеджер"}
+                      <div
+                        key={m.id}
+                        className={`flex ${isClient ? "justify-start" : "justify-end"}`}
+                        onMouseEnter={() => setHoveredId(m.id)}
+                        onMouseLeave={() => setHoveredId(null)}
+                      >
+                        <div className="flex flex-col gap-0.5 max-w-[70%]">
+                          <div className={`rounded-2xl px-3.5 py-2.5 ${isClient ? "bg-muted" : isAi ? "bg-violet-50 border border-violet-200" : "bg-primary text-white"}`}>
+                            <div className={`text-[10px] font-medium mb-1 ${isClient ? "text-muted-foreground" : isAi ? "text-violet-600" : "text-white/70"}`}>
+                              {isClient ? "Пайщик" : isAi ? "ИИ-помощник" : m.sender_name || "Менеджер"}
+                            </div>
+                            {isEditing ? (
+                              <div className="flex gap-1.5 items-end">
+                                <textarea
+                                  className="text-sm bg-white/20 text-inherit rounded p-1 resize-none w-full min-h-[56px] outline-none border border-white/30"
+                                  value={editText}
+                                  onChange={(e) => setEditText(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(m.id); } if (e.key === "Escape") setEditingId(null); }}
+                                  autoFocus
+                                />
+                                <div className="flex flex-col gap-1 shrink-0">
+                                  <button onClick={() => handleEditSave(m.id)} className="p-1 rounded bg-white/20 hover:bg-white/30"><Icon name="Check" size={13} /></button>
+                                  <button onClick={() => setEditingId(null)} className="p-1 rounded bg-white/20 hover:bg-white/30"><Icon name="X" size={13} /></button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm whitespace-pre-wrap">{m.body}</div>
+                            )}
+                            <div className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1 ${isClient ? "text-muted-foreground/60" : isAi ? "text-violet-400" : "text-white/60"}`}>
+                              {m.edited_at && <span className="italic">изм.</span>}
+                              {new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
                           </div>
-                          <div className="text-sm whitespace-pre-wrap">{m.body}</div>
-                          <div className={`text-[10px] mt-1 text-right ${isClient ? "text-muted-foreground/60" : isAi ? "text-violet-400" : "text-white/60"}`}>
-                            {new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                          </div>
+                          {isStaff && hoveredId === m.id && !isEditing && (
+                            <div className="flex gap-1 justify-end px-1">
+                              <button onClick={() => handleEditStart(m)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Редактировать">
+                                <Icon name="Pencil" size={11} />
+                              </button>
+                              <button onClick={() => handleDelete(m.id)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-red-500 transition-colors" title="Удалить">
+                                <Icon name="Trash2" size={11} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

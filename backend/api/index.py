@@ -7012,6 +7012,43 @@ def handle_chat(method, params, body, headers, cur, conn):
         conn.commit()
         return {'success': True}
 
+    elif action == 'edit_message':
+        msg_id = body.get('message_id')
+        new_body = body.get('body', '').strip()
+        if not msg_id or not new_body:
+            return {'error': 'message_id и body обязательны'}
+        if is_staff:
+            cur.execute("SELECT id, sender_id, sender_type FROM chat_messages WHERE id=%s" % msg_id)
+        else:
+            cur.execute("SELECT id, sender_id, sender_type FROM chat_messages m JOIN chat_conversations c ON c.id=m.conversation_id WHERE m.id=%s AND c.member_id=%s" % (msg_id, member_id))
+        msg_row = cur.fetchone()
+        if not msg_row:
+            return {'_status': 403, 'error': 'Нет доступа или сообщение не найдено'}
+        if not is_staff and msg_row[1] != user_id:
+            return {'_status': 403, 'error': 'Можно редактировать только свои сообщения'}
+        if msg_row[2] == 'ai':
+            return {'_status': 403, 'error': 'Нельзя редактировать сообщения ИИ'}
+        cur.execute("UPDATE chat_messages SET body='%s', edited_at=NOW() WHERE id=%s" % (esc(new_body), msg_id))
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'delete_message':
+        msg_id = body.get('message_id')
+        if not msg_id:
+            return {'error': 'message_id обязателен'}
+        if is_staff:
+            cur.execute("SELECT id, sender_id FROM chat_messages WHERE id=%s" % msg_id)
+        else:
+            cur.execute("SELECT m.id, m.sender_id FROM chat_messages m JOIN chat_conversations c ON c.id=m.conversation_id WHERE m.id=%s AND c.member_id=%s" % (msg_id, member_id))
+        msg_row = cur.fetchone()
+        if not msg_row:
+            return {'_status': 403, 'error': 'Нет доступа или сообщение не найдено'}
+        if not is_staff and msg_row[1] != user_id:
+            return {'_status': 403, 'error': 'Можно удалять только свои сообщения'}
+        cur.execute("DELETE FROM chat_messages WHERE id=%s" % msg_id)
+        conn.commit()
+        return {'success': True}
+
     return {'error': 'Неизвестное действие: %s' % action}
 
 
