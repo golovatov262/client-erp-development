@@ -26,6 +26,10 @@ def handler(event, context):
     try:
         accrual_date = body.get('date', date.today().isoformat())
 
+        # Автозакрытие истёкших вкладов (end_date < сегодня и статус active)
+        cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
+        auto_closed = max(0, cur.rowcount)
+
         cur.execute("SELECT id, current_balance, rate, start_date, end_date FROM savings WHERE status='active'")
         savings_rows = cur.fetchall()
         count = 0
@@ -33,13 +37,19 @@ def handler(event, context):
         skipped = 0
 
         for row in savings_rows:
-            s_id, s_bal, s_rate, s_start, s_end = row[0], Decimal(str(row[1])), Decimal(str(row[2])), str(row[3]), str(row[4]) if row[4] else None
+            s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
+            # Приводим даты к строке ISO формата для корректного сравнения
+            s_start = row[3].isoformat() if hasattr(row[3], 'isoformat') else str(row[3])
+            s_end = row[4].isoformat() if row[4] and hasattr(row[4], 'isoformat') else (str(row[4]) if row[4] else None)
+
             if s_bal <= 0:
                 skipped += 1
                 continue
+            # Начисляем только строго после даты начала
             if accrual_date <= s_start:
                 skipped += 1
                 continue
+            # Не начисляем строго после даты окончания (end_date — последний день включительно)
             if s_end and accrual_date > s_end:
                 skipped += 1
                 continue
@@ -67,6 +77,7 @@ def handler(event, context):
             'processed': count,
             'skipped': skipped,
             'total_accrued': float(total),
+            'savings_auto_closed': auto_closed,
             'overdue': overdue_result,
             'penalties': penalty_result,
             'notifications': 'moved to cron-notify function'

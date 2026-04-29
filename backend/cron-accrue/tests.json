@@ -1,4 +1,4 @@
 {"tests": [
-  {"name": "Daily accrue, overdue and push reminders", "method": "POST", "path": "/", "body": {"date": "2026-03-17"}, "expectedStatus": 200, "expectedBody": {"success": true, "overdue": {"checked_date": "string"}, "push_reminders": {"sent": 0}}, "bodyMatcher": "partial"},
+  {"name": "Daily accrue, overdue and push reminders", "method": "POST", "path": "/", "body": {"date": "2026-03-17"}, "expectedStatus": 200, "expectedBody": {"success": true, "overdue": {"checked_date": "string"}, "savings_auto_closed": 0}, "bodyMatcher": "partial"},
   {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200}
 ]}
