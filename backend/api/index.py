@@ -853,11 +853,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             recalc_schedule = None
             auto_recalculated = False
 
-            # Пересчёт нужен если была любая переплата (pp > плановый ОД периода)
+            # Пересчёт нужен если была значимая переплата (больше 1 рубля — порог погрешности округления)
+            # Мелкие округления (копейки) не должны вызывать пересчёт графика
             actual_overpay = pp - (f_sp - f_spa if first_row else Decimal('0')) if first_row else Decimal('0')
             if actual_overpay < 0:
                 actual_overpay = Decimal('0')
-            should_recalc = nb > 0 and (overpay_amount > 0 or actual_overpay > Decimal('0.005'))
+            should_recalc = nb > 0 and (overpay_amount > Decimal('1.00') or actual_overpay > Decimal('1.00'))  # fix: порог 1 руб.
 
             if should_recalc:
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
