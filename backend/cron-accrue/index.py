@@ -30,21 +30,28 @@ def handler(event, context):
         cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
         auto_closed = max(0, cur.rowcount)
 
-        # Список дат для начисления: вчера (если были пропуски) + сегодня
-        dates_to_process = []
-        yesterday = (date.fromisoformat(accrual_date) - timedelta(days=1)).isoformat()
-        if yesterday >= '2026-01-01':
+        # Список дат для начисления: пропущенные дни за последние 7 дней + сегодня
+        # Для каждого вклада индивидуально проверяем наличие начисления
+        today_dt = date.fromisoformat(accrual_date)
+        lookback_days = [(today_dt - timedelta(days=i)).isoformat() for i in range(7, 0, -1)]
+
+        missed_dates = []
+        for check_date in lookback_days:
             cur.execute("""
-                SELECT COUNT(*) FROM savings
-                WHERE status = 'active' AND current_balance > 0 AND start_date < '%s'
-                AND id NOT IN (
-                    SELECT saving_id FROM savings_daily_accruals WHERE accrual_date = '%s'
-                )
-            """ % (yesterday, yesterday))
-            missed_yesterday = cur.fetchone()[0]
-            if missed_yesterday > 0:
-                dates_to_process.append(yesterday)
-        dates_to_process.append(accrual_date)
+                SELECT COUNT(*) FROM savings s
+                WHERE s.status = 'active'
+                  AND s.current_balance > 0
+                  AND s.start_date < '%s'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM savings_daily_accruals a
+                      WHERE a.saving_id = s.id AND a.accrual_date = '%s'
+                  )
+            """ % (check_date, check_date))
+            missed_count = cur.fetchone()[0]
+            if missed_count > 0:
+                missed_dates.append(check_date)
+
+        dates_to_process = missed_dates + [accrual_date]
 
         count = 0
         total = Decimal('0')
