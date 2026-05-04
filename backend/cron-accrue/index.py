@@ -30,41 +30,63 @@ def handler(event, context):
         cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
         auto_closed = max(0, cur.rowcount)
 
-        cur.execute("SELECT id, current_balance, rate, start_date, end_date FROM savings WHERE status='active'")
-        savings_rows = cur.fetchall()
+        # Список дат для начисления: вчера (если были пропуски) + сегодня
+        dates_to_process = []
+        yesterday = (date.fromisoformat(accrual_date) - timedelta(days=1)).isoformat()
+        if yesterday >= '2026-01-01':
+            cur.execute("""
+                SELECT COUNT(*) FROM savings
+                WHERE status = 'active' AND current_balance > 0 AND start_date < '%s'
+                AND id NOT IN (
+                    SELECT saving_id FROM savings_daily_accruals WHERE accrual_date = '%s'
+                )
+            """ % (yesterday, yesterday))
+            missed_yesterday = cur.fetchone()[0]
+            if missed_yesterday > 0:
+                dates_to_process.append(yesterday)
+        dates_to_process.append(accrual_date)
+
         count = 0
         total = Decimal('0')
         skipped = 0
+        recovery_count = 0
 
-        for row in savings_rows:
-            s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
-            # Приводим даты к строке ISO формата для корректного сравнения
-            s_start = row[3].isoformat() if hasattr(row[3], 'isoformat') else str(row[3])
-            s_end = row[4].isoformat() if row[4] and hasattr(row[4], 'isoformat') else (str(row[4]) if row[4] else None)
+        for process_date in dates_to_process:
+            cur.execute("SELECT id, current_balance, rate, start_date, end_date FROM savings WHERE status='active'")
+            savings_rows = cur.fetchall()
 
-            if s_bal <= 0:
-                skipped += 1
-                continue
-            # Начисляем только строго после даты начала
-            if accrual_date <= s_start:
-                skipped += 1
-                continue
-            # Не начисляем строго после даты окончания (end_date — последний день включительно)
-            if s_end and accrual_date > s_end:
-                skipped += 1
-                continue
-            daily_amount = (s_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            if daily_amount <= 0:
-                skipped += 1
-                continue
-            cur.execute("SELECT id FROM savings_daily_accruals WHERE saving_id=%s AND accrual_date='%s'" % (s_id, accrual_date))
-            if cur.fetchone():
-                skipped += 1
-                continue
-            cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (s_id, accrual_date, float(s_bal), float(s_rate), float(daily_amount)))
-            cur.execute("UPDATE savings SET accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(daily_amount), s_id))
-            count += 1
-            total += daily_amount
+            for row in savings_rows:
+                s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
+                s_start = row[3].isoformat() if hasattr(row[3], 'isoformat') else str(row[3])
+                s_end = row[4].isoformat() if row[4] and hasattr(row[4], 'isoformat') else (str(row[4]) if row[4] else None)
+
+                if s_bal <= 0:
+                    skipped += 1
+                    continue
+                if process_date <= s_start:
+                    skipped += 1
+                    continue
+                if s_end and process_date > s_end:
+                    skipped += 1
+                    continue
+                daily_amount = (s_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if daily_amount <= 0:
+                    skipped += 1
+                    continue
+                cur.execute("SELECT id FROM savings_daily_accruals WHERE saving_id=%s AND accrual_date='%s'" % (s_id, process_date))
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+                cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (s_id, process_date, float(s_bal), float(s_rate), float(daily_amount)))
+                cur.execute("UPDATE savings SET accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(daily_amount), s_id))
+                if process_date == accrual_date:
+                    count += 1
+                    total += daily_amount
+                else:
+                    recovery_count += 1
+
+            # Коммитим каждую дату отдельно
+            conn.commit()
 
         overdue_result = check_overdue_loans(cur, accrual_date)
         penalty_result = accrue_penalties(cur, accrual_date)
@@ -78,6 +100,7 @@ def handler(event, context):
             'skipped': skipped,
             'total_accrued': float(total),
             'savings_auto_closed': auto_closed,
+            'recovery_accruals': recovery_count,
             'overdue': overdue_result,
             'penalties': penalty_result,
             'notifications': 'moved to cron-notify function'
