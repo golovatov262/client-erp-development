@@ -72,7 +72,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
     const comm = Number(form.commission_amount || 0);
     const agent = agentReward ?? 0;
     if (!comm) return null;
-    return (comm - agent) / 2;
+    return (comm - agent) / 4;
   })();
 
   const handleSave = async () => {
