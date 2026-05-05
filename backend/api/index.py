@@ -171,7 +171,7 @@ def refresh_loan_overdue_status(cur, lid):
     
     cur.execute("""
         SELECT COUNT(*) FROM loan_schedule
-        WHERE loan_id=%s AND status IN ('pending', 'overdue')
+        WHERE loan_id=%s AND status IN ('pending', 'overdue', 'partial')
           AND payment_date < CURRENT_DATE
     """ % lid)
     has_overdue = cur.fetchone()[0] > 0
@@ -180,17 +180,12 @@ def refresh_loan_overdue_status(cur, lid):
         cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
         cur.execute("""
             UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
-            WHERE loan_id=%s AND status IN ('pending') AND payment_date < CURRENT_DATE
+            WHERE loan_id=%s AND status IN ('pending', 'partial') AND payment_date < CURRENT_DATE
         """ % lid)
     else:
         cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
-    
-    cur.execute("""
-        UPDATE loan_schedule SET overdue_days=(CURRENT_DATE - payment_date)
-        WHERE loan_id=%s AND status = 'partial' AND payment_date < CURRENT_DATE
-    """ % lid)
 
 def recalc_loan_schedule_statuses(cur, lid):
     cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
@@ -256,7 +251,6 @@ def recalc_loan_schedule_statuses(cur, lid):
             """ % lid)
             unpaid_rows = cur.fetchall()
 
-            covered_one_future = False
             for row in unpaid_rows:
                 if remaining <= Decimal('0.005'):
                     break
@@ -267,10 +261,8 @@ def recalc_loan_schedule_statuses(cur, lid):
                 spa = Decimal(str(row[4]))
                 sch_date = str(row[5])
 
-                is_future = sch_date > pay_date
-                if is_future and covered_one_future:
+                if sch_date > pay_date:
                     break
-                need_total_for_row = sp + si + spn - spa
 
                 already_i = min(spa, si)
                 already_pn = min(spa - si, spn) if spa > si else Decimal('0')
@@ -282,8 +274,6 @@ def recalc_loan_schedule_statuses(cur, lid):
                 need_total = need_i + need_pn + need_pp
 
                 if need_total <= Decimal('0.005'):
-                    if is_future:
-                        covered_one_future = True
                     continue
 
                 take_total = min(remaining, need_total)
@@ -301,9 +291,6 @@ def recalc_loan_schedule_statuses(cur, lid):
                 new_paid = spa + item_i + item_pn + item_pp
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
-
-                if is_future:
-                    covered_one_future = True
 
             if remaining > Decimal('0.005'):
                 pay_pp += remaining
