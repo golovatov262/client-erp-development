@@ -63,6 +63,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
   const numOrNull = (v: unknown) => (v === "" || v == null ? null : toNum(String(v)));
 
   const agentReward = (() => {
+    if (!form.is_agent_application) return null;
     const amt = Number(form.amount || 0);
     if (!amt) return null;
     return amt * 0.01;
@@ -662,7 +663,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
               <div className="space-y-1">
                 <Label className="text-xs">Комиссия куратора, ₽</Label>
                 <Input value={curatorCommission != null ? fmt(curatorCommission) : "—"} disabled className="bg-muted/40" />
-                <p className="text-[11px] text-muted-foreground">(Комиссия − Вознаграждение агента) / 2</p>
+                <p className="text-[11px] text-muted-foreground">(Комиссия − Вознаграждение агента) / 4</p>
               </div>
 
               <div className="col-span-2 flex items-center gap-3 py-1 border-t pt-3 mt-1">
