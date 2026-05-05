@@ -35,6 +35,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [saving, setSaving] = useState(false);
   const [showApprove, setShowApprove] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
 
@@ -141,6 +142,21 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
   );
 
   const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
+
+  const handleReject = async () => {
+    const reason = prompt("Причина отклонения:");
+    if (reason === null) return;
+    setRejecting(true);
+    try {
+      await api.loanApplications.reject(item!.id, reason);
+      toast({ title: "Заявка отклонена" });
+      onSaved();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setRejecting(false);
+    }
+  };
 
   const fillFromMember = async (id: string | null) => {
     const memberId = id ? Number(id) : null;
@@ -699,9 +715,14 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
           <Button variant="outline" onClick={() => onOpenChange(false)}>Закрыть</Button>
           {!isNew && <LoanApplicationDocButtons item={form as LoanApplication} />}
           {canEdit && item && (item.status === "new" || item.status === "in_review") && (
-            <Button variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" onClick={() => setShowApprove(true)}>
-              Одобрить
-            </Button>
+            <>
+              <Button variant="outline" className="text-red-600 border-red-300 hover:bg-red-50" onClick={handleReject} disabled={rejecting}>
+                Отклонить
+              </Button>
+              <Button variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" onClick={() => setShowApprove(true)}>
+                Одобрить
+              </Button>
+            </>
           )}
           {canEdit && (
             <Button onClick={handleSave} disabled={saving}>
