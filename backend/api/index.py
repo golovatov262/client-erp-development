@@ -251,6 +251,9 @@ def recalc_loan_schedule_statuses(cur, lid):
             """ % lid)
             unpaid_rows = cur.fetchall()
 
+            pay_date_str = str(pay_date)
+            pay_ym = pay_date_str[:7]
+            covered_one_future_recalc = False
             for row in unpaid_rows:
                 if remaining <= Decimal('0.005'):
                     break
@@ -261,7 +264,11 @@ def recalc_loan_schedule_statuses(cur, lid):
                 spa = Decimal(str(row[4]))
                 sch_date = str(row[5])
 
-                if sch_date > pay_date:
+                is_future = sch_date > pay_date_str
+                is_current_month = sch_date[:7] == pay_ym
+                if is_future and not is_current_month:
+                    break
+                if is_future and covered_one_future_recalc:
                     break
 
                 already_i = min(spa, si)
@@ -291,6 +298,9 @@ def recalc_loan_schedule_statuses(cur, lid):
                 new_paid = spa + item_i + item_pn + item_pp
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
+
+                if is_future:
+                    covered_one_future_recalc = True
 
             if remaining > Decimal('0.005'):
                 pay_pp += remaining
@@ -768,6 +778,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 unpaid_rows = cur.fetchall()
 
                 covered_one_future = False
+                pd_ym = pd[:7]
                 for row in unpaid_rows:
                     if remaining_amt <= Decimal('0.005'):
                         break
@@ -779,10 +790,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     sch_date = str(row[5])
 
                     is_future = sch_date > pd
-                    if is_future and covered_one_future:
+                    is_current_month = sch_date[:7] == pd_ym
+                    if is_future and not is_current_month:
                         break
-                    need_total_for_row = sp + si + spn - spa
-                    if is_future and remaining_amt < need_total_for_row:
+                    if is_future and covered_one_future:
                         break
 
                     already_i = min(spa, si)
