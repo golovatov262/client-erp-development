@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import psycopg2
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -3909,11 +3910,12 @@ def handle_export(params, cur):
             if not app:
                 return None
             fio = (app.get('full_name') or '').strip()
-            passport_series = app.get('passport_series') or ''
-            passport_number = app.get('passport_number') or ''
+            psn = re.sub(r'\D', '', app.get('passport_series_number') or '')
+            passport_series = psn[:4]
+            passport_number = psn[4:10]
             passport_issued_by = app.get('passport_issued_by') or ''
             passport_issue_date = app.get('passport_issue_date') or ''
-            passport_dept_code = app.get('passport_dept_code') or ''
+            passport_dept_code = app.get('passport_division_code') or ''
         else:
             app = query_one(cur, "SELECT * FROM saving_applications WHERE id = %s" % item_id)
             if not app:
