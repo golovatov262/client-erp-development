@@ -7715,10 +7715,10 @@ def handle_loan_applications(method, params, body, cur, conn, staff=None, ip='')
                 cur.execute("UPDATE loan_applications SET member_id=%s WHERE id=%s" % (mid, app_id))
             if not amt or not term or rate <= 0:
                 return {'error': 'Для одобрения заполните сумму, срок и ставку'}
-            cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)),0)+1 FROM loans WHERE contract_no ~ '^[0-9]+'")
-            nn = cur.fetchone()[0] or 1
             sd = date.fromisoformat(start_date)
-            cn = '%s-%s' % (nn, sd.strftime('%d%m%Y'))
+            cur.execute("SELECT application_no FROM loan_applications WHERE id=%s" % app_id)
+            _app_no_row = cur.fetchone()
+            cn = _app_no_row[0] if _app_no_row and _app_no_row[0] else ('ЗЗ-%06d' % app_id)
             sched, monthly = (calc_annuity_schedule if schedule_type == 'annuity' else calc_end_of_term_schedule)(float(amt), rate, int(term), sd)
             ed = add_months(sd, int(term))
             cur.execute("INSERT INTO loans (contract_no, member_id, amount, balance, rate, term_months, schedule_type, start_date, end_date, monthly_payment, status, org_id) VALUES ('%s',%s,%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s) RETURNING id" % (esc(cn), mid, float(amt), float(amt), rate, int(term), schedule_type, sd.isoformat(), ed.isoformat(), float(monthly), org_id if org_id else 'NULL'))
