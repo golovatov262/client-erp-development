@@ -4095,10 +4095,10 @@ def handle_dashboard(cur, params=None):
         cur.execute("""
             SELECT COALESCE(SUM(ls.payment_amount - COALESCE(ls.paid_amount,0)),0),
                    MIN(ls.payment_date),
-                   MAX(CASE WHEN ls.status='overdue' OR (ls.status='pending' AND ls.payment_date < CURRENT_DATE) THEN (CURRENT_DATE - ls.payment_date) ELSE 0 END),
+                   MAX(CURRENT_DATE - ls.payment_date),
                    COALESCE(SUM(ls.penalty_amount),0)
             FROM loan_schedule ls
-            WHERE ls.loan_id=%s AND ls.status IN ('overdue','pending') AND ls.payment_date < CURRENT_DATE
+            WHERE ls.loan_id=%s AND ls.status IN ('overdue','pending','partial') AND ls.payment_date < CURRENT_DATE
         """ % loan_id)
         sched = cur.fetchone()
         overdue_loans.append({
