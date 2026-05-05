@@ -14,6 +14,7 @@ import DadataSuggest from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
 import dadata, { DadataAddressSuggestion, DadataFmsUnitSuggestion, DadataPartySuggestion } from "@/lib/dadata";
 import { LoanApplicationDocButtons } from "./LoanApplicationPrintForm";
+import LoanApplicationApproveDialog from "./LoanApplicationApproveDialog";
 
 type Props = {
   open: boolean;
@@ -23,20 +24,22 @@ type Props = {
   orgs: Organization[];
   canEdit: boolean;
   onSaved: () => void;
+  onLoanCreated?: () => void;
 };
 
 const fmt = (n: number | null | undefined) =>
   n == null ? "" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n);
 
-const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdit, onSaved }: Props) => {
+const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdit, onSaved, onLoanCreated }: Props) => {
   const [form, setForm] = useState<Partial<LoanApplication>>({});
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [saving, setSaving] = useState(false);
+  const [showApprove, setShowApprove] = useState(false);
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
 
   const isNew = !item;
-  const readOnly = !canEdit || (item && (item.status === "approved" || item.status === "rejected" || item.status === "archived"));
+  const readOnly = !canEdit;
   const isFl = (form.borrower_type || "fl") === "fl";
 
   useEffect(() => {
@@ -695,13 +698,31 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
         <DialogFooter className="border-t px-6 py-3 shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Закрыть</Button>
           {!isNew && <LoanApplicationDocButtons item={form as LoanApplication} />}
-          {canEdit && !readOnly && (
+          {canEdit && item && (item.status === "new" || item.status === "in_review") && (
+            <Button variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" onClick={() => setShowApprove(true)}>
+              Одобрить
+            </Button>
+          )}
+          {canEdit && (
             <Button onClick={handleSave} disabled={saving}>
               {saving ? "Сохраняем..." : (isNew ? "Создать заявку" : "Сохранить")}
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
+
+      {item && (
+        <LoanApplicationApproveDialog
+          open={showApprove}
+          onOpenChange={setShowApprove}
+          item={item}
+          onApproved={() => {
+            setShowApprove(false);
+            onSaved();
+            onLoanCreated?.();
+          }}
+        />
+      )}
     </Dialog>
   );
 };
