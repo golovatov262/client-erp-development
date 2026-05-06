@@ -13,6 +13,7 @@
     + '.lw-sub{color:#6b7280;font-size:14px;margin:0 0 18px}'
     + '.lw-section{border-top:1px solid #f0f0f0;padding-top:16px;margin-top:16px}'
     + '.lw-section:first-of-type{border-top:0;padding-top:0;margin-top:0}'
+    + '.lw-section.lw-hidden{display:none}'
     + '.lw-st{font-weight:600;font-size:15px;margin:0 0 10px;color:#111}'
     + '.lw-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}'
     + '.lw-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}'
@@ -43,12 +44,6 @@
     ;
 
   function $(id) { return document.getElementById(id); }
-  function el(tag, attrs, html) {
-    var e = document.createElement(tag);
-    if (attrs) for (var k in attrs) { if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]); }
-    if (html != null) e.innerHTML = html;
-    return e;
-  }
 
   function injectStyle() {
     if (document.getElementById('lw-style')) return;
@@ -63,7 +58,7 @@
     var req = opts.required ? ' <span class="lw-req">*</span>' : '';
     var input;
     if (type === 'textarea') {
-      input = '<textarea class="lw-textarea" name="' + name + '" ' + (opts.required ? 'required' : '') + '></textarea>';
+      input = '<textarea class="lw-textarea" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + '></textarea>';
     } else if (type === 'select') {
       var opt = '<option value="">— выберите —</option>';
       (opts.options || []).forEach(function (o) { opt += '<option value="' + o + '">' + o + '</option>'; });
@@ -74,6 +69,10 @@
     return '<div class="lw-field"><label class="lw-label">' + label + req + '</label>' + input + '</div>';
   }
 
+  function section(extraCls, content) {
+    return '<div class="lw-section ' + (extraCls || '') + '">' + content + '</div>';
+  }
+
   function buildHtml() {
     return ''
       + '<div class="lw-card">'
@@ -82,149 +81,157 @@
       + '<div id="lw-msg"></div>'
       + '<form id="lw-form" autocomplete="on">'
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Тип заёмщика</div>'
-      + '<div class="lw-toggle">'
-      + '<button type="button" data-bt="fl" class="active">Физ. лицо</button>'
-      + '<button type="button" data-bt="ip">ИП</button>'
-      + '<button type="button" data-bt="ul">Юр. лицо</button>'
-      + '</div>'
-      + '<input type="hidden" name="borrower_type" value="fl" />'
-      + '</div>'
+      // Тип заёмщика
+      + section('', ''
+        + '<div class="lw-st">Тип заёмщика</div>'
+        + '<div class="lw-toggle">'
+        + '<button type="button" data-bt="fl" class="active">Физ. лицо</button>'
+        + '<button type="button" data-bt="ul">Юр. лицо / ИП</button>'
+        + '</div>'
+        + '<input type="hidden" name="borrower_type" value="fl" />'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Контактные данные</div>'
-      + field('ФИО', 'full_name', 'text', { required: true, placeholder: 'Иванов Иван Иванович' })
-      + '<div class="lw-row">'
-      + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
-      + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
-      + '</div>'
-      + '</div>'
+      // Условия займа (общие)
+      + section('', ''
+        + '<div class="lw-st">Условия займа</div>'
+        + '<div class="lw-row">'
+        + field('Сумма, ₽', 'amount', 'number')
+        + field('Срок, мес.', 'term_months', 'number')
+        + '</div>'
+        + field('Вид предполагаемого залога', 'collateral_types', 'text', { placeholder: 'Без залога, авто, недвижимость и т.д.' })
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Условия займа</div>'
-      + '<div class="lw-row-3">'
-      + field('Сумма, ₽', 'amount', 'number')
-      + field('Срок, мес.', 'term_months', 'number')
-      + field('Программа', 'loan_program', 'text')
-      + '</div>'
-      + field('Виды залога', 'collateral_types', 'text', { placeholder: 'Авто, недвижимость и т.д.' })
-      + '</div>'
+      // ─── Блок ФЛ ─────────────────────────────────────────────
+      + section('lw-fl', ''
+        + '<div class="lw-st">Контактные данные</div>'
+        + field('ФИО', 'full_name', 'text', { required: true, placeholder: 'Иванов Иван Иванович' })
+        + '<div class="lw-row">'
+        + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
+        + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
+        + '</div>'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Паспортные данные</div>'
-      + '<div class="lw-row">'
-      + field('Дата рождения', 'birth_date', 'date')
-      + field('Место рождения', 'birth_place', 'text')
-      + '</div>'
-      + '<div class="lw-row-3">'
-      + field('Серия и номер', 'passport_series_number', 'text', { placeholder: '0000 000000' })
-      + field('Дата выдачи', 'passport_issue_date', 'date')
-      + field('Код подразделения', 'passport_division_code', 'text', { placeholder: '000-000' })
-      + '</div>'
-      + field('Кем выдан', 'passport_issued_by', 'textarea')
-      + field('Адрес регистрации', 'registration_address', 'textarea')
-      + field('ИНН', 'inn', 'text')
-      + '</div>'
+      + section('lw-fl', ''
+        + '<div class="lw-st">Паспортные данные</div>'
+        + '<div class="lw-row">'
+        + field('Дата рождения', 'birth_date', 'date')
+        + field('Место рождения', 'birth_place', 'text')
+        + '</div>'
+        + '<div class="lw-row-3">'
+        + field('Серия и номер', 'passport_series_number', 'text', { placeholder: '0000 000000' })
+        + field('Дата выдачи', 'passport_issue_date', 'date')
+        + field('Код подразделения', 'passport_division_code', 'text', { placeholder: '000-000' })
+        + '</div>'
+        + field('Кем выдан', 'passport_issued_by', 'textarea')
+        + field('Адрес регистрации', 'registration_address', 'textarea')
+        + field('ИНН', 'inn', 'text')
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Банковские реквизиты</div>'
-      + '<div class="lw-row-3">'
-      + field('Расчётный счёт', 'bank_account', 'text')
-      + field('БИК', 'bik', 'text')
-      + field('Банк', 'bank_name', 'text')
-      + '</div>'
-      + '</div>'
+      + section('lw-fl', ''
+        + '<div class="lw-st">Доход и работа</div>'
+        + '<div class="lw-row">'
+        + field('Официальный доход, ₽', 'official_income', 'number')
+        + field('Подтверждение дохода', 'income_confirmation', 'text', { placeholder: '2-НДФЛ, справка по форме банка...' })
+        + '</div>'
+        + '<div class="lw-row">'
+        + field('ИНН работодателя', 'employer_inn', 'text')
+        + field('Работодатель', 'employer_name', 'text')
+        + '</div>'
+        + field('Должность', 'position', 'text')
+        + '<div class="lw-row-3">'
+        + field('Доп. доход (тип)', 'additional_income_type', 'text')
+        + field('Доп. доход, ₽', 'additional_income', 'number')
+        + field('Иное', 'additional_income_other', 'text')
+        + '</div>'
+        + '<div class="lw-row">'
+        + field('Платежи по тек. займам, ₽', 'current_loans_payments', 'number')
+        + field('Обязательные расходы, ₽', 'mandatory_expenses', 'number')
+        + '</div>'
+        + field('Действующие займы', 'has_active_loans', 'select', { options: ['Нет', 'Да'] })
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Доход и работа</div>'
-      + '<div class="lw-row">'
-      + field('Официальный доход, ₽', 'official_income', 'number')
-      + field('Подтверждение дохода', 'income_confirmation', 'text', { placeholder: '2-НДФЛ, справка по форме банка...' })
-      + '</div>'
-      + '<div class="lw-row">'
-      + field('ИНН работодателя', 'employer_inn', 'text')
-      + field('Работодатель', 'employer_name', 'text')
-      + '</div>'
-      + field('Должность', 'position', 'text')
-      + '<div class="lw-row-3">'
-      + field('Доп. доход (тип)', 'additional_income_type', 'text')
-      + field('Доп. доход, ₽', 'additional_income', 'number')
-      + field('Иное', 'additional_income_other', 'text')
-      + '</div>'
-      + '<div class="lw-row">'
-      + field('Платежи по тек. займам, ₽', 'current_loans_payments', 'number')
-      + field('Обязательные расходы, ₽', 'mandatory_expenses', 'number')
-      + '</div>'
-      + field('Действующие займы', 'has_active_loans', 'select', { options: ['Нет', 'Да'] })
-      + '</div>'
+      + section('lw-fl', ''
+        + '<div class="lw-st">Семья</div>'
+        + '<div class="lw-row">'
+        + field('Семейное положение', 'marital_status', 'select', { options: ['Холост / не замужем', 'Женат / замужем', 'Разведён / разведена', 'Вдовец / вдова'] })
+        + field('Несовершеннолетние дети', 'has_minor_children', 'select', { options: ['Нет', 'Да'] })
+        + '</div>'
+        + '<div class="lw-row">'
+        + field('Количество детей', 'children_count', 'number')
+        + '</div>'
+        + '<div class="lw-row-3">'
+        + field('ФИО супруга(и)', 'spouse_name', 'text')
+        + field('Телефон супруга(и)', 'spouse_phone', 'tel')
+        + field('Доход супруга(и), ₽', 'spouse_income', 'number')
+        + '</div>'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Семья</div>'
-      + '<div class="lw-row">'
-      + field('Семейное положение', 'marital_status', 'select', { options: ['Холост / не замужем', 'Женат / замужем', 'Разведён / разведена', 'Вдовец / вдова'] })
-      + field('Несовершеннолетние дети', 'has_minor_children', 'select', { options: ['Нет', 'Да'] })
-      + '</div>'
-      + '<div class="lw-row">'
-      + field('Количество детей', 'children_count', 'number')
-      + field('Маткапитал', 'has_maternal_capital', 'select', { options: ['Нет', 'Да'] })
-      + '</div>'
-      + '<div class="lw-row-3">'
-      + field('ФИО супруга(и)', 'spouse_name', 'text')
-      + field('Телефон супруга(и)', 'spouse_phone', 'tel')
-      + field('Доход супруга(и), ₽', 'spouse_income', 'number')
-      + '</div>'
-      + '</div>'
+      // ─── Блок ЮЛ / ИП ────────────────────────────────────────
+      + section('lw-ul lw-hidden', ''
+        + '<div class="lw-st">Данные организации / ИП</div>'
+        + field('Наименование организации / ИП', 'full_name', 'text', { required: true, placeholder: 'ООО «Ромашка» / ИП Иванов И.И.' })
+        + '<div class="lw-row">'
+        + field('ИНН', 'inn', 'text')
+        + field('ФИО руководителя / ИП', 'employer_name', 'text')
+        + '</div>'
+        + field('Юридический / фактический адрес', 'registration_address', 'textarea')
+        + '<div class="lw-row">'
+        + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
+        + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
+        + '</div>'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Залог: недвижимость</div>'
-      + field('Тип недвижимости', 'real_estate_type', 'text', { placeholder: 'Квартира, дом, земля...' })
-      + '<div class="lw-row">'
-      + field('Кадастровый номер', 'cadastral_number', 'text')
-      + field('Адрес объекта', 'property_address', 'text')
-      + '</div>'
-      + '<div class="lw-row">'
-      + field('Кадастровый номер участка', 'land_cadastral_number', 'text')
-      + field('Адрес участка', 'land_address', 'text')
-      + '</div>'
-      + '</div>'
+      // ─── Залог (общий блок) ──────────────────────────────────
+      + section('', ''
+        + '<div class="lw-st">Залог: недвижимость</div>'
+        + field('Тип недвижимости', 'real_estate_type', 'text', { placeholder: 'Квартира, дом, земля...' })
+        + '<div class="lw-row">'
+        + field('Кадастровый номер', 'cadastral_number', 'text')
+        + field('Адрес объекта', 'property_address', 'text')
+        + '</div>'
+        + '<div class="lw-row">'
+        + field('Кадастровый номер участка', 'land_cadastral_number', 'text')
+        + field('Адрес участка', 'land_address', 'text')
+        + '</div>'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Залог: автомобиль</div>'
-      + '<div class="lw-row-3">'
-      + field('Марка', 'car_brand', 'text')
-      + field('Модель', 'car_model', 'text')
-      + field('Год', 'car_year', 'number')
-      + '</div>'
-      + field('Рыночная стоимость, ₽', 'car_market_value', 'number')
-      + field('Иное обеспечение', 'other_collateral_description', 'textarea')
-      + '</div>'
+      + section('', ''
+        + '<div class="lw-st">Залог: автомобиль</div>'
+        + '<div class="lw-row-3">'
+        + field('Марка', 'car_brand', 'text')
+        + field('Модель', 'car_model', 'text')
+        + field('Год', 'car_year', 'number')
+        + '</div>'
+        + field('Рыночная стоимость, ₽', 'car_market_value', 'number')
+        + field('Иное обеспечение', 'other_collateral_description', 'textarea')
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Контактное лицо (на случай связи)</div>'
-      + '<div class="lw-row">'
-      + field('ФИО', 'contact_full_name', 'text')
-      + field('Телефон', 'contact_phone', 'tel')
-      + '</div>'
-      + '</div>'
+      + section('', ''
+        + '<div class="lw-st">Контактное лицо (на случай связи)</div>'
+        + '<div class="lw-row">'
+        + field('ФИО', 'contact_full_name', 'text')
+        + field('Телефон', 'contact_phone', 'tel')
+        + '</div>'
+      )
 
-      + '<div class="lw-section">'
-      + '<div class="lw-st">Проверка</div>'
-      + '<div class="lw-field">'
-      + '<label class="lw-label">Сколько будет: <span id="lw-cap-q" class="lw-captcha-q">…</span> <span class="lw-req">*</span></label>'
-      + '<div class="lw-captcha">'
-      + '<span class="lw-captcha-q" id="lw-cap-q2">…</span>'
-      + '<input class="lw-input" type="number" id="lw-cap-a" name="captcha_answer" required />'
-      + '<button type="button" class="lw-captcha-reload" id="lw-cap-r">обновить</button>'
-      + '</div>'
-      + '</div>'
-      + '<label class="lw-checkbox"><input type="checkbox" id="lw-consent" required /><span>Я даю согласие на обработку персональных данных в соответствии с Политикой конфиденциальности <span class="lw-req">*</span></span></label>'
-      + '</div>'
+      + section('', ''
+        + '<div class="lw-st">Проверка</div>'
+        + '<div class="lw-field">'
+        + '<label class="lw-label">Сколько будет: <span id="lw-cap-q" class="lw-captcha-q">…</span> <span class="lw-req">*</span></label>'
+        + '<div class="lw-captcha">'
+        + '<span class="lw-captcha-q" id="lw-cap-q2">…</span>'
+        + '<input class="lw-input" type="number" id="lw-cap-a" name="captcha_answer" required />'
+        + '<button type="button" class="lw-captcha-reload" id="lw-cap-r">обновить</button>'
+        + '</div>'
+        + '</div>'
+        + '<label class="lw-checkbox"><input type="checkbox" id="lw-consent" required /><span>Я даю согласие на обработку персональных данных в соответствии с Политикой конфиденциальности <span class="lw-req">*</span></span></label>'
+      )
 
-      + '<div class="lw-section">'
-      + '<button type="submit" class="lw-btn" id="lw-submit">Отправить заявку</button>'
-      + '<p class="lw-foot">Отправляя форму, вы подтверждаете согласие на обработку персональных данных.</p>'
-      + '</div>'
+      + section('', ''
+        + '<button type="submit" class="lw-btn" id="lw-submit">Отправить заявку</button>'
+        + '<p class="lw-foot">Отправляя форму, вы подтверждаете согласие на обработку персональных данных.</p>'
+      )
+
       + '</form>'
       + '</div>';
   }
@@ -248,8 +255,35 @@
   function showMsg(kind, text) {
     var box = $('lw-msg');
     if (!box) return;
+    if (!kind) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="lw-msg ' + kind + '">' + text + '</div>';
     if (kind === 'ok') box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function applyBorrowerType(c, type) {
+    var flBlocks = c.querySelectorAll('.lw-section.lw-fl');
+    var ulBlocks = c.querySelectorAll('.lw-section.lw-ul');
+    if (type === 'fl') {
+      flBlocks.forEach(function (b) { b.classList.remove('lw-hidden'); });
+      ulBlocks.forEach(function (b) { b.classList.add('lw-hidden'); });
+    } else {
+      flBlocks.forEach(function (b) { b.classList.add('lw-hidden'); });
+      ulBlocks.forEach(function (b) { b.classList.remove('lw-hidden'); });
+    }
+    // Для скрытых обязательных полей убираем required, чтобы браузер не блокировал отправку
+    c.querySelectorAll('input[required], textarea[required]').forEach(function (inp) {
+      var sec = inp.closest('.lw-section');
+      if (sec && sec.classList.contains('lw-hidden')) {
+        inp.dataset.lwReq = '1';
+        inp.required = false;
+      }
+    });
+    c.querySelectorAll('input[data-lw-req="1"], textarea[data-lw-req="1"]').forEach(function (inp) {
+      var sec = inp.closest('.lw-section');
+      if (sec && !sec.classList.contains('lw-hidden')) {
+        inp.required = true;
+      }
+    });
   }
 
   function init() {
@@ -262,15 +296,17 @@
     c.className = (c.className || '') + ' lw-wrap';
     c.innerHTML = buildHtml();
 
-    // Toggle borrower_type
     var btns = c.querySelectorAll('.lw-toggle button');
     btns.forEach(function (b) {
       b.addEventListener('click', function () {
         btns.forEach(function (x) { x.classList.remove('active'); });
         b.classList.add('active');
-        c.querySelector('input[name=borrower_type]').value = b.getAttribute('data-bt');
+        var type = b.getAttribute('data-bt');
+        c.querySelector('input[name=borrower_type]').value = type;
+        applyBorrowerType(c, type);
       });
     });
+    applyBorrowerType(c, 'fl');
 
     $('lw-cap-r').addEventListener('click', loadCaptcha);
     loadCaptcha();
@@ -283,8 +319,14 @@
         return;
       }
       var data = { source: SOURCE, consent_pd: true, captcha_token: captchaToken };
-      var fd = new FormData($('lw-form'));
-      fd.forEach(function (v, k) { if (v !== '') data[k] = v; });
+      // Собираем только поля из видимых секций
+      c.querySelectorAll('input[name], select[name], textarea[name]').forEach(function (inp) {
+        var sec = inp.closest('.lw-section');
+        if (sec && sec.classList.contains('lw-hidden')) return;
+        var name = inp.getAttribute('name');
+        var val = inp.value;
+        if (val !== '' && val != null) data[name] = val;
+      });
 
       var btn = $('lw-submit');
       btn.disabled = true;
@@ -301,6 +343,9 @@
             showMsg('ok', '<b>Заявка успешно отправлена!</b><br/>Номер вашей заявки: <b>' + res.j.application_no + '</b>. Наш специалист свяжется с вами в ближайшее время.');
             $('lw-form').reset();
             c.querySelector('input[name=borrower_type]').value = 'fl';
+            btns.forEach(function (x) { x.classList.remove('active'); });
+            btns[0].classList.add('active');
+            applyBorrowerType(c, 'fl');
             loadCaptcha();
           } else {
             showMsg('err', (res.j && res.j.error) || 'Не удалось отправить заявку. Попробуйте ещё раз.');

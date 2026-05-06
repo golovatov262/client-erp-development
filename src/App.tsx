@@ -19,6 +19,7 @@ import CabinetLogin from "@/pages/cabinet/Login";
 import Cabinet from "@/pages/cabinet/Cabinet";
 import AgentCabinet from "@/pages/agent/AgentCabinet";
 import Agents from "@/pages/Agents";
+import LoanApplicationPublic from "@/pages/LoanApplicationPublic";
 import NotFound from "@/pages/NotFound";
 import Icon from "@/components/ui/icon";
 
@@ -41,6 +42,7 @@ const AppRoutes = () => {
       <Route path="/" element={<CabinetLogin />} />
       <Route path="/cabinet" element={<Cabinet />} />
       <Route path="/agent" element={<AgentCabinet />} />
+      <Route path="/loan-application" element={<LoanApplicationPublic />} />
       <Route path="/office/login" element={user ? <Navigate to="/office" replace /> : <Login />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/office" element={<Dashboard />} />
