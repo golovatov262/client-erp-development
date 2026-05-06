@@ -4761,6 +4761,22 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
         mr = cur.fetchone()
         info = {'name': mr[0], 'member_no': mr[1], 'phone': mr[2], 'email': mr[3]} if mr else {}
 
+        cur.execute("""
+            UPDATE loans
+            SET status = CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM loan_schedule s
+                    WHERE s.loan_id = loans.id AND s.status = 'overdue'
+                ) THEN 'overdue'
+                ELSE 'active'
+            END,
+            updated_at = NOW()
+            WHERE member_id = %s
+              AND status = 'holiday'
+              AND holiday_end IS NOT NULL
+              AND holiday_end <= CURRENT_DATE
+        """ % member_id)
+
         loans = query_rows(cur, """
             SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type, l.start_date, l.end_date,
                    l.monthly_payment, l.balance, l.status, l.org_id,
