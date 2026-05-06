@@ -427,6 +427,26 @@ const Loans = () => {
     }
   };
 
+  const handleEndHolidayEarly = async () => {
+    if (!detail) return;
+    if (!confirm("Закрыть каникулы досрочно? Статус договора будет переведён в «активный», срок и график пересчитаны.")) return;
+    setSaving(true);
+    try {
+      const res = await api.loans.endHolidayEarly(detail.id);
+      const desc = res.used_months
+        ? `Использовано ${res.used_months} мес. Новая дата окончания: ${res.new_end_date || ""}`
+        : "Каникулы не успели начаться — полностью отменены";
+      toast({ title: "Каникулы закрыты", description: desc });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleExportLoans = async () => {
     setExporting(true);
     try {
@@ -544,6 +564,7 @@ const Loans = () => {
           setHolidayForm({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: detail?.holiday_months ? String(detail.holiday_months) : "3" });
           setShowHoliday(true);
         }}
+        onEndHolidayEarly={handleEndHolidayEarly}
       />
 
       {detail && (

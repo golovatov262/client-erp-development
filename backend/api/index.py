@@ -1401,6 +1401,94 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 'extended_schedule': extended_schedule,
             }
 
+        elif action == 'end_holiday_early':
+            lid = int(body['loan_id'])
+            cur.execute(
+                "SELECT id, contract_no, term_months, start_date, end_date, status, holiday_start, holiday_end, holiday_months FROM loans WHERE id=%s",
+                (lid,)
+            )
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            loan_id, contract_no, term_months, start_date, end_date, status, h_start, h_end, h_months = lr
+            if not h_start or not h_end or not h_months:
+                return {'error': 'У договора нет действующих каникул'}
+            h_start = date.fromisoformat(str(h_start))
+            h_end = date.fromisoformat(str(h_end))
+            end_date = date.fromisoformat(str(end_date))
+            today = date.today()
+            h_months = int(h_months)
+
+            # Сколько каникулярных месяцев фактически прошло
+            if today <= h_start:
+                used_months = 0
+            elif today >= h_end:
+                used_months = h_months
+            else:
+                used_months = (today.year - h_start.year) * 12 + (today.month - h_start.month)
+                if used_months < 0:
+                    used_months = 0
+                if used_months > h_months:
+                    used_months = h_months
+
+            # Если каникулы ещё не начались — полная отмена (как holiday_months=0)
+            if used_months == 0:
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='holiday'", (lid,))
+                holiday_count = int(cur.fetchone()[0] or 0)
+                cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status='holiday'", (lid,))
+                cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='holiday_pending'", (lid,))
+                # Удаляем хвостовые сгенерированные платежи на каникулярные месяцы
+                if holiday_count > 0:
+                    cur.execute(
+                        "DELETE FROM loan_schedule WHERE id IN (SELECT id FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no DESC LIMIT %s)",
+                        (lid, holiday_count)
+                    )
+                new_end = add_months(end_date, -h_months)
+                cur.execute(
+                    "UPDATE loans SET holiday_start=NULL, holiday_months=0, holiday_end=NULL, end_date=%s, term_months=%s, status='active', updated_at=NOW() WHERE id=%s",
+                    (new_end.isoformat(), term_months - h_months, lid)
+                )
+                recalc_loan_schedule_statuses(cur, lid)
+                audit_log(cur, staff, 'end_holiday_early', 'loan', lid, contract_no,
+                    'Каникулы отменены досрочно (не начались). Срок сокращён до %s' % new_end.isoformat(), ip)
+                conn.commit()
+                return {'success': True, 'message': 'Кредитные каникулы досрочно прекращены', 'used_months': 0}
+
+            # Каникулы идут — обрываем на сегодня
+            # Возвращаем в график платежи, у которых дата >= today и статус 'holiday'
+            cur.execute(
+                "UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='holiday' AND payment_date >= %s",
+                (lid, today.isoformat())
+            )
+            # Считаем разницу в месяцах для сокращения срока
+            diff_months = h_months - used_months
+            # Удаляем лишние хвостовые сгенерированные платежи
+            if diff_months > 0:
+                cur.execute(
+                    "DELETE FROM loan_schedule WHERE id IN (SELECT id FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no DESC LIMIT %s)",
+                    (lid, diff_months)
+                )
+            new_end = add_months(end_date, -diff_months)
+            new_holiday_end = add_months(h_start, used_months)
+
+            cur.execute(
+                "UPDATE loans SET holiday_months=%s, holiday_end=%s, end_date=%s, term_months=%s, status='active', updated_at=NOW() WHERE id=%s",
+                (used_months, new_holiday_end.isoformat(), new_end.isoformat(), term_months - diff_months, lid)
+            )
+            recalc_loan_schedule_statuses(cur, lid)
+            audit_log(cur, staff, 'end_holiday_early', 'loan', lid, contract_no,
+                'Каникулы досрочно прекращены. Использовано %s из %s мес. Новая дата окончания: %s' % (
+                    used_months, h_months, new_end.isoformat()
+                ), ip)
+            conn.commit()
+            return {
+                'success': True,
+                'message': 'Кредитные каникулы досрочно прекращены',
+                'used_months': used_months,
+                'holiday_end': new_holiday_end.isoformat(),
+                'new_end_date': new_end.isoformat(),
+            }
+
 def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes=None):
     rc_list = []
     if rate_changes:

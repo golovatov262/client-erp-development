@@ -45,6 +45,7 @@ interface LoansDetailDialogProps {
   onFixSchedule: () => void;
   onEditLoan: () => void;
   onHoliday: () => void;
+  onEndHolidayEarly: () => void;
 }
 
 const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
@@ -245,6 +246,12 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
                 <Button size="sm" variant="outline" onClick={props.onHoliday}>
                   <Icon name="Umbrella" size={14} className="mr-1" />
                   {detail.status === "holiday" ? "Изменить каникулы" : "Кредитные каникулы"}
+                </Button>
+              )}
+              {detail.status === "holiday" && (
+                <Button size="sm" variant="outline" onClick={props.onEndHolidayEarly}>
+                  <Icon name="CalendarOff" size={14} className="mr-1" />
+                  Закрыть каникулы досрочно
                 </Button>
               )}
             </div>

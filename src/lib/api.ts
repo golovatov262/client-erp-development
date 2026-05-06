@@ -142,6 +142,8 @@ export const api = {
       request<{ success: boolean; holiday_start: string; holiday_end: string; new_end_date: string; holiday_months: number; extended_schedule: ScheduleItem[] }>("POST", undefined, { entity: "loans", action: "set_holiday", ...data }),
     cancelHoliday: (loanId: number) =>
       request<{ success: boolean; message: string }>("POST", undefined, { entity: "loans", action: "set_holiday", loan_id: loanId, holiday_months: 0 }),
+    endHolidayEarly: (loanId: number) =>
+      request<{ success: boolean; message: string; used_months: number; holiday_end?: string; new_end_date?: string }>("POST", undefined, { entity: "loans", action: "end_holiday_early", loan_id: loanId }),
   },
 
   savings: {
