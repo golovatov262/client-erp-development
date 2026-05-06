@@ -30,6 +30,13 @@
       "method": "OPTIONS",
       "path": "/",
       "expectedStatus": 200
+    },
+    {
+      "name": "DaData address suggest",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "dadata", "type": "address", "query": "москва"},
+      "expectedStatus": 200
     }
   ]
 }

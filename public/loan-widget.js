@@ -41,6 +41,13 @@
     + '.lw-toggle button.active{background:#2563eb;color:#fff;border-color:#2563eb}'
     + '.lw-foot{font-size:12px;color:#6b7280;margin-top:14px;line-height:1.5}'
     + '.lw-foot a{color:#2563eb}'
+    + '.lw-dd-wrap{position:relative}'
+    + '.lw-dd{position:absolute;left:0;right:0;top:calc(100% + 2px);background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.08);max-height:280px;overflow-y:auto;z-index:9999}'
+    + '.lw-dd-item{padding:8px 12px;cursor:pointer;font-size:13px;line-height:1.4;border-bottom:1px solid #f3f4f6}'
+    + '.lw-dd-item:last-child{border-bottom:0}'
+    + '.lw-dd-item:hover,.lw-dd-item.active{background:#eff6ff}'
+    + '.lw-dd-meta{font-size:11px;color:#6b7280;margin-top:2px}'
+    + '.lw-dd-empty{padding:8px 12px;font-size:12px;color:#9ca3af}'
     ;
 
   function $(id) { return document.getElementById(id); }
@@ -56,17 +63,19 @@
   function field(label, name, type, opts) {
     opts = opts || {};
     var req = opts.required ? ' <span class="lw-req">*</span>' : '';
+    var dd = opts.dadata ? ' data-dadata="' + opts.dadata + '"' : '';
     var input;
     if (type === 'textarea') {
-      input = '<textarea class="lw-textarea" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + '></textarea>';
+      input = '<textarea class="lw-textarea" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + dd + '></textarea>';
     } else if (type === 'select') {
       var opt = '<option value="">— выберите —</option>';
       (opts.options || []).forEach(function (o) { opt += '<option value="' + o + '">' + o + '</option>'; });
       input = '<select class="lw-select" name="' + name + '">' + opt + '</select>';
     } else {
-      input = '<input class="lw-input" type="' + type + '" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + ' />';
+      input = '<input class="lw-input" type="' + type + '" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + dd + ' autocomplete="off" />';
     }
-    return '<div class="lw-field"><label class="lw-label">' + label + req + '</label>' + input + '</div>';
+    var wrap = opts.dadata ? '<div class="lw-dd-wrap">' + input + '</div>' : input;
+    return '<div class="lw-field"><label class="lw-label">' + label + req + '</label>' + wrap + '</div>';
   }
 
   function section(extraCls, content) {
@@ -122,8 +131,8 @@
         + field('Дата выдачи', 'passport_issue_date', 'date')
         + field('Код подразделения', 'passport_division_code', 'text', { placeholder: '000-000' })
         + '</div>'
-        + field('Кем выдан', 'passport_issued_by', 'textarea')
-        + field('Адрес регистрации', 'registration_address', 'textarea')
+        + field('Кем выдан', 'passport_issued_by', 'text', { dadata: 'fms_unit', placeholder: 'Начните вводить название подразделения...' })
+        + field('Адрес регистрации', 'registration_address', 'text', { dadata: 'address', placeholder: 'Начните вводить адрес...' })
         + field('ИНН', 'inn', 'text')
       )
 
@@ -134,7 +143,7 @@
         + field('Подтверждение дохода', 'income_confirmation', 'text', { placeholder: '2-НДФЛ, справка по форме банка...' })
         + '</div>'
         + '<div class="lw-row">'
-        + field('ИНН работодателя', 'employer_inn', 'text')
+        + field('ИНН работодателя', 'employer_inn', 'text', { dadata: 'party', placeholder: 'Введите ИНН или название работодателя...' })
         + field('Работодатель', 'employer_name', 'text')
         + '</div>'
         + field('Должность', 'position', 'text')
@@ -169,12 +178,12 @@
       // ─── Блок ЮЛ / ИП ────────────────────────────────────────
       + section('lw-ul lw-hidden', ''
         + '<div class="lw-st">Данные организации / ИП</div>'
-        + field('Наименование организации / ИП', 'full_name', 'text', { required: true, placeholder: 'ООО «Ромашка» / ИП Иванов И.И.' })
+        + field('Наименование организации / ИП', 'full_name', 'text', { required: true, dadata: 'party', placeholder: 'Введите название или ИНН...' })
         + '<div class="lw-row">'
         + field('ИНН', 'inn', 'text')
         + field('ФИО руководителя / ИП', 'employer_name', 'text')
         + '</div>'
-        + field('Юридический / фактический адрес', 'registration_address', 'textarea')
+        + field('Юридический / фактический адрес', 'registration_address', 'text', { dadata: 'address', placeholder: 'Начните вводить адрес...' })
         + '<div class="lw-row">'
         + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
         + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
@@ -286,6 +295,138 @@
     });
   }
 
+  function fetchDadata(type, query) {
+    return fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'dadata', type: type, query: query }),
+    }).then(function (r) { return r.json(); }).catch(function () { return { suggestions: [] }; });
+  }
+
+  function setVal(c, name, value) {
+    var el = c.querySelector('[name="' + name + '"]');
+    if (!el) return;
+    if (!el.value || el.dataset.lwAuto !== '0') {
+      el.value = value;
+    }
+  }
+
+  function renderSuggestion(type, item) {
+    if (type === 'address') return item.value || '';
+    if (type === 'fms_unit') {
+      var code = item.data && item.data.code ? '<div class="lw-dd-meta">' + item.data.code + '</div>' : '';
+      return (item.value || '') + code;
+    }
+    if (type === 'party') {
+      var name = (item.data && item.data.name && (item.data.name.short_with_opf || item.data.name.full_with_opf)) || item.value || '';
+      var meta = '';
+      var inn = item.data && item.data.inn ? 'ИНН: ' + item.data.inn : '';
+      var addr = item.data && item.data.address && item.data.address.value ? ' • ' + item.data.address.value : '';
+      if (inn || addr) meta = '<div class="lw-dd-meta">' + inn + addr + '</div>';
+      return name + meta;
+    }
+    return item.value || '';
+  }
+
+  function applySelection(c, input, type, item) {
+    if (type === 'address') {
+      input.value = (item.unrestricted_value || item.value || '');
+    } else if (type === 'fms_unit') {
+      input.value = item.value || '';
+      if (item.data && item.data.code) setVal(c, 'passport_division_code', item.data.code);
+    } else if (type === 'party') {
+      var name = item.data && item.data.name;
+      var fullName = (name && (name.full_with_opf || name.short_with_opf)) || item.value || '';
+      var inn = (item.data && item.data.inn) || '';
+      var addr = (item.data && item.data.address && item.data.address.unrestricted_value) || '';
+      var fieldName = input.getAttribute('name');
+      if (fieldName === 'employer_inn') {
+        input.value = inn;
+        if (name && name.short_with_opf) setVal(c, 'employer_name', name.short_with_opf);
+      } else {
+        input.value = fullName;
+        if (inn) setVal(c, 'inn', inn);
+        if (addr) setVal(c, 'registration_address', addr);
+        var mgmt = item.data && item.data.management;
+        if (mgmt && mgmt.name) setVal(c, 'employer_name', mgmt.name);
+      }
+    }
+  }
+
+  function attachDadata(c, input) {
+    var type = input.getAttribute('data-dadata');
+    if (!type) return;
+    var wrap = input.parentNode;
+    var dd = null;
+    var items = [];
+    var activeIdx = -1;
+    var timer = null;
+
+    function close() {
+      if (dd) { dd.remove(); dd = null; items = []; activeIdx = -1; }
+    }
+
+    function open(suggestions) {
+      close();
+      if (!suggestions || !suggestions.length) return;
+      items = suggestions;
+      dd = document.createElement('div');
+      dd.className = 'lw-dd';
+      suggestions.forEach(function (s, i) {
+        var it = document.createElement('div');
+        it.className = 'lw-dd-item';
+        it.innerHTML = renderSuggestion(type, s);
+        it.addEventListener('mousedown', function (ev) {
+          ev.preventDefault();
+          applySelection(c, input, type, s);
+          close();
+        });
+        dd.appendChild(it);
+      });
+      wrap.appendChild(dd);
+    }
+
+    function query() {
+      var q = input.value.trim();
+      var minChars = type === 'address' ? 3 : 2;
+      if (q.length < minChars) { close(); return; }
+      fetchDadata(type, q).then(function (res) {
+        if (document.activeElement !== input) return;
+        open(res.suggestions || []);
+      });
+    }
+
+    input.addEventListener('input', function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(query, 300);
+    });
+    input.addEventListener('focus', function () {
+      if (input.value.trim().length >= (type === 'address' ? 3 : 2)) query();
+    });
+    input.addEventListener('blur', function () {
+      setTimeout(close, 150);
+    });
+    input.addEventListener('keydown', function (ev) {
+      if (!dd) return;
+      var nodes = dd.querySelectorAll('.lw-dd-item');
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, nodes.length - 1);
+        nodes.forEach(function (n, i) { n.classList.toggle('active', i === activeIdx); });
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        nodes.forEach(function (n, i) { n.classList.toggle('active', i === activeIdx); });
+      } else if (ev.key === 'Enter' && activeIdx >= 0 && items[activeIdx]) {
+        ev.preventDefault();
+        applySelection(c, input, type, items[activeIdx]);
+        close();
+      } else if (ev.key === 'Escape') {
+        close();
+      }
+    });
+  }
+
   function init() {
     injectStyle();
     var c = document.getElementById(CONTAINER_ID);
@@ -307,6 +448,10 @@
       });
     });
     applyBorrowerType(c, 'fl');
+
+    c.querySelectorAll('[data-dadata]').forEach(function (inp) {
+      attachDadata(c, inp);
+    });
 
     $('lw-cap-r').addEventListener('click', loadCaptcha);
     loadCaptcha();

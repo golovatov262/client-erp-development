@@ -6,6 +6,8 @@ import hashlib
 import random
 import re
 import smtplib
+import urllib.request
+import urllib.error
 from datetime import date, datetime
 from email.mime.text import MIMEText
 import psycopg2
@@ -238,8 +240,46 @@ def send_application_email(app_no, body, source):
         return False, str(e)
 
 
+DADATA_ENDPOINTS = {
+    'address': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+    'fms_unit': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/fms_unit',
+    'party': 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party',
+}
+
+
+def dadata_suggest(action: str, query: str):
+    """Прокси к DaData для подсказок (адрес, ФМС, организация)."""
+    if action not in DADATA_ENDPOINTS:
+        return {'error': 'Unsupported action'}
+    api_key = os.environ.get('DADATA_API_KEY', '').strip()
+    if not api_key:
+        return {'suggestions': []}
+    q = (query or '').strip()
+    if len(q) < 2:
+        return {'suggestions': []}
+    payload = json.dumps({'query': q, 'count': 8}).encode('utf-8')
+    req = urllib.request.Request(
+        DADATA_ENDPOINTS[action],
+        data=payload,
+        headers={
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': 'Token %s' % api_key,
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            return {'suggestions': data.get('suggestions', [])}
+    except urllib.error.HTTPError as e:
+        return {'error': 'dadata http %d' % e.code, 'suggestions': []}
+    except Exception as e:
+        return {'error': str(e), 'suggestions': []}
+
+
 def handler(event, context):
-    """Публичный приём заявок на займ с сайта (с капчей и уведомлением на email)."""
+    """Публичный приём заявок на займ с сайта (с капчей, DaData-подсказками и уведомлением на email)."""
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -259,6 +299,12 @@ def handler(event, context):
         body = json.loads(event.get('body') or '{}')
     except Exception:
         return cors_json({'error': 'Невалидный JSON'}, 400)
+
+    # DaData-подсказки (без капчи — это запрос подсказок, не сохранение)
+    if body.get('action') == 'dadata':
+        suggest_type = (body.get('type') or '').strip()
+        query = (body.get('query') or '').strip()
+        return cors_json(dadata_suggest(suggest_type, query))
 
     captcha_token = body.get('captcha_token', '')
     captcha_answer = body.get('captcha_answer', '')
