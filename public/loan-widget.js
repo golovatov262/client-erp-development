@@ -64,6 +64,9 @@
     opts = opts || {};
     var req = opts.required ? ' <span class="lw-req">*</span>' : '';
     var dd = opts.dadata ? ' data-dadata="' + opts.dadata + '"' : '';
+    var mk = opts.mask ? ' data-mask="' + opts.mask + '"' : '';
+    var mn = opts.money ? ' data-money="1" inputmode="numeric"' : '';
+    var dg = opts.digits ? ' data-digits="' + opts.digits + '" inputmode="numeric"' : '';
     var input;
     if (type === 'textarea') {
       input = '<textarea class="lw-textarea" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + dd + '></textarea>';
@@ -72,7 +75,8 @@
       (opts.options || []).forEach(function (o) { opt += '<option value="' + o + '">' + o + '</option>'; });
       input = '<select class="lw-select" name="' + name + '">' + opt + '</select>';
     } else {
-      input = '<input class="lw-input" type="' + type + '" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + dd + ' autocomplete="off" />';
+      var realType = (opts.money || opts.digits || opts.mask) ? 'text' : type;
+      input = '<input class="lw-input" type="' + realType + '" name="' + name + '"' + (opts.placeholder ? ' placeholder="' + opts.placeholder + '"' : '') + (opts.required ? ' required' : '') + dd + mk + mn + dg + ' autocomplete="off" />';
     }
     var wrap = opts.dadata ? '<div class="lw-dd-wrap">' + input + '</div>' : input;
     return '<div class="lw-field"><label class="lw-label">' + label + req + '</label>' + wrap + '</div>';
@@ -104,8 +108,8 @@
       + section('', ''
         + '<div class="lw-st">Условия займа</div>'
         + '<div class="lw-row">'
-        + field('Сумма, ₽', 'amount', 'number', { required: true })
-        + field('Срок, мес.', 'term_months', 'number', { required: true })
+        + field('Сумма, ₽', 'amount', 'text', { required: true, money: true, placeholder: '500 000' })
+        + field('Срок, мес.', 'term_months', 'text', { required: true, digits: 3, placeholder: '12' })
         + '</div>'
         + field('Вид предполагаемого залога', 'collateral_types', 'text', { required: true, placeholder: 'Без залога, авто, недвижимость и т.д.' })
       )
@@ -115,7 +119,7 @@
         + '<div class="lw-st">Контактные данные</div>'
         + field('ФИО', 'full_name', 'text', { required: true, placeholder: 'Иванов Иван Иванович' })
         + '<div class="lw-row">'
-        + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
+        + field('Телефон', 'mobile_phone', 'tel', { required: true, mask: '+7 (___) ___-__-__', placeholder: '+7 (___) ___-__-__' })
         + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
         + '</div>'
       )
@@ -127,34 +131,34 @@
         + field('Место рождения', 'birth_place', 'text')
         + '</div>'
         + '<div class="lw-row-3">'
-        + field('Серия и номер', 'passport_series_number', 'text', { placeholder: '0000 000000' })
+        + field('Серия и номер', 'passport_series_number', 'text', { mask: '__ __ ______', placeholder: '00 00 000000' })
         + field('Дата выдачи', 'passport_issue_date', 'date')
-        + field('Код подразделения', 'passport_division_code', 'text', { placeholder: '000-000' })
+        + field('Код подразделения', 'passport_division_code', 'text', { mask: '___-___', placeholder: '000-000' })
         + '</div>'
         + field('Кем выдан', 'passport_issued_by', 'text', { dadata: 'fms_unit', placeholder: 'Начните вводить название подразделения...' })
         + field('Адрес регистрации', 'registration_address', 'text', { dadata: 'address', placeholder: 'Начните вводить адрес...' })
-        + field('ИНН', 'inn', 'text')
+        + field('ИНН', 'inn', 'text', { digits: 12, placeholder: '12 цифр' })
       )
 
       + section('lw-fl', ''
         + '<div class="lw-st">Доход и работа</div>'
         + '<div class="lw-row">'
-        + field('Официальный доход, ₽', 'official_income', 'number')
+        + field('Официальный доход, ₽', 'official_income', 'text', { money: true, placeholder: '50 000' })
         + field('Подтверждение дохода', 'income_confirmation', 'text', { placeholder: '2-НДФЛ, справка по форме банка...' })
         + '</div>'
         + '<div class="lw-row">'
-        + field('ИНН работодателя', 'employer_inn', 'text', { dadata: 'party', placeholder: 'Введите ИНН или название работодателя...' })
+        + field('ИНН работодателя', 'employer_inn', 'text', { dadata: 'party', digits: 12, placeholder: 'Введите ИНН или название работодателя...' })
         + field('Работодатель', 'employer_name', 'text')
         + '</div>'
         + field('Должность', 'position', 'text')
         + '<div class="lw-row-3">'
         + field('Доп. доход (тип)', 'additional_income_type', 'text')
-        + field('Доп. доход, ₽', 'additional_income', 'number')
+        + field('Доп. доход, ₽', 'additional_income', 'text', { money: true })
         + field('Иное', 'additional_income_other', 'text')
         + '</div>'
         + '<div class="lw-row">'
-        + field('Платежи по тек. займам, ₽', 'current_loans_payments', 'number')
-        + field('Обязательные расходы, ₽', 'mandatory_expenses', 'number')
+        + field('Платежи по тек. займам, ₽', 'current_loans_payments', 'text', { money: true })
+        + field('Обязательные расходы, ₽', 'mandatory_expenses', 'text', { money: true })
         + '</div>'
         + field('Действующие займы', 'has_active_loans', 'select', { options: ['Нет', 'Да'] })
       )
@@ -166,12 +170,12 @@
         + field('Несовершеннолетние дети', 'has_minor_children', 'select', { options: ['Нет', 'Да'] })
         + '</div>'
         + '<div class="lw-row">'
-        + field('Количество детей', 'children_count', 'number')
+        + field('Количество детей', 'children_count', 'text', { digits: 2 })
         + '</div>'
         + '<div class="lw-row-3">'
         + field('ФИО супруга(и)', 'spouse_name', 'text')
-        + field('Телефон супруга(и)', 'spouse_phone', 'tel')
-        + field('Доход супруга(и), ₽', 'spouse_income', 'number')
+        + field('Телефон супруга(и)', 'spouse_phone', 'tel', { mask: '+7 (___) ___-__-__', placeholder: '+7 (___) ___-__-__' })
+        + field('Доход супруга(и), ₽', 'spouse_income', 'text', { money: true })
         + '</div>'
       )
 
@@ -180,12 +184,12 @@
         + '<div class="lw-st">Данные организации / ИП</div>'
         + field('Наименование организации / ИП', 'full_name', 'text', { required: true, dadata: 'party', placeholder: 'Введите название или ИНН...' })
         + '<div class="lw-row">'
-        + field('ИНН', 'inn', 'text')
+        + field('ИНН', 'inn', 'text', { digits: 12, placeholder: '10 или 12 цифр' })
         + field('ФИО руководителя / ИП', 'employer_name', 'text')
         + '</div>'
         + field('Юридический / фактический адрес', 'registration_address', 'text', { dadata: 'address', placeholder: 'Начните вводить адрес...' })
         + '<div class="lw-row">'
-        + field('Телефон', 'mobile_phone', 'tel', { required: true, placeholder: '+7 (___) ___-__-__' })
+        + field('Телефон', 'mobile_phone', 'tel', { required: true, mask: '+7 (___) ___-__-__', placeholder: '+7 (___) ___-__-__' })
         + field('Email', 'email', 'email', { required: true, placeholder: 'name@example.com' })
         + '</div>'
       )
@@ -209,9 +213,9 @@
         + '<div class="lw-row-3">'
         + field('Марка', 'car_brand', 'text')
         + field('Модель', 'car_model', 'text')
-        + field('Год', 'car_year', 'number')
+        + field('Год', 'car_year', 'text', { digits: 4, placeholder: '2020' })
         + '</div>'
-        + field('Рыночная стоимость, ₽', 'car_market_value', 'number')
+        + field('Рыночная стоимость, ₽', 'car_market_value', 'text', { money: true })
         + field('Иное обеспечение', 'other_collateral_description', 'textarea')
       )
 
@@ -219,7 +223,7 @@
         + '<div class="lw-st">Контактное лицо (на случай связи)</div>'
         + '<div class="lw-row">'
         + field('ФИО', 'contact_full_name', 'text')
-        + field('Телефон', 'contact_phone', 'tel')
+        + field('Телефон', 'contact_phone', 'tel', { mask: '+7 (___) ___-__-__', placeholder: '+7 (___) ___-__-__' })
         + '</div>'
       )
 
@@ -229,7 +233,7 @@
         + '<label class="lw-label">Сколько будет: <span id="lw-cap-q" class="lw-captcha-q">…</span> <span class="lw-req">*</span></label>'
         + '<div class="lw-captcha">'
         + '<span class="lw-captcha-q" id="lw-cap-q2">…</span>'
-        + '<input class="lw-input" type="number" id="lw-cap-a" name="captcha_answer" required />'
+        + '<input class="lw-input" type="text" inputmode="numeric" id="lw-cap-a" name="captcha_answer" data-digits="3" required />'
         + '<button type="button" class="lw-captcha-reload" id="lw-cap-r">обновить</button>'
         + '</div>'
         + '</div>'
@@ -293,6 +297,63 @@
         inp.required = true;
       }
     });
+  }
+
+  // ─── Маски ввода ────────────────────────────────────────────
+  function applyMask(value, mask) {
+    var digits = (value || '').replace(/\D/g, '');
+    var res = '';
+    var di = 0;
+    for (var i = 0; i < mask.length; i++) {
+      var ch = mask[i];
+      if (ch === '_') {
+        if (di >= digits.length) break;
+        res += digits[di++];
+      } else {
+        if (di >= digits.length && i >= 1) break;
+        res += ch;
+      }
+    }
+    return res;
+  }
+
+  function formatMoney(value) {
+    var digits = (value || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    if (!digits) return '';
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  }
+
+  function attachMask(input) {
+    var mask = input.getAttribute('data-mask');
+    var money = input.getAttribute('data-money') === '1';
+    var digitsLimit = parseInt(input.getAttribute('data-digits') || '0', 10);
+    if (!mask && !money && !digitsLimit) return;
+
+    function handle() {
+      var v = input.value;
+      var newVal;
+      if (mask) {
+        // Для телефона +7: если первая цифра 7 или 8 — игнорируем (она уже в маске)
+        if (mask.indexOf('+7') === 0) {
+          var d = v.replace(/\D/g, '');
+          if (d.length && (d[0] === '7' || d[0] === '8')) d = d.slice(1);
+          newVal = applyMask(d, mask);
+        } else {
+          newVal = applyMask(v, mask);
+        }
+      } else if (money) {
+        newVal = formatMoney(v);
+      } else if (digitsLimit) {
+        newVal = (v || '').replace(/\D/g, '').slice(0, digitsLimit);
+      }
+      if (newVal !== v) {
+        input.value = newVal;
+      }
+    }
+
+    input.addEventListener('input', handle);
+    input.addEventListener('blur', handle);
+    input.addEventListener('paste', function () { setTimeout(handle, 0); });
   }
 
   function fetchDadata(type, query) {
@@ -453,6 +514,10 @@
       attachDadata(c, inp);
     });
 
+    c.querySelectorAll('[data-mask], [data-money], [data-digits]').forEach(function (inp) {
+      attachMask(inp);
+    });
+
     $('lw-cap-r').addEventListener('click', loadCaptcha);
     loadCaptcha();
 
@@ -470,7 +535,21 @@
         if (sec && sec.classList.contains('lw-hidden')) return;
         var name = inp.getAttribute('name');
         var val = inp.value;
-        if (val !== '' && val != null) data[name] = val;
+        if (val == null || val === '') return;
+        // Нормализация: убираем форматирование из чисел и масок
+        if (inp.getAttribute('data-money') === '1' || inp.getAttribute('data-digits')) {
+          val = val.replace(/\D/g, '');
+        } else if (inp.getAttribute('data-mask')) {
+          var mask = inp.getAttribute('data-mask');
+          if (mask.indexOf('+7') === 0) {
+            var d = val.replace(/\D/g, '');
+            if (d.length && (d[0] === '8')) d = '7' + d.slice(1);
+            if (d.length && d[0] !== '7') d = '7' + d;
+            val = '+' + d;
+          }
+          // Для остальных масок — оставляем как есть
+        }
+        if (val !== '') data[name] = val;
       });
 
       var btn = $('lw-submit');
