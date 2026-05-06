@@ -140,6 +140,9 @@ def validate_required(body):
     full_name = (body.get('full_name') or '').strip()
     phone = (body.get('mobile_phone') or '').strip()
     email_v = (body.get('email') or '').strip()
+    amount = str(body.get('amount') or '').strip()
+    term = str(body.get('term_months') or '').strip()
+    collateral = (body.get('collateral_types') or '').strip()
     consent = body.get('consent_pd')
     if not full_name or len(full_name) < 3:
         errors.append('Укажите ФИО')
@@ -147,6 +150,18 @@ def validate_required(body):
         errors.append('Укажите корректный телефон')
     if not email_v or not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email_v):
         errors.append('Укажите корректный email')
+    try:
+        if not amount or float(amount.replace(',', '.').replace(' ', '')) <= 0:
+            errors.append('Укажите сумму займа')
+    except Exception:
+        errors.append('Укажите корректную сумму займа')
+    try:
+        if not term or int(float(term)) <= 0:
+            errors.append('Укажите срок займа')
+    except Exception:
+        errors.append('Укажите корректный срок займа')
+    if not collateral:
+        errors.append('Укажите вид предполагаемого залога')
     if not consent:
         errors.append('Необходимо согласие на обработку персональных данных')
     return errors

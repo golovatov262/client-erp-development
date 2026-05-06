@@ -104,10 +104,10 @@
       + section('', ''
         + '<div class="lw-st">Условия займа</div>'
         + '<div class="lw-row">'
-        + field('Сумма, ₽', 'amount', 'number')
-        + field('Срок, мес.', 'term_months', 'number')
+        + field('Сумма, ₽', 'amount', 'number', { required: true })
+        + field('Срок, мес.', 'term_months', 'number', { required: true })
         + '</div>'
-        + field('Вид предполагаемого залога', 'collateral_types', 'text', { placeholder: 'Без залога, авто, недвижимость и т.д.' })
+        + field('Вид предполагаемого залога', 'collateral_types', 'text', { required: true, placeholder: 'Без залога, авто, недвижимость и т.д.' })
       )
 
       // ─── Блок ФЛ ─────────────────────────────────────────────
