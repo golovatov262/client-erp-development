@@ -1,0 +1,35 @@
+{
+  "tests": [
+    {
+      "name": "Health check GET",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get captcha",
+      "method": "GET",
+      "path": "/?action=captcha",
+      "expectedStatus": 200,
+      "expectedBody": {"question": "string", "token": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST without captcha rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {"full_name": "Иванов Иван Иванович", "mobile_phone": "+79001234567", "email": "test@test.ru", "consent_pd": true},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "OPTIONS CORS",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 {
+  "public-application": "https://functions.poehali.dev/0924bff4-d641-4d72-bf91-6be621dfc8d9",
   "cron-sber": "https://functions.poehali.dev/1f3896d2-7604-47b6-b33d-c1ce55e29925",
   "cron-notify": "https://functions.poehali.dev/91b29bc5-8da9-4e79-9042-cb0fcb16b4f8",
   "cron-accrue": "https://functions.poehali.dev/aa0d7089-a856-4384-abbb-1651e214b2af",
