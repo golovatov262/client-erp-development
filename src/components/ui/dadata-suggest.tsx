@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import Icon from "@/components/ui/icon";
 
-interface DadataSuggestProps<T> {
+export interface DadataSuggestProps<T> {
   value: string;
   onChange: (value: string) => void;
   onSelect?: (item: T) => void;

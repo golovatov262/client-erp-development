@@ -1,6 +1,9 @@
-import DadataSuggest from "@/components/ui/dadata-suggest";
+import React from "react";
+import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import dadata, { DadataAddressSuggestion } from "@/lib/dadata";
 import Icon from "@/components/ui/icon";
+
+const DadataAddressSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataAddressSuggestion>>;
 
 interface AddressSuggestProps {
   value: string;
@@ -10,7 +13,7 @@ interface AddressSuggestProps {
 }
 
 const AddressSuggest = ({ value, onChange, placeholder = "Начните вводить адрес...", className }: AddressSuggestProps) => (
-  <DadataSuggest<DadataAddressSuggestion>
+  <DadataAddressSuggest
     value={value}
     onChange={onChange}
     fetchSuggestions={(q) => dadata.suggestAddress(q)}

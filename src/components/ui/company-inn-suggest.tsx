@@ -1,7 +1,9 @@
-import { useCallback } from "react";
-import DadataSuggest from "@/components/ui/dadata-suggest";
+import React, { useCallback } from "react";
+import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import dadata, { DadataPartySuggestion } from "@/lib/dadata";
 import Icon from "@/components/ui/icon";
+
+const DadataPartySuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataPartySuggestion>>;
 
 export interface CompanySelectData {
   inn: string;
@@ -44,7 +46,7 @@ const CompanyInnSuggest = ({ value, onChange, onCompanySelect, placeholder = "В
   );
 
   return (
-    <DadataSuggest<DadataPartySuggestion>
+    <DadataPartySuggest
       value={value}
       onChange={onChange}
       onSelect={handleSelect}
@@ -71,5 +73,7 @@ const CompanyInnSuggest = ({ value, onChange, onCompanySelect, placeholder = "В
     />
   );
 };
+
+
 
 export default CompanyInnSuggest;

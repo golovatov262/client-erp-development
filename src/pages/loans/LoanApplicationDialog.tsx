@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,9 +10,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { LoanApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
-import DadataSuggest from "@/components/ui/dadata-suggest";
+import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
 import dadata, { DadataAddressSuggestion, DadataFmsUnitSuggestion, DadataPartySuggestion } from "@/lib/dadata";
+
+const DadataAddressSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataAddressSuggestion>>;
+const DadataPartySuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataPartySuggestion>>;
+const DadataFmsSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataFmsUnitSuggestion>>;
 import { LoanApplicationDocButtons } from "./LoanApplicationPrintForm";
 import LoanApplicationApproveDialog from "./LoanApplicationApproveDialog";
 
@@ -307,7 +311,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                   />
                 ))}
                 {field("Адрес регистрации *", (
-                  <DadataSuggest<DadataAddressSuggestion>
+                  <DadataAddressSuggest
                     value={form.registration_address || ""}
                     onChange={v => set("registration_address", v as never)}
                     onSelect={item => set("registration_address", item.unrestricted_value as never)}
@@ -386,7 +390,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
             {!isFl && (
               <TabsContent value="borrower" className="grid grid-cols-2 gap-3 mt-0 pb-2">
                 {field("Наименование организации / ФИО ИП *", (
-                  <DadataSuggest<DadataPartySuggestion>
+                  <DadataPartySuggest
                     value={form.full_name || ""}
                     onChange={v => set("full_name", v as never)}
                     onSelect={s => {
@@ -421,7 +425,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                   />
                 ))}
                 {field("Юридический / фактический адрес *", (
-                  <DadataSuggest<DadataAddressSuggestion>
+                  <DadataAddressSuggest
                     value={form.registration_address || ""}
                     onChange={v => set("registration_address", v as never)}
                     onSelect={item => set("registration_address", item.unrestricted_value as never)}
@@ -495,7 +499,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 {field("Официально подтверждённый доход *, ₽", num("official_income"))}
                 {field("Вид подтверждения дохода", txt("income_confirmation", "2-НДФЛ, выписка и т.д."))}
                 {field("ИНН работодателя *", (
-                  <DadataSuggest<DadataPartySuggestion>
+                  <DadataPartySuggest
                     value={form.employer_inn || ""}
                     onChange={v => set("employer_inn", v as never)}
                     onSelect={s => {
@@ -590,7 +594,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                     />
                   ))}
                   {field("Адрес залогового объекта", (
-                    <DadataSuggest<DadataAddressSuggestion>
+                    <DadataAddressSuggest
                       value={form.property_address || ""}
                       onChange={v => set("property_address", v as never)}
                       onSelect={item => set("property_address", item.unrestricted_value as never)}
@@ -603,7 +607,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                   ))}
                   {field("Кадастровый номер земли", txt("land_cadastral_number"))}
                   {field("Адрес земельного участка", (
-                    <DadataSuggest<DadataAddressSuggestion>
+                    <DadataAddressSuggest
                       value={form.land_address || ""}
                       onChange={v => set("land_address", v as never)}
                       onSelect={item => set("land_address", item.unrestricted_value as never)}

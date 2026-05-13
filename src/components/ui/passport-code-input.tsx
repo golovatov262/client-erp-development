@@ -1,7 +1,9 @@
-import { useCallback } from "react";
-import DadataSuggest from "@/components/ui/dadata-suggest";
+import React, { useCallback } from "react";
+import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import dadata, { DadataFmsUnitSuggestion } from "@/lib/dadata";
 import Icon from "@/components/ui/icon";
+
+const DadataFmsSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataFmsUnitSuggestion>>;
 
 interface PassportCodeInputProps {
   value: string;
@@ -34,7 +36,7 @@ const PassportCodeInput = ({ value, onChange, onIssuedByChange, placeholder = "0
   );
 
   return (
-    <DadataSuggest<DadataFmsUnitSuggestion>
+    <DadataFmsSuggest
       value={value}
       onChange={handleChange}
       onSelect={handleSelect}

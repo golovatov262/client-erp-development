@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,9 +10,13 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { SavingApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
-import DadataSuggest from "@/components/ui/dadata-suggest";
+import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
 import dadata, { DadataAddressSuggestion, DadataFmsUnitSuggestion, DadataPartySuggestion } from "@/lib/dadata";
+
+const DadataAddressSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataAddressSuggestion>>;
+const DadataPartySuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataPartySuggestion>>;
+const DadataFmsSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataFmsUnitSuggestion>>;
 import { SavingApplicationDocButtons } from "./SavingApplicationPrintForm";
 
 type Props = {
@@ -324,7 +328,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
                 ))}
                 {field("Дата выдачи", dateF("passport_issue_date"))}
                 {field("Кем выдан", (
-                  <DadataSuggest<DadataFmsUnitSuggestion>
+                  <DadataFmsSuggest
                     value={form.passport_issued_by || ""}
                     onChange={v => set("passport_issued_by", v as never)}
                     onSelect={s => {
@@ -346,7 +350,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
 
                 <div className="col-span-2 text-sm font-medium text-muted-foreground border-t pt-3">Адрес и контакты</div>
                 {field("Адрес регистрации", (
-                  <DadataSuggest<DadataAddressSuggestion>
+                  <DadataAddressSuggest
                     value={form.registration_address || ""}
                     onChange={v => set("registration_address", v as never)}
                     onSelect={item => set("registration_address", item.unrestricted_value as never)}
@@ -436,7 +440,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
             {!isFl && (
               <TabsContent value="depositor" className="grid grid-cols-2 gap-3 mt-0 pb-2">
                 {field("Наименование организации / ФИО ИП *", (
-                  <DadataSuggest<DadataPartySuggestion>
+                  <DadataPartySuggest
                     value={form.last_name || ""}
                     onChange={v => set("last_name", v as never)}
                     onSelect={s => {
@@ -469,7 +473,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
                   />
                 ))}
                 {field("Юридический / фактический адрес *", (
-                  <DadataSuggest<DadataAddressSuggestion>
+                  <DadataAddressSuggest
                     value={form.registration_address || ""}
                     onChange={v => set("registration_address", v as never)}
                     onSelect={item => set("registration_address", item.unrestricted_value as never)}
