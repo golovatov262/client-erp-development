@@ -201,9 +201,15 @@ const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
           <DialogHeader><DialogTitle>Выплата остатка клиенту</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="text-sm text-muted-foreground">
-              К выплате: <span className="font-semibold text-foreground">{detail ? fmt(detail.current_balance) : "—"}</span>
+              К выплате: <span className="font-semibold text-foreground">{detail ? fmt(detail.current_balance + (detail.accrued_interest || 0)) : "—"}</span>
             </div>
-            <div className="text-xs text-muted-foreground">После проведения баланс договора обнулится.</div>
+            {detail && detail.accrued_interest > 0 && (
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <div>Остаток: {fmt(detail.current_balance)}</div>
+                <div>Начисленные %: {fmt(detail.accrued_interest)}</div>
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground">После проведения баланс и начисленные проценты обнулятся.</div>
             <div><Label>Дата выплаты</Label><Input type="date" value={props.finalPayoutForm.payout_date} onChange={e => props.setFinalPayoutForm({ ...props.finalPayoutForm, payout_date: e.target.value })} /></div>
             <div><Label>Примечание (необязательно)</Label><Input value={props.finalPayoutForm.note} onChange={e => props.setFinalPayoutForm({ ...props.finalPayoutForm, note: e.target.value })} placeholder="Например: выдано наличными" /></div>
           </div>

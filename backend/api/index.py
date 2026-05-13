@@ -2275,31 +2275,33 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             return {'success': True, 'final_amount': float(fa), 'accrued_paid': float(accrued)}
 
         elif action == 'final_payout':
-            """Выплата остатка по уже закрытому/досрочно закрытому договору — обнуление баланса"""
+            """Выплата остатка по уже закрытому/досрочно закрытому договору — обнуление баланса и процентов"""
             sid = int(body['saving_id'])
             payout_date = body.get('payout_date', date.today().isoformat())
             note = body.get('note', '')
-            cur.execute("SELECT id, contract_no, current_balance, status FROM savings WHERE id=%s" % sid)
+            cur.execute("SELECT id, contract_no, current_balance, accrued_interest, status FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             if not sv:
                 return {'error': 'Договор не найден'}
-            sid, contract_no, balance, status = sv
+            sid, contract_no, balance, accrued, status = sv
             balance = Decimal(str(balance))
+            accrued = Decimal(str(accrued or 0))
+            total = balance + accrued
             if status not in ('closed', 'early_closed'):
                 return {'error': 'Выплата остатка доступна только для закрытых договоров'}
-            if balance <= 0:
+            if total <= 0:
                 return {'error': 'Баланс договора уже равен нулю'}
             desc = ('Выплата остатка при закрытии' + ('. ' + note if note else ''))
             cur.execute(
                 "INSERT INTO savings_transactions (saving_id, transaction_date, amount, transaction_type, description) VALUES (%s, '%s', %s, 'final_payout', '%s')" % (
-                    sid, payout_date, float(balance), desc.replace("'", "''")
+                    sid, payout_date, float(total), desc.replace("'", "''")
                 )
             )
-            cur.execute("UPDATE savings SET current_balance=0, updated_at=NOW() WHERE id=%s" % sid)
+            cur.execute("UPDATE savings SET current_balance=0, accrued_interest=0, updated_at=NOW() WHERE id=%s" % sid)
             audit_log(cur, staff, 'final_payout', 'saving', sid, contract_no,
-                'Выплата остатка %s руб. (%s)' % (float(balance), payout_date), ip)
+                'Выплата остатка %s руб. (баланс: %s + %% %s) (%s)' % (float(total), float(balance), float(accrued), payout_date), ip)
             conn.commit()
-            return {'success': True, 'amount': float(balance)}
+            return {'success': True, 'amount': float(total)}
 
 def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':

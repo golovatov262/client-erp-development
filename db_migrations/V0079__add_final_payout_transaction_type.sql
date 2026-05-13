@@ -1,0 +1,2 @@
+ALTER TABLE savings_transactions DROP CONSTRAINT IF EXISTS savings_transactions_transaction_type_check;
+ALTER TABLE savings_transactions ADD CONSTRAINT savings_transactions_transaction_type_check CHECK (transaction_type IN ('opening','deposit','withdrawal','partial_withdrawal','interest_payout','interest_accrual','term_change','rate_change','early_close','closing','final_payout','backfill','correction'));
