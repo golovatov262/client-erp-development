@@ -13,7 +13,7 @@ import { buildPaymentQRString } from "@/lib/payment-qr";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
-const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие" };
+const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие", final_payout: "Выплата остатка" };
 const monthNames = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 
 interface MonthGroup {
@@ -46,6 +46,7 @@ interface SavingsDetailDialogProps {
   onDeleteAccrual: (id: number) => void;
   onClearAccruals: () => void;
   onEdit: () => void;
+  onFinalPayout: () => void;
 }
 
 const SavingDepositQR = ({ detail, orgs }: { detail: SavingDetail; orgs?: Organization[] }) => {
@@ -184,6 +185,11 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
                 <Button size="sm" variant="destructive" onClick={props.onClose}><Icon name="XCircle" size={14} className="mr-1" />Закрытие договора</Button>
               </>)}
+              {(detail.status === "closed" || detail.status === "early_closed") && detail.current_balance > 0 && (
+                <Button size="sm" onClick={props.onFinalPayout}>
+                  <Icon name="Banknote" size={14} className="mr-1" />Выплатить остаток клиенту
+                </Button>
+              )}
             </div>
             {(isAdmin || isManager) && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
           </div>

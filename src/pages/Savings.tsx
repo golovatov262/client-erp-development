@@ -95,6 +95,7 @@ const Savings = () => {
         onDeleteAccrual={h.handleDeleteAccrual}
         onClearAccruals={h.handleClearAccruals}
         onEdit={h.openEditSaving}
+        onFinalPayout={() => h.setShowFinalPayout(true)}
       />
 
       <SavingsEditDialog
@@ -150,6 +151,11 @@ const Savings = () => {
         editTxForm={h.editTxForm}
         setEditTxForm={h.setEditTxForm}
         handleEditTx={h.handleEditTx}
+        showFinalPayout={h.showFinalPayout}
+        setShowFinalPayout={h.setShowFinalPayout}
+        finalPayoutForm={h.finalPayoutForm}
+        setFinalPayoutForm={h.setFinalPayoutForm}
+        handleFinalPayout={h.handleFinalPayout}
       />
     </div>
   );

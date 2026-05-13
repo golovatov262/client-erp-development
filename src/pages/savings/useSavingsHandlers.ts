@@ -38,6 +38,8 @@ export default function useSavingsHandlers() {
   const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10), mode: "add_missing" });
   const [showRateChange, setShowRateChange] = useState(false);
   const [rateChangeForm, setRateChangeForm] = useState({ new_rate: "", effective_date: new Date().toISOString().slice(0, 10), reason: "" });
+  const [showFinalPayout, setShowFinalPayout] = useState(false);
+  const [finalPayoutForm, setFinalPayoutForm] = useState({ payout_date: new Date().toISOString().slice(0, 10), note: "" });
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" });
   const [showEdit, setShowEdit] = useState(false);
@@ -361,6 +363,25 @@ export default function useSavingsHandlers() {
     }
   };
 
+  const handleFinalPayout = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.finalPayout({
+        saving_id: detail.id,
+        payout_date: finalPayoutForm.payout_date,
+        note: finalPayoutForm.note,
+      });
+      toast({ title: "Выплата проведена", description: fmt(res.amount) });
+      setShowFinalPayout(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteContract = async () => {
     if (!detail || !confirm(`Удалить договор сбережений ${detail.contract_no}? Все связанные данные будут удалены.`)) return;
     try {
@@ -405,5 +426,6 @@ export default function useSavingsHandlers() {
     handleDeleteContract, openEditSaving,
     showEdit, setShowEdit, editForm, setEditForm, handleEditSaving,
     exporting, handleExportSavings, handleRecalcAll,
+    showFinalPayout, setShowFinalPayout, finalPayoutForm, setFinalPayoutForm, handleFinalPayout,
   };
 }

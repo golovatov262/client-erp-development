@@ -58,6 +58,12 @@ interface SavingsActionDialogsProps {
   editTxForm: { transaction_id: number; amount: string; transaction_date: string; description: string };
   setEditTxForm: (v: { transaction_id: number; amount: string; transaction_date: string; description: string }) => void;
   handleEditTx: () => void;
+
+  showFinalPayout: boolean;
+  setShowFinalPayout: (v: boolean) => void;
+  finalPayoutForm: { payout_date: string; note: string };
+  setFinalPayoutForm: (v: { payout_date: string; note: string }) => void;
+  handleFinalPayout: () => void;
 }
 
 const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
@@ -187,6 +193,21 @@ const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
             <div><Label>Примечание</Label><Input value={props.editTxForm.description} onChange={e => props.setEditTxForm({ ...props.editTxForm, description: e.target.value })} /></div>
           </div>
           <DialogFooter><Button onClick={props.handleEditTx} disabled={saving}>Сохранить</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={props.showFinalPayout} onOpenChange={props.setShowFinalPayout}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Выплата остатка клиенту</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              К выплате: <span className="font-semibold text-foreground">{detail ? fmt(detail.current_balance) : "—"}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">После проведения баланс договора обнулится.</div>
+            <div><Label>Дата выплаты</Label><Input type="date" value={props.finalPayoutForm.payout_date} onChange={e => props.setFinalPayoutForm({ ...props.finalPayoutForm, payout_date: e.target.value })} /></div>
+            <div><Label>Примечание (необязательно)</Label><Input value={props.finalPayoutForm.note} onChange={e => props.setFinalPayoutForm({ ...props.finalPayoutForm, note: e.target.value })} placeholder="Например: выдано наличными" /></div>
+          </div>
+          <DialogFooter><Button onClick={props.handleFinalPayout} disabled={saving}>Провести выплату</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
