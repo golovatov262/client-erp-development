@@ -7827,11 +7827,13 @@ def handle_loan_applications(method, params, body, cur, conn, staff=None, ip='')
             rate = float(str(body.get('rate', '0')).replace(',', '.'))
             start_date = body.get('start_date', date.today().isoformat())
             schedule_type = body.get('schedule_type', 'annuity')
-            cur.execute("SELECT member_id, amount, term_months, full_name, mobile_phone, inn, registration_address, org_id FROM loan_applications WHERE id=%s" % app_id)
+            cur.execute("SELECT member_id, amount, term_months, full_name, mobile_phone, inn, registration_address, org_id, status, created_loan_id FROM loan_applications WHERE id=%s" % app_id)
             app = cur.fetchone()
             if not app:
                 return {'error': 'Заявка не найдена'}
-            mid, amt, term, fio, phone, inn_v, addr, org_id = app
+            mid, amt, term, fio, phone, inn_v, addr, org_id, app_status, created_loan_id = app
+            if app_status == 'approved' and created_loan_id:
+                return {'error': 'Заявка уже одобрена и договор займа создан (#%s)' % created_loan_id}
             if not mid:
                 if not fio:
                     return {'error': 'Для одобрения укажите ФИО заявителя либо привяжите пайщика'}
