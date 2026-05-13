@@ -773,6 +773,30 @@ def calc_daily_interest(balance, annual_rate, days):
     return (Decimal(str(balance)) * daily_rate * Decimal(str(days))).quantize(Decimal('0.01'))
 
 
+def refresh_loan_overdue_status(cur, lid):
+    """Пересчитывает статус займа: снимает overdue если все просроченные платежи погашены."""
+    cur.execute("SELECT status FROM loans WHERE id=%s" % lid)
+    row = cur.fetchone()
+    if not row or row[0] == 'closed':
+        return
+    cur.execute("""
+        SELECT COUNT(*) FROM loan_schedule
+        WHERE loan_id=%s AND status IN ('pending', 'overdue', 'partial')
+          AND payment_date < CURRENT_DATE
+    """ % lid)
+    has_overdue = cur.fetchone()[0] > 0
+    if has_overdue:
+        cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
+        cur.execute("""
+            UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
+            WHERE loan_id=%s AND status IN ('pending', 'partial') AND payment_date < CURRENT_DATE
+        """ % lid)
+    else:
+        cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
+        cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)
+        cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
+
+
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     """Разнесение платежа по займу.
     При досрочном погашении (сумма > текущего периода) проценты считаются
@@ -1058,6 +1082,7 @@ def load_statement_from_1c(cur, conn, section, connection_id):
             if m_entity == 'loan':
                 pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
                 if pay_id:
+                    refresh_loan_overdue_status(cur, m_entity_id)
                     cur.execute("UPDATE bank_transactions SET match_status='applied', payment_id=%s WHERE id=%s" % (pay_id, txn_id))
                     matched += 1
                 else:
