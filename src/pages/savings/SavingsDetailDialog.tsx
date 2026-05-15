@@ -10,6 +10,7 @@ import DataTable, { Column } from "@/components/ui/data-table";
 import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem, Organization } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
+import { SavingContractDocButtons } from "./SavingContractPrintForm";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -199,6 +200,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           <TabsList>
             <TabsTrigger value="transactions">Операции</TabsTrigger>
             <TabsTrigger value="schedule">График</TabsTrigger>
+            <TabsTrigger value="documents">Документы</TabsTrigger>
           </TabsList>
 
           <TabsContent value="transactions">
@@ -286,6 +288,23 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
 
           <TabsContent value="schedule">
             <DataTable columns={schCols} data={detail.schedule || []} />
+          </TabsContent>
+
+          <TabsContent value="documents">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon name="FileText" size={18} />
+                  Договор сбережений № {detail.contract_no}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-sm text-muted-foreground">
+                  Печатная форма договора с автоматически подставленными реквизитами организации и пайщика. Скачайте в формате DOCX или отправьте на печать.
+                </div>
+                <SavingContractDocButtons detail={detail} orgs={props.orgs} />
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </DialogContent>
