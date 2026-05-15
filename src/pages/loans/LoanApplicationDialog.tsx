@@ -282,7 +282,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 ))}
                 {field("Дата выдачи паспорта *", dateF("passport_issue_date"))}
                 {field("Кем выдан *", (
-                  <DadataSuggest<DadataFmsUnitSuggestion>
+                  <DadataFmsSuggest
                     value={form.passport_issued_by || ""}
                     onChange={v => set("passport_issued_by", v as never)}
                     onSelect={item => {
