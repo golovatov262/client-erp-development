@@ -139,9 +139,19 @@ function buildBody(detail: SavingDetail, member: MemberDetail | null, org: Organ
   const minPct = detail.min_balance_pct ?? 0;
 
   return `
+<style>
+  @page { size: 210mm 297mm; margin: 10mm 12mm 10mm 15mm; }
+  body, p, td, table { font-size: 10pt; line-height: 1.1; }
+  p { margin: 2pt 0; }
+  .center { text-align: center; }
+  .bold { font-weight: bold; }
+  .justify { text-align: justify; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 2pt 3pt; vertical-align: top; }
+  br { line-height: 1.1; }
+</style>
 <p class="center bold">Договор сбережений № ${contractNo}</p>
-<br/>
-<table style="margin-bottom:8pt"><tr>
+<table style="margin-bottom:4pt"><tr>
   <td style="width:50%">г. ${cityFromAddr}</td>
   <td style="text-align:right">${startDate}</td>
 </tr></table>
@@ -198,7 +208,7 @@ function buildBody(detail: SavingDetail, member: MemberDetail | null, org: Organ
 <p class="justify">5.4. Подписывая настоящий договор я, ${memberFio}, в соответствии с Федеральным законом от 27 июля 2006 г. № 152-ФЗ «О персональных данных» даю тем самым свое бессрочное (до даты отзыва его мною путем подачи в ${orgName} соответствующего заявления в произвольной форме) согласие на обработку, использование и передачу моих персональных данных (любой информации, относящейся ко мне, в том числе фамилии, имени, отчества, года, месяца, даты и места рождения, адреса, семейного, социального, имущественного положения, образования, профессии, доходов), содержащихся в настоящем договоре, а также в представленных мною документах.</p>
 <p class="justify">Я, ${memberFio}, также согласен(на) с получением и проверкой ${orgName} любых данных обо мне в связи с исполнением настоящего договора.</p>
 
-<p class="bold center" style="margin-top:12pt">Адреса, банковские реквизиты, подписи сторон</p>
+<p class="bold center" style="margin-top:4pt">Адреса, банковские реквизиты, подписи сторон</p>
 <table style="border:1px solid #000">
   <tr>
     <td style="width:50%;border-right:1px solid #000;border-bottom:1px solid #000;vertical-align:top">
@@ -226,13 +236,13 @@ function buildBody(detail: SavingDetail, member: MemberDetail | null, org: Organ
     </td>
   </tr>
   <tr>
-    <td style="padding-top:24pt;vertical-align:bottom">
-      ${directorPos}:<br/><br/>
+    <td style="padding-top:18pt;vertical-align:bottom">
+      ${directorPos}:<br/>
       ____________________ ${directorFioShort}<br/>
       МП
     </td>
-    <td style="padding-top:24pt;vertical-align:bottom">
-      <br/><br/>
+    <td style="padding-top:18pt;vertical-align:bottom">
+      <br/>
       ____________________ ${memberFioShort}
     </td>
   </tr>
