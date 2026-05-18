@@ -168,27 +168,6 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
     setShowAdd(true);
   };
 
-  const handlePassportAutoCheck = async () => {
-    if (!confirm("Запустить автоматическую проверку паспорта через СМЭВ3?\n\nБудут использованы паспортные данные из карточки пайщика.")) return;
-    setPassportChecking(true);
-    try {
-      const result = await api.memberChecks.passportAutoCheck(memberId);
-      if (result.error) {
-        toast({ title: "Ошибка проверки", description: result.error, variant: "destructive" });
-      } else if (result.status === "pending") {
-        toast({ title: "Запрос отправлен", description: result.message || "Ожидается ответ от СМЭВ3. Обновите через минуту." });
-      } else {
-        const statusLabel = result.status === "ok" ? "Пройдена" : result.status === "fail" ? "Не пройдена" : "Внимание";
-        toast({ title: `Проверка: ${statusLabel}`, description: result.comment });
-      }
-      loadChecks();
-    } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
-    } finally {
-      setPassportChecking(false);
-    }
-  };
-
   const handlePollPending = async (check: MemberCheck) => {
     const reqId = check.result?.request_id || check.result?.requestId;
     if (!reqId) {
@@ -222,23 +201,6 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       <CreditCheckPanel buildInput={buildCreditCheckInput} />
 
       <div className="border-t pt-4" />
-
-      <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-        <Icon name="Zap" size={18} className="text-blue-600 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-blue-900 dark:text-blue-100">Автоматическая проверка паспорта</div>
-          <div className="text-xs text-blue-700 dark:text-blue-300">Проверка через СМЭВ3 (Kvell). Использует паспортные данные из карточки пайщика.</div>
-        </div>
-        <Button
-          size="sm"
-          onClick={handlePassportAutoCheck}
-          disabled={passportChecking}
-          className="gap-1.5 shrink-0 bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          {passportChecking ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Search" size={14} />}
-          {passportChecking ? "Проверка..." : "Проверить"}
-        </Button>
-      </div>
 
       {checks.length === 0 && !showAdd && (
         <div className="text-center py-6 text-muted-foreground">

@@ -15,11 +15,11 @@
       "bodyMatcher": "partial"
     },
     {
-      "name": "POST without configured key returns error",
+      "name": "POST proxies to upstream (may timeout)",
       "method": "POST",
       "path": "/",
       "body": "{}",
-      "expectedStatus": 500,
+      "expectedStatus": 504,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
     }

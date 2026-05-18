@@ -35,14 +35,14 @@ def call_upstream(method: str, path: str, body: dict | None = None):
         headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=25) as resp:
             status = resp.getcode()
             raw = resp.read().decode('utf-8', errors='replace')
     except urllib.error.HTTPError as e:
         status = e.code
         raw = e.read().decode('utf-8', errors='replace') if e.fp else str(e)
-    except urllib.error.URLError as e:
-        return cors_json({'error': 'Upstream unreachable', 'detail': str(e)}, 502)
+    except (urllib.error.URLError, TimeoutError) as e:
+        return cors_json({'error': 'Upstream timeout or unreachable', 'detail': str(e)}, 504)
     try:
         payload = json.loads(raw) if raw else {}
     except json.JSONDecodeError:
