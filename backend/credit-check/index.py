@@ -147,22 +147,32 @@ def handler(event: dict, context) -> dict:
         with db_connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("SELECT * FROM credit_checks WHERE idempotency_key = %s", (idem_key,))
             existing = cur.fetchone()
-            if existing:
+
+            if existing and (existing['status'] in ('done', 'completed') or existing.get('upstream_check_id')):
                 return cors_json(row_to_dict(existing), 200)
 
-            cur.execute(
-                "INSERT INTO credit_checks (member_id, status, request_payload, idempotency_key, callback_url) "
-                "VALUES (%s, 'pending', %s, %s, %s) RETURNING id, created_at",
-                (
-                    member_id_int,
-                    json.dumps(upstream_body, ensure_ascii=False),
-                    idem_key,
-                    callback_url,
-                ),
-            )
-            row = cur.fetchone()
-            local_id = row['id']
-            created_at = row['created_at']
+            if existing:
+                local_id = existing['id']
+                created_at = existing['created_at']
+                cur.execute(
+                    "UPDATE credit_checks SET status = 'pending', error_text = NULL, response_payload = NULL, "
+                    "request_payload = %s, callback_url = COALESCE(%s, callback_url), updated_at = NOW() WHERE id = %s",
+                    (json.dumps(upstream_body, ensure_ascii=False), callback_url, local_id),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO credit_checks (member_id, status, request_payload, idempotency_key, callback_url) "
+                    "VALUES (%s, 'pending', %s, %s, %s) RETURNING id, created_at",
+                    (
+                        member_id_int,
+                        json.dumps(upstream_body, ensure_ascii=False),
+                        idem_key,
+                        callback_url,
+                    ),
+                )
+                row = cur.fetchone()
+                local_id = row['id']
+                created_at = row['created_at']
 
         status, payload = call_upstream(
             'POST',
