@@ -1,6 +1,6 @@
 import json
 import os
-import threading
+import hashlib
 import urllib.request
 import urllib.error
 import psycopg2
@@ -14,7 +14,7 @@ CORS_HEADERS = {
 }
 
 API_BASE = 'https://api.loanapp.ru'
-UPSTREAM_TIMEOUT = 25
+UPSTREAM_TIMEOUT = 10
 FINAL_STATUSES = {'done', 'error', 'failed', 'completed'}
 
 
@@ -31,10 +31,12 @@ def db_connect():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
 
-def call_upstream(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+def call_upstream(method: str, path: str, body: dict | None = None, extra_headers: dict | None = None) -> tuple[int, dict]:
     url = f'{API_BASE}{path}'
     api_key = os.environ.get('CREDIT_CHECK_API_KEY', '')
     headers = {'X-API-Key': api_key, 'Accept': 'application/json'}
+    if extra_headers:
+        headers.update(extra_headers)
     data = None
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode('utf-8')
@@ -56,60 +58,11 @@ def call_upstream(method: str, path: str, body: dict | None = None) -> tuple[int
     return status, payload
 
 
-def derive_status(upstream_status: int, payload: dict) -> str:
-    if upstream_status >= 500 or upstream_status == 504:
-        return 'pending'
-    if upstream_status >= 400:
-        return 'error'
+def derive_status(payload: dict) -> str:
     raw = (payload or {}).get('status') or ''
     if raw in FINAL_STATUSES:
         return raw
     return 'pending'
-
-
-def bg_create_upstream(local_id: int, body: dict):
-    try:
-        status, payload = call_upstream('POST', '/api/v1/checks', body)
-        upstream_id = (payload or {}).get('check_id') or (payload or {}).get('id')
-        new_status = derive_status(status, payload)
-        with db_connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE credit_checks SET upstream_check_id = %s, status = %s, response_payload = %s, error_text = %s, updated_at = NOW() WHERE id = %s",
-                (
-                    str(upstream_id) if upstream_id else None,
-                    new_status,
-                    json.dumps(payload, ensure_ascii=False),
-                    None if status < 400 else json.dumps(payload, ensure_ascii=False),
-                    local_id,
-                ),
-            )
-    except Exception as e:
-        try:
-            with db_connect() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE credit_checks SET status = 'error', error_text = %s, updated_at = NOW() WHERE id = %s",
-                    (str(e), local_id),
-                )
-        except Exception:
-            pass
-
-
-def bg_refresh_upstream(local_id: int, upstream_id: str):
-    try:
-        status, payload = call_upstream('GET', f'/api/v1/checks/{upstream_id}')
-        new_status = derive_status(status, payload)
-        with db_connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE credit_checks SET status = %s, response_payload = %s, error_text = %s, updated_at = NOW() WHERE id = %s",
-                (
-                    new_status,
-                    json.dumps(payload, ensure_ascii=False),
-                    None if status < 400 else json.dumps(payload, ensure_ascii=False),
-                    local_id,
-                ),
-            )
-    except Exception:
-        pass
 
 
 def row_to_dict(row: dict) -> dict:
@@ -132,11 +85,35 @@ def row_to_dict(row: dict) -> dict:
     }
 
 
-def handler(event: dict, context) -> dict:
-    """Асинхронный прокси к Credit Check API.
+def build_idempotency_key(body: dict) -> str:
+    series = str(body.get('passport_series') or '').strip()
+    number = str(body.get('passport_number') or '').strip()
+    consent = str(body.get('consent_date') or '').strip()
+    if series and number and consent:
+        return f'{series}{number}-{consent}'
+    payload = json.dumps(body, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()[:48]
 
-    POST /            — создаёт локальную запись, в фоне дёргает upstream, сразу возвращает id (pending).
-    GET ?check_id=ID  — отдаёт текущее состояние из БД. Если статус pending — на фоне обновляет данные с upstream.
+
+def fetch_and_persist(local_id: int, upstream_id: str) -> dict:
+    """Запрашивает свежий статус у upstream и сохраняет в БД."""
+    status, payload = call_upstream('GET', f'/api/v1/checks/{upstream_id}')
+    new_status = derive_status(payload) if status < 400 else 'pending'
+    err_text = None if status < 400 else json.dumps(payload, ensure_ascii=False)
+    with db_connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "UPDATE credit_checks SET status = %s, response_payload = %s, error_text = %s, updated_at = NOW() WHERE id = %s RETURNING *",
+            (new_status, json.dumps(payload, ensure_ascii=False), err_text, local_id),
+        )
+        return cur.fetchone()
+
+
+def handler(event: dict, context) -> dict:
+    """Прокси к api.loanapp.ru (асинхронный режим).
+
+    POST /            — создаёт проверку (Idempotency-Key), сохраняет в БД, возвращает локальный id.
+    GET ?check_id=ID  — отдаёт состояние; если pending — синхронно опрашивает upstream (короткий таймаут).
+    GET ?passport=... — восстановление check_id по паспорту через upstream.
     """
     method = event.get('httpMethod', 'GET')
     if method == 'OPTIONS':
@@ -162,29 +139,83 @@ def handler(event: dict, context) -> dict:
         except (TypeError, ValueError):
             member_id_int = None
 
-        upstream_body = {k: v for k, v in body.items() if k != 'member_id'}
+        callback_url = body.get('callback_url')
+        upstream_body = {k: v for k, v in body.items() if k not in ('member_id',)}
+
+        idem_key = build_idempotency_key(upstream_body)
+
+        with db_connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM credit_checks WHERE idempotency_key = %s", (idem_key,))
+            existing = cur.fetchone()
+            if existing:
+                return cors_json(row_to_dict(existing), 200)
+
+            cur.execute(
+                "INSERT INTO credit_checks (member_id, status, request_payload, idempotency_key, callback_url) "
+                "VALUES (%s, 'pending', %s, %s, %s) RETURNING id, created_at",
+                (
+                    member_id_int,
+                    json.dumps(upstream_body, ensure_ascii=False),
+                    idem_key,
+                    callback_url,
+                ),
+            )
+            row = cur.fetchone()
+            local_id = row['id']
+            created_at = row['created_at']
+
+        status, payload = call_upstream(
+            'POST',
+            '/api/v1/checks',
+            upstream_body,
+            extra_headers={'Idempotency-Key': idem_key},
+        )
+
+        if status >= 400:
+            with db_connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE credit_checks SET status = 'error', error_text = %s, response_payload = %s, updated_at = NOW() WHERE id = %s",
+                    (json.dumps(payload, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), local_id),
+                )
+            return cors_json({
+                'check_id': str(local_id),
+                'id': local_id,
+                'status': 'error',
+                'error': payload,
+            }, 200)
+
+        upstream_id = (payload or {}).get('check_id') or (payload or {}).get('id')
+        new_status = derive_status(payload)
 
         with db_connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO credit_checks (member_id, status, request_payload) VALUES (%s, 'pending', %s) RETURNING id, created_at",
-                (member_id_int, json.dumps(upstream_body, ensure_ascii=False)),
+                "UPDATE credit_checks SET upstream_check_id = %s, status = %s, response_payload = %s, updated_at = NOW() WHERE id = %s",
+                (
+                    str(upstream_id) if upstream_id else None,
+                    new_status,
+                    json.dumps(payload, ensure_ascii=False),
+                    local_id,
+                ),
             )
-            row = cur.fetchone()
-            local_id = row[0]
-            created_at = row[1]
-
-        t = threading.Thread(target=bg_create_upstream, args=(local_id, upstream_body), daemon=True)
-        t.start()
 
         return cors_json({
             'check_id': str(local_id),
             'id': local_id,
-            'status': 'pending',
+            'upstream_check_id': str(upstream_id) if upstream_id else None,
+            'status': new_status,
             'created_at': created_at.isoformat() if created_at else None,
         }, 202)
 
     if method == 'GET':
         check_id = (params.get('check_id') or '').strip()
+        passport = (params.get('passport') or '').strip()
+
+        if passport:
+            status, payload = call_upstream('GET', f'/api/v1/checks?passport={passport}&limit=1')
+            if status >= 400:
+                return cors_json({'error': 'Upstream error', 'detail': payload}, status)
+            return cors_json(payload, 200)
+
         if not check_id:
             return cors_json({'error': 'check_id query parameter is required'}, 400)
         try:
@@ -200,12 +231,12 @@ def handler(event: dict, context) -> dict:
             return cors_json({'error': 'Check not found'}, 404)
 
         if row['status'] == 'pending' and row.get('upstream_check_id'):
-            t = threading.Thread(
-                target=bg_refresh_upstream,
-                args=(local_id, row['upstream_check_id']),
-                daemon=True,
-            )
-            t.start()
+            try:
+                updated = fetch_and_persist(local_id, row['upstream_check_id'])
+                if updated:
+                    row = updated
+            except Exception:
+                pass
 
         return cors_json(row_to_dict(row))
 
