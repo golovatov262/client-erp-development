@@ -22,6 +22,7 @@ export type CreditCheckInput = {
   gender?: string | null;
   phone?: string | null;
   reg_addr_full?: string | null;
+  member_id?: number | null;
 };
 
 type CheckStatus = {
@@ -32,8 +33,26 @@ type CheckStatus = {
   reject_reasons?: string[] | null;
   results?: Record<string, unknown> | null;
   errors?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  error?: string | null;
   created_at?: string | null;
   completed_at?: string | null;
+  updated_at?: string | null;
+  upstream_check_id?: string | null;
+};
+
+const normalizeStatus = (data: CheckStatus): CheckStatus => {
+  const inner = (data.result || {}) as Record<string, unknown>;
+  return {
+    ...data,
+    status: data.status || (inner.status as string) || "pending",
+    score: (data.score ?? (inner.score as number)) ?? null,
+    decision: (data.decision ?? (inner.decision as string)) ?? null,
+    reject_reasons: (data.reject_reasons ?? (inner.reject_reasons as string[])) ?? null,
+    results: (data.results ?? (inner.results as Record<string, unknown>)) ?? null,
+    errors: (data.errors ?? (inner.errors as Record<string, unknown>)) ?? null,
+    completed_at: (data.completed_at ?? (inner.completed_at as string)) ?? null,
+  };
 };
 
 const SOURCES: { key: string; label: string; icon: string }[] = [
@@ -135,11 +154,13 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
         const text = await resp.text();
         throw new Error(`${resp.status}: ${text}`);
       }
-      const data: CheckStatus = await resp.json();
+      const raw: CheckStatus = await resp.json();
+      const data = normalizeStatus(raw);
       setCheck(data);
-      if (data.status === "done" || data.status === "error") {
+      if (data.status === "done" || data.status === "completed" || data.status === "error" || data.status === "failed") {
         stopPolling();
-        toast({ title: data.status === "done" ? "Проверка завершена" : "Ошибка проверки", variant: data.status === "error" ? "destructive" : "default" });
+        const isError = data.status === "error" || data.status === "failed";
+        toast({ title: isError ? "Ошибка проверки" : "Проверка завершена", variant: isError ? "destructive" : "default" });
         return;
       }
       pollTimer.current = window.setTimeout(() => pollResult(checkId, attempt + 1), 5000);
@@ -174,7 +195,8 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
         const text = await resp.text();
         throw new Error(`${resp.status}: ${text}`);
       }
-      const data: CheckStatus = await resp.json();
+      const raw: CheckStatus = await resp.json();
+      const data = normalizeStatus(raw);
       setCheck(data);
       toast({ title: "Проверка запущена", description: `ID: ${data.check_id}` });
       setPolling(true);
@@ -192,8 +214,8 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
     try {
       const resp = await fetch(`${CREDIT_CHECK_URL}?check_id=${encodeURIComponent(check.check_id)}`);
       if (!resp.ok) throw new Error(await resp.text());
-      const data: CheckStatus = await resp.json();
-      setCheck(data);
+      const raw: CheckStatus = await resp.json();
+      setCheck(normalizeStatus(raw));
     } catch (e) {
       toast({ title: "Ошибка обновления", description: String(e), variant: "destructive" });
     } finally {

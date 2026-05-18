@@ -15,12 +15,20 @@
       "bodyMatcher": "partial"
     },
     {
-      "name": "POST proxies to upstream (may timeout)",
+      "name": "GET with non-existent id returns 404",
+      "method": "GET",
+      "path": "/?check_id=999999999",
+      "expectedStatus": 404,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST creates pending check and returns 202",
       "method": "POST",
       "path": "/",
       "body": "{}",
-      "expectedStatus": 504,
-      "expectedBody": {"error": "string"},
+      "expectedStatus": 202,
+      "expectedBody": {"check_id": "string", "status": "pending"},
       "bodyMatcher": "partial"
     }
   ]

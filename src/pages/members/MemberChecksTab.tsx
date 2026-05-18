@@ -119,6 +119,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       inn: member.inn ? String(member.inn).replace(/\D/g, "") : null,
       phone: member.phone ? String(member.phone).replace(/\D/g, "") : null,
       reg_addr_full: member.registration_address || null,
+      member_id: memberId,
     };
   };
 
