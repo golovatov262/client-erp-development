@@ -19,6 +19,7 @@ const DadataPartySuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataPa
 const DadataFmsSuggest = DadataSuggest as React.FC<DadataSuggestProps<DadataFmsUnitSuggestion>>;
 import { LoanApplicationDocButtons } from "./LoanApplicationPrintForm";
 import LoanApplicationApproveDialog from "./LoanApplicationApproveDialog";
+import CreditCheckPanel, { CreditCheckInput } from "@/components/credit-check/CreditCheckPanel";
 
 type Props = {
   open: boolean;
@@ -148,6 +149,32 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
 
   const curatorName = users.find(u => u.id === form.curator_user_id)?.name || "—";
 
+  const buildCreditCheckInput = (): CreditCheckInput | { error: string } => {
+    const fio = (form.full_name || "").trim().split(/\s+/);
+    const last_name = fio[0] || "";
+    const first_name = fio[1] || "";
+    const middle_name = fio.slice(2).join(" ") || null;
+    const passport = String(form.passport_series_number || "").replace(/\D/g, "");
+    const passport_series = passport.slice(0, 4);
+    const passport_number = passport.slice(4, 10);
+    if (!last_name || !first_name) return { error: "Заполните ФИО заёмщика" };
+    if (!form.birth_date) return { error: "Укажите дату рождения" };
+    if (passport_series.length !== 4 || passport_number.length !== 6) return { error: "Заполните серию и номер паспорта" };
+    return {
+      last_name,
+      first_name,
+      middle_name,
+      birth_date: String(form.birth_date),
+      passport_series,
+      passport_number,
+      passport_issue_date: form.passport_issue_date ? String(form.passport_issue_date) : null,
+      passport_issuer_code: form.passport_division_code ? String(form.passport_division_code).replace(/\D/g, "") : null,
+      inn: form.inn ? String(form.inn).replace(/\D/g, "") : null,
+      phone: form.mobile_phone ? String(form.mobile_phone).replace(/\D/g, "") : null,
+      reg_addr_full: form.registration_address || null,
+    };
+  };
+
   const handleReject = async () => {
     const reason = prompt("Причина отклонения:");
     if (reason === null) return;
@@ -235,6 +262,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
             {isFl && <TabsTrigger value="income" className="text-xs">Доходы и расходы</TabsTrigger>}
             {isFl && <TabsTrigger value="family" className="text-xs">Семья</TabsTrigger>}
             <TabsTrigger value="collateral" className="text-xs">Обеспечение</TabsTrigger>
+            {isFl && <TabsTrigger value="checks" className="text-xs">Проверки</TabsTrigger>}
             <TabsTrigger value="service" className="text-xs">Служебное</TabsTrigger>
           </TabsList>
 
@@ -634,6 +662,13 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
                 {field("Описание обеспечения", area("other_collateral_description"))}
               </div>
             </TabsContent>
+
+            {/* ── Проверки ── */}
+            {isFl && (
+              <TabsContent value="checks" className="mt-0 pb-2">
+                <CreditCheckPanel buildInput={buildCreditCheckInput} />
+              </TabsContent>
+            )}
 
             {/* ── Служебное ── */}
             <TabsContent value="service" className="grid grid-cols-2 gap-3 mt-0 pb-2">

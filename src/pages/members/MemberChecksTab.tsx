@@ -6,8 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import Icon from "@/components/ui/icon";
-import api, { MemberCheck } from "@/lib/api";
+import api, { MemberCheck, MemberDetail } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import CreditCheckPanel, { CreditCheckInput } from "@/components/credit-check/CreditCheckPanel";
 
 const CHECK_TYPES: Record<string, { label: string; icon: string }> = {
   passport: { label: "Паспорт", icon: "CreditCard" },
@@ -85,6 +86,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
   const [passportChecking, setPassportChecking] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState({ check_type: "", status: "pending", comment: "" });
+  const [member, setMember] = useState<MemberDetail | null>(null);
   const { toast } = useToast();
 
   const loadChecks = () => {
@@ -93,6 +95,32 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
   };
 
   useEffect(() => { loadChecks(); }, [memberId]);
+
+  useEffect(() => {
+    api.members.get(memberId).then(setMember).catch(() => setMember(null));
+  }, [memberId]);
+
+  const buildCreditCheckInput = (): CreditCheckInput | { error: string } => {
+    if (!member) return { error: "Данные пайщика ещё не загружены" };
+    if (!member.last_name || !member.first_name) return { error: "В карточке пайщика не заполнены ФИО" };
+    if (!member.birth_date) return { error: "В карточке пайщика не указана дата рождения" };
+    const series = String(member.passport_series || "").replace(/\D/g, "");
+    const number = String(member.passport_number || "").replace(/\D/g, "");
+    if (series.length !== 4 || number.length !== 6) return { error: "В карточке пайщика не заполнены серия и номер паспорта" };
+    return {
+      last_name: member.last_name,
+      first_name: member.first_name,
+      middle_name: member.middle_name || null,
+      birth_date: member.birth_date,
+      passport_series: series,
+      passport_number: number,
+      passport_issue_date: member.passport_issue_date || null,
+      passport_issuer_code: member.passport_dept_code ? String(member.passport_dept_code).replace(/\D/g, "") : null,
+      inn: member.inn ? String(member.inn).replace(/\D/g, "") : null,
+      phone: member.phone ? String(member.phone).replace(/\D/g, "") : null,
+      reg_addr_full: member.registration_address || null,
+    };
+  };
 
   const resetForm = () => {
     setForm({ check_type: "", status: "pending", comment: "" });
@@ -191,6 +219,10 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
 
   return (
     <div className="space-y-4">
+      <CreditCheckPanel buildInput={buildCreditCheckInput} />
+
+      <div className="border-t pt-4" />
+
       <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
         <Icon name="Zap" size={18} className="text-blue-600 shrink-0" />
         <div className="flex-1 min-w-0">
