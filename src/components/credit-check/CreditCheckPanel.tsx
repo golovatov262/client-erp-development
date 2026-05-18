@@ -4,9 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
+import funcUrls from "../../../backend/func2url.json";
 
-const API_BASE = "https://api.loanapp.ru";
-const API_KEY = "kpk_expert_4fff11571edcb1717f53fadc143ca4f2";
+const CREDIT_CHECK_URL = (funcUrls as Record<string, string>)["credit-check"];
 
 export type CreditCheckInput = {
   last_name: string;
@@ -130,9 +130,7 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
       return;
     }
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/checks/${checkId}`, {
-        headers: { "X-API-Key": API_KEY },
-      });
+      const resp = await fetch(`${CREDIT_CHECK_URL}?check_id=${encodeURIComponent(checkId)}`);
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(`${resp.status}: ${text}`);
@@ -167,12 +165,9 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
         ...input,
         consent_date: today,
       };
-      const resp = await fetch(`${API_BASE}/api/v1/checks`, {
+      const resp = await fetch(CREDIT_CHECK_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": API_KEY,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
@@ -195,9 +190,7 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
     if (!check?.check_id) return;
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/checks/${check.check_id}`, {
-        headers: { "X-API-Key": API_KEY },
-      });
+      const resp = await fetch(`${CREDIT_CHECK_URL}?check_id=${encodeURIComponent(check.check_id)}`);
       if (!resp.ok) throw new Error(await resp.text());
       const data: CheckStatus = await resp.json();
       setCheck(data);
