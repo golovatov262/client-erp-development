@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import funcUrls from "../../../backend/func2url.json";
+import { fmtLabel, fmtValue, isTechField } from "./formatters";
 
 const CREDIT_CHECK_URL = (funcUrls as Record<string, string>)["credit-check"];
 
@@ -96,23 +97,76 @@ const sourceStatus = (raw: unknown): { label: string; color: string } => {
   return { label: "Получено", color: "text-blue-600" };
 };
 
+const renderKV = (obj: Record<string, unknown>) => {
+  const entries = Object.entries(obj).filter(([k]) => !isTechField(k));
+  if (entries.length === 0) return <div className="text-xs text-muted-foreground">Нет данных</div>;
+  return (
+    <div className="space-y-1 text-xs">
+      {entries.map(([k, v]) => (
+        <div key={k} className="flex gap-2 items-start">
+          <span className="text-muted-foreground min-w-[160px]">{fmtLabel(k)}:</span>
+          <span className="break-words flex-1">{fmtValue(k, v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const renderRecord = (rec: Record<string, unknown>, idx: number, total: number) => (
+  <div key={idx} className="border rounded-md p-2.5 bg-muted/30">
+    {total > 1 && <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">Запись №{idx + 1}</div>}
+    {renderKV(rec)}
+  </div>
+);
+
 const renderSourceDetails = (data: unknown) => {
   if (!data) return <div className="text-xs text-muted-foreground">Нет данных</div>;
   if (typeof data === "string") return <div className="text-xs whitespace-pre-wrap">{data}</div>;
   if (typeof data !== "object") return <div className="text-xs">{String(data)}</div>;
   const obj = data as Record<string, unknown>;
-  const entries = Object.entries(obj);
+  const entries = Object.entries(obj).filter(([k]) => !isTechField(k));
   if (entries.length === 0) return <div className="text-xs text-muted-foreground">Нет данных</div>;
+
+  const records = Array.isArray(obj.records) ? (obj.records as unknown[]) : null;
+  const otherEntries = entries.filter(([k]) => k !== "records");
+
   return (
-    <div className="space-y-1 text-xs">
-      {entries.map(([k, v]) => (
-        <div key={k} className="flex gap-2">
-          <span className="text-muted-foreground min-w-[140px]">{k}:</span>
-          <span className="font-mono break-all">
-            {v == null ? "—" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)}
-          </span>
+    <div className="space-y-3">
+      {otherEntries.length > 0 && (
+        <div className="space-y-1 text-xs">
+          {otherEntries.map(([k, v]) => {
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              return (
+                <div key={k} className="border-l-2 border-muted pl-2 py-1">
+                  <div className="text-muted-foreground font-medium mb-1">{fmtLabel(k)}:</div>
+                  <div className="pl-1">{renderKV(v as Record<string, unknown>)}</div>
+                </div>
+              );
+            }
+            return (
+              <div key={k} className="flex gap-2 items-start">
+                <span className="text-muted-foreground min-w-[160px]">{fmtLabel(k)}:</span>
+                <span className="break-words flex-1">{fmtValue(k, v)}</span>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      )}
+      {records && records.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Найдено записей: {records.length}
+          </div>
+          {records.map((rec, i) =>
+            rec && typeof rec === "object"
+              ? renderRecord(rec as Record<string, unknown>, i, records.length)
+              : <div key={i} className="text-xs">{String(rec)}</div>
+          )}
+        </div>
+      )}
+      {records && records.length === 0 && (
+        <div className="text-xs text-green-600">Записей не найдено</div>
+      )}
     </div>
   );
 };
