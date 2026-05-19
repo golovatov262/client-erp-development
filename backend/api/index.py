@@ -1991,18 +1991,27 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             sid = int(body['saving_id'])
             new_term = safe_int(body.get('new_term'), 'срок')
             effective_date = body.get('effective_date', date.today().isoformat())
-            cur.execute("SELECT amount, rate, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
+            cur.execute("SELECT amount, rate, start_date, payout_type, status FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             if not sv:
-                return {'error': 'Вклад не найден или не активен'}
+                return {'error': 'Вклад не найден'}
+            cur_status = sv[4]
+            if cur_status not in ('active', 'closed'):
+                return {'error': 'Срок можно менять только для активных или закрытых по сроку договоров'}
             s_amount, s_rate, s_start, s_pt = float(sv[0]), float(sv[1]), date.fromisoformat(str(sv[2])), sv[3]
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
             new_end = add_months(s_start, new_term)
             cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'term_change','Изменение срока: %s мес. с %s, новая дата окончания: %s')" % (sid, effective_date, new_term, fmt_date(effective_date), fmt_date(new_end.isoformat())))
+            reactivated = False
+            if cur_status == 'closed' and new_end > date.today():
+                cur.execute("UPDATE savings SET status='active', updated_at=NOW() WHERE id=%s" % sid)
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'reactivation','Возобновление договора: новая дата окончания %s')" % (sid, date.today().isoformat(), fmt_date(new_end.isoformat())))
+                audit_log(cur, staff, 'reactivate', 'saving', sid, '', 'Договор возобновлён (продление срока), новая дата окончания: %s' % new_end.isoformat(), ip)
+                reactivated = True
             audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес. с %s' % (new_term, effective_date), ip)
             conn.commit()
-            return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule}
+            return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule, 'reactivated': reactivated}
 
         elif action == 'recalc_schedule':
             sid = int(body['saving_id'])
@@ -2068,7 +2077,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             new_mid = int(body['member_id']) if 'member_id' in body else int(sv[2])
             new_ed = add_months(new_sd, new_term)
             cur.execute("UPDATE savings SET contract_no='%s', member_id=%s, amount=%s, rate=%s, term_months=%s, payout_type='%s', start_date='%s', end_date='%s', min_balance_pct=%s, org_id=%s, updated_at=NOW() WHERE id=%s" % (esc(cn), new_mid, new_amount, new_rate, new_term, new_pt, new_sd.isoformat(), new_ed.isoformat(), new_mbp, new_org if new_org else 'NULL', sid))
-            if old_status == 'active':
+            reactivated = False
+            if old_status == 'closed' and new_ed > date.today():
+                cur.execute("UPDATE savings SET status='active', updated_at=NOW() WHERE id=%s" % sid)
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'reactivation','Возобновление договора: новая дата окончания %s')" % (sid, date.today().isoformat(), fmt_date(new_ed.isoformat())))
+                audit_log(cur, staff, 'reactivate', 'saving', sid, cn, 'Договор возобновлён (продление срока), новая дата окончания: %s' % new_ed.isoformat(), ip)
+                reactivated = True
+            if old_status == 'active' or reactivated:
                 cur.execute("UPDATE savings SET current_balance=%s WHERE id=%s AND current_balance=%s" % (new_amount, sid, old_amount))
             changes = []
             if cn != old_cn:
