@@ -201,6 +201,11 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
                 <Button size="sm" variant="destructive" onClick={props.onClose}><Icon name="XCircle" size={14} className="mr-1" />Закрытие договора</Button>
               </>)}
+              {detail.status === "closed" && (
+                <Button size="sm" variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50" onClick={props.onModifyTerm}>
+                  <Icon name="RefreshCw" size={14} className="mr-1" />Продлить срок
+                </Button>
+              )}
               {(detail.status === "closed" || detail.status === "early_closed") && detail.current_balance > 0 && (
                 <Button size="sm" onClick={props.onFinalPayout}>
                   <Icon name="Banknote" size={14} className="mr-1" />Выплатить остаток клиенту
