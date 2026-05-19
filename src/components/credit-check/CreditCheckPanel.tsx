@@ -89,10 +89,16 @@ const sourceStatus = (raw: unknown): { label: string; color: string } => {
   if (!raw || typeof raw !== "object") return { label: "Нет данных", color: "text-muted-foreground" };
   const r = raw as Record<string, unknown>;
   const status = String(r.status || r.state || r.result || "").toLowerCase();
-  if (["ok", "valid", "clean", "not_found", "no", "pass", "passed"].includes(status)) return { label: "Чисто", color: "text-green-600" };
+  if (["ok", "valid", "clean", "not_found", "no", "pass", "passed"].includes(status)) {
+    if (r.is_found === true || r.found === true || r.is_match === true || r.is_bankrupt === true || r.has_proceedings === true || r.has_charges === true || r.has_fines === true || r.is_wanted === true || r.has_legal_case === true) {
+      return { label: "Найдено", color: "text-red-600" };
+    }
+    return { label: "Чисто", color: "text-green-600" };
+  }
   if (["found", "fail", "invalid", "blocked", "warning", "match"].includes(status)) return { label: "Найдено", color: "text-red-600" };
   if (["pending", "running", "wait"].includes(status)) return { label: "Ожидание", color: "text-yellow-600" };
-  if (["error"].includes(status)) return { label: "Ошибка", color: "text-red-600" };
+  if (["error", "timeout"].includes(status)) return { label: status === "timeout" ? "Таймаут" : "Ошибка", color: "text-red-600" };
+  if (status === "skipped") return { label: "Пропущено", color: "text-muted-foreground" };
   if (Object.keys(r).length === 0) return { label: "Нет данных", color: "text-muted-foreground" };
   return { label: "Получено", color: "text-blue-600" };
 };

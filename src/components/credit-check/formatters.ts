@@ -4,6 +4,8 @@ export const FIELD_LABELS: Record<string, string> = {
   http_code: "Код ответа",
   result: "Результат",
   description: "Описание",
+  message: "Сообщение",
+  error: "Ошибка",
   smev3: "СМЭВ-3",
   smev4: "СМЭВ-4",
   mvd_check: "Проверка МВД",
@@ -19,6 +21,7 @@ export const FIELD_LABELS: Record<string, string> = {
   has_active_procedure: "Есть активная процедура",
   in_list: "В списке",
   is_wanted: "В розыске",
+  is_found: "Найден в реестре",
   fio: "ФИО",
   inn: "ИНН",
   snils: "СНИЛС",
@@ -45,7 +48,43 @@ export const FIELD_LABELS: Record<string, string> = {
   passport: "Паспорт",
   is_valid: "Действителен",
   reason: "Причина",
-  found: "Найдено",
+  found: "Найден",
+  // РФМ
+  is_match: "Найдено совпадение",
+  is_blocked: "Заблокирован",
+  in_mvk_list: "В перечне МВК",
+  in_oon_list: "В перечне ООН",
+  in_terrorist_list: "В перечне террористов и экстремистов",
+  in_omu_list: "В перечне ОМУ",
+  in_sanctions_list: "В санкционных списках",
+  is_pep: "Публичное должностное лицо (PEP)",
+  orgs: "Организации",
+  persons: "Физлица",
+  // Мобилизация / ИП / НПД
+  is_mobilized: "Мобилизован",
+  mob_start: "Начало мобилизации",
+  mob_end: "Окончание мобилизации",
+  actual_at: "Актуально на",
+  is_ip: "Является ИП",
+  is_npd_taxpayer: "Самозанятый (НПД)",
+  is_chief_founder: "Руководитель / учредитель",
+  is_bankruptcy_trustee: "Арбитражный управляющий",
+  details: "Детали",
+  fns: "ФНС",
+  // Штрафы / ГИС ГМП
+  charges: "Начисления",
+  has_charges: "Есть начисления",
+  charges_count: "Кол-во начислений",
+  has_fines: "Есть штрафы",
+  fines_count: "Кол-во штрафов",
+  // База должников
+  has_legal_case: "Есть судебное дело",
+  legal_case: "Судебное дело",
+  extrajudicial_bankruptcy_id: "ID внесудебного банкротства",
+  has_extrajudicial_bankruptcy: "Есть внесудебное банкротство",
+  // Прочее
+  warnings: "Предупреждения",
+  has_debt: "Есть задолженность",
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
@@ -61,6 +100,17 @@ export const SOURCE_LABELS: Record<string, string> = {
   apicloud_flmob: "API Cloud (Мобилизация)",
   apicloud_fines: "API Cloud (Штрафы)",
   apicloud_gisgmp: "API Cloud (ГИС ГМП)",
+  fns_smev3: "ФНС (СМЭВ-3)",
+  fns_tax_debt: "ФНС (налоговая задолженность)",
+  smev3_flmob: "СМЭВ-3 (мобилизация)",
+  rfm_checker: "Росфинмониторинг",
+  gisgmp: "ГИС ГМП",
+  okb: "ОКБ — Объединённое кредитное бюро",
+  nbki: "НБКИ — Национальное бюро кредитных историй",
+  kvell_smz: "Kvell (самозанятость)",
+  kvell_fines: "Kvell (штрафы)",
+  kvell_sanctions: "Kvell (санкции)",
+  kvell_client_debt: "Kvell (база должников)",
 };
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -80,6 +130,9 @@ export const STATUS_LABELS: Record<string, string> = {
   match: "Совпадение",
   blocked: "Заблокирован",
   warning: "Предупреждение",
+  skipped: "Пропущено",
+  timeout: "Превышено время ожидания",
+  no_data: "Нет данных",
 };
 
 export const STATUS_CODE_LABELS: Record<string, string> = {
