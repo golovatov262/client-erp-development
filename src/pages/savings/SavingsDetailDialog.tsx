@@ -14,7 +14,7 @@ import { SavingContractDocButtons } from "./SavingContractPrintForm";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
-const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие", final_payout: "Выплата остатка" };
+const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие", final_payout: "Выплата остатка", reactivation: "Возобновление договора" };
 const monthNames = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 
 interface MonthGroup {
@@ -149,6 +149,11 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
 
   const filteredTx = txFilterState === "transactions" ? detail.transactions.filter(t => t.transaction_type !== "interest_accrual") : detail.transactions;
 
+  const reactivations = detail.transactions.filter(t => t.transaction_type === "reactivation");
+  const lastReactivation = reactivations.length > 0
+    ? reactivations.reduce((a, b) => (a.transaction_date > b.transaction_date ? a : b))
+    : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
@@ -159,6 +164,16 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           </div>
           <Badge variant={detail.status === "active" ? "default" : "secondary"}>{detail.status === "active" ? "Активен" : detail.status === "early_closed" ? "Досрочно" : "Закрыт"}</Badge>
         </DialogHeader>
+
+        {lastReactivation && (
+          <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-100">
+            <Icon name="RefreshCw" size={16} className="mt-0.5 shrink-0 text-blue-600" />
+            <div className="flex-1">
+              <span className="font-medium">Возобновлён {fmtDate(lastReactivation.transaction_date)}</span>
+              <span className="text-blue-800/80 dark:text-blue-200/80"> — продление срока{lastReactivation.description ? `: ${lastReactivation.description}` : ""}</span>
+            </div>
+          </div>
+        )}
 
         <div className="grid md:grid-cols-3 gap-4">
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Сумма вклада</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.amount)}</div></CardContent></Card>

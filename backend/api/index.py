@@ -2083,6 +2083,8 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'reactivation','Возобновление договора: новая дата окончания %s')" % (sid, date.today().isoformat(), fmt_date(new_ed.isoformat())))
                 audit_log(cur, staff, 'reactivate', 'saving', sid, cn, 'Договор возобновлён (продление срока), новая дата окончания: %s' % new_ed.isoformat(), ip)
                 reactivated = True
+            if new_rate != old_rate:
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'rate_change','Изменение ставки: %s%% → %s%%')" % (sid, date.today().isoformat(), old_rate, new_rate))
             if old_status == 'active' or reactivated:
                 cur.execute("UPDATE savings SET current_balance=%s WHERE id=%s AND current_balance=%s" % (new_amount, sid, old_amount))
             changes = []
