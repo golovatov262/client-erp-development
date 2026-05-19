@@ -179,12 +179,14 @@ const renderSourceDetails = (data: unknown) => {
 
 interface Props {
   buildInput: () => CreditCheckInput | { error: string };
+  memberId?: number | null;
 }
 
-const CreditCheckPanel = ({ buildInput }: Props) => {
+const CreditCheckPanel = ({ buildInput, memberId }: Props) => {
   const [check, setCheck] = useState<CheckStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const pollTimer = useRef<number | null>(null);
@@ -193,6 +195,25 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
   useEffect(() => () => {
     if (pollTimer.current) window.clearTimeout(pollTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!memberId) return;
+    let cancelled = false;
+    setHistoryLoading(true);
+    fetch(`${CREDIT_CHECK_URL}?member_id=${encodeURIComponent(String(memberId))}`)
+      .then(async (resp) => {
+        if (resp.status === 404) return null;
+        if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+        return (await resp.json()) as CheckStatus;
+      })
+      .then((raw) => {
+        if (cancelled || !raw) return;
+        setCheck(normalizeStatus(raw));
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [memberId]);
 
   const stopPolling = () => {
     if (pollTimer.current) {
@@ -297,6 +318,17 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
               <div className="text-xs text-muted-foreground mt-0.5">
                 Проверка по 10 источникам: паспорт МВД, ФССП, банкротство, РФМ, розыск, реестр КЛ, мобилизация, штрафы ГИБДД, ГИС ГМП, должники.
               </div>
+              {historyLoading && !check && (
+                <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                  <Icon name="Loader2" size={12} className="animate-spin" />
+                  Загружаем последнюю проверку…
+                </div>
+              )}
+              {!startedAt && check?.created_at && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Последняя проверка: <span className="font-medium text-foreground">{fmtDateTime(check.created_at)}</span>
+                </div>
+              )}
               {startedAt && (
                 <div className="text-xs text-muted-foreground mt-1">
                   Запущена: <span className="font-medium text-foreground">{fmtDateTime(startedAt)}</span>
@@ -323,7 +355,7 @@ const CreditCheckPanel = ({ buildInput }: Props) => {
         </CardContent>
       </Card>
 
-      {!check && !loading && (
+      {!check && !loading && !historyLoading && (
         <div className="text-center py-10 text-muted-foreground text-sm">
           <Icon name="ClipboardCheck" size={36} className="mx-auto mb-2 opacity-40" />
           Нажмите «Запустить проверку», чтобы получить результаты по всем источникам.

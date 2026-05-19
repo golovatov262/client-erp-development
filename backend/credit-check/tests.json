@@ -23,6 +23,14 @@
       "bodyMatcher": "partial"
     },
     {
+      "name": "GET by member_id without checks returns 404",
+      "method": "GET",
+      "path": "/?member_id=999999999",
+      "expectedStatus": 404,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "POST creates local check (upstream may be unreachable in test env)",
       "method": "POST",
       "path": "/",

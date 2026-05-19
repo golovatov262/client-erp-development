@@ -219,12 +219,35 @@ def handler(event: dict, context) -> dict:
     if method == 'GET':
         check_id = (params.get('check_id') or '').strip()
         passport = (params.get('passport') or '').strip()
+        member_id_q = (params.get('member_id') or '').strip()
 
         if passport:
             status, payload = call_upstream('GET', f'/api/v1/checks?passport={passport}&limit=1')
             if status >= 400:
                 return cors_json({'error': 'Upstream error', 'detail': payload}, status)
             return cors_json(payload, 200)
+
+        if member_id_q:
+            try:
+                m_id = int(member_id_q)
+            except ValueError:
+                return cors_json({'error': 'member_id must be integer'}, 400)
+            with db_connect() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT * FROM credit_checks WHERE member_id = %s ORDER BY created_at DESC LIMIT 1",
+                    (m_id,),
+                )
+                row = cur.fetchone()
+            if not row:
+                return cors_json({'error': 'No checks found for member'}, 404)
+            if row['status'] == 'pending' and row.get('upstream_check_id'):
+                try:
+                    updated = fetch_and_persist(row['id'], row['upstream_check_id'])
+                    if updated:
+                        row = updated
+                except Exception:
+                    pass
+            return cors_json(row_to_dict(row))
 
         if not check_id:
             return cors_json({'error': 'check_id query parameter is required'}, 400)

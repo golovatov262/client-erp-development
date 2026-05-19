@@ -199,7 +199,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
 
   return (
     <div className="space-y-4">
-      <CreditCheckPanel buildInput={buildCreditCheckInput} />
+      <CreditCheckPanel buildInput={buildCreditCheckInput} memberId={memberId} />
 
       <div className="border-t pt-4" />
 
