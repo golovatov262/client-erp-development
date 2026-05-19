@@ -140,6 +140,21 @@ export const STATUS_CODE_LABELS: Record<string, string> = {
   CitizenDebtRestructuring: "Реструктуризация долгов гражданина",
   CompletedAssetsDisposal: "Завершена реализация имущества",
   CompletedDebtRestructuring: "Завершена реструктуризация",
+  ProceedingsFinished: "Производство по делу завершено",
+  ProceedingsTerminated: "Производство по делу прекращено",
+  ProceedingsSuspended: "Производство по делу приостановлено",
+  Supervision: "Наблюдение",
+  ExternalManagement: "Внешнее управление",
+  FinancialRecovery: "Финансовое оздоровление",
+  BankruptcyProceedings: "Конкурсное производство",
+  Settlement: "Мировое соглашение",
+  AmicableAgreement: "Мировое соглашение",
+  ExtrajudicialBankruptcy: "Внесудебное банкротство",
+  ExtrajudicialBankruptcyCompleted: "Внесудебное банкротство завершено",
+  ExtrajudicialBankruptcyTerminated: "Внесудебное банкротство прекращено",
+  CitizenBankruptcy: "Банкротство гражданина",
+  CompletedCitizenBankruptcy: "Банкротство гражданина завершено",
+  None: "Нет",
 };
 
 export const RESULT_LABELS: Record<string, string> = {
