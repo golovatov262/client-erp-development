@@ -172,6 +172,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
       inn: form.inn ? String(form.inn).replace(/\D/g, "") : null,
       phone: form.mobile_phone ? String(form.mobile_phone).replace(/\D/g, "") : null,
       reg_addr_full: form.registration_address || null,
+      member_id: form.member_id ? Number(form.member_id) : null,
     };
   };
 
@@ -666,7 +667,10 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
             {/* ── Проверки ── */}
             {isFl && (
               <TabsContent value="checks" className="mt-0 pb-2">
-                <CreditCheckPanel buildInput={buildCreditCheckInput} />
+                <CreditCheckPanel
+                  buildInput={buildCreditCheckInput}
+                  memberId={form.member_id ? Number(form.member_id) : null}
+                />
               </TabsContent>
             )}
 
