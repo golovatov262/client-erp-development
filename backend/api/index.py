@@ -2944,7 +2944,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = 'Выписка по сбережению'
+    ws.title = 'Выписка по паевому счету'
 
     thin = Side(style='thin')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -2954,7 +2954,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     row = build_xlsx_header(ws, org)
 
     ws.merge_cells('A%d:F%d' % (row, row))
-    ws['A%d' % row] = 'Выписка по договору сбережений %s' % saving.get('contract_no', '')
+    ws['A%d' % row] = 'Выписка по договору паевого счета %s' % saving.get('contract_no', '')
     ws['A%d' % row].font = Font(bold=True, size=14)
     row += 2
 
@@ -2962,11 +2962,11 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     ws['B%d' % row] = member_name
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Сумма вклада:'
+    ws['A%d' % row] = 'Сумма паевого взноса:'
     ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Ставка:'
+    ws['A%d' % row] = 'Доходность:'
     ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
     ws['A%d' % row].font = Font(bold=True)
     row += 1
@@ -2978,7 +2978,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     ws['B%d' % row] = '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date')))
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Начислено %:'
+    ws['A%d' % row] = 'Начислено дохода:'
     ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('accrued_interest'))
     ws['A%d' % row].font = Font(bold=True)
     row += 2
@@ -2993,7 +2993,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     ws['A%d' % row].font = Font(bold=True, size=12)
     row += 1
 
-    headers = ['№', 'Начало', 'Окончание', 'Проценты', 'Накоплено', 'Баланс']
+    headers = ['№', 'Начало', 'Окончание', 'Доход', 'Накоплено', 'Баланс']
     for ci, h in enumerate(headers, 1):
         c = ws.cell(row=row, column=ci, value=h)
         c.font = header_font
@@ -3026,7 +3026,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
             c.fill = header_fill
             c.border = border
         row += 1
-        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %', 'early_close': 'Досрочное закрытие'}
+        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата дохода', 'early_close': 'Досрочное закрытие'}
         for t in transactions:
             ws.cell(row=row, column=1, value=fmt_date(t.get('transaction_date'))).border = border
             ws.cell(row=row, column=2, value=float(t.get('amount', 0))).border = border
@@ -3062,13 +3062,13 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
     footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
 
-    story.append(Paragraph('Выписка по договору сбережений %s' % saving.get('contract_no', ''), title_style))
+    story.append(Paragraph('Выписка по договору паевого счета %s' % saving.get('contract_no', ''), title_style))
     story.append(Spacer(1, 4))
 
     info = [
-        ['Пайщик:', member_name, 'Сумма:', '%s руб.' % fmt_money(saving.get('amount'))],
-        ['Ставка:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
-        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Начислено:', '%s руб.' % fmt_money(saving.get('accrued_interest'))],
+        ['Пайщик:', member_name, 'Сумма паевого взноса:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Доходность:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
+        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Начислено дохода:', '%s руб.' % fmt_money(saving.get('accrued_interest'))],
     ]
     it = Table(info, colWidths=[55, 150, 60, 150])
     it.setStyle(TableStyle([
@@ -3080,7 +3080,7 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     story.append(Spacer(1, 6))
 
     story.append(Paragraph('График доходности', sub_style))
-    sdata = [['№', 'Начало', 'Окончание', 'Проценты', 'Накоплено', 'Баланс']]
+    sdata = [['№', 'Начало', 'Окончание', 'Доход', 'Накоплено', 'Баланс']]
     for item in schedule:
         sdata.append([str(item.get('period_no', '')), fmt_date(item.get('period_start')), fmt_date(item.get('period_end')),
                        fmt_money(item.get('interest_amount', 0)), fmt_money(item.get('cumulative_interest', 0)), fmt_money(item.get('balance_after', 0))])
@@ -3099,7 +3099,7 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
         story.append(Spacer(1, 6))
         story.append(Paragraph('Операции', sub_style))
         tdata = [['Дата', 'Сумма', 'Тип', 'Описание']]
-        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %', 'early_close': 'Досрочное закрытие'}
+        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата дохода', 'early_close': 'Досрочное закрытие'}
         for t in transactions:
             tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
                            type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
@@ -3135,7 +3135,7 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
     row = build_xlsx_header(ws, org)
 
     ws.merge_cells('A%d:F%d' % (row, row))
-    ws['A%d' % row] = 'Выписка по транзакциям — договор %s' % saving.get('contract_no', '')
+    ws['A%d' % row] = 'Выписка по транзакциям — договор паевого счета %s' % saving.get('contract_no', '')
     ws['A%d' % row].font = Font(bold=True, size=14)
     row += 2
 
@@ -3143,11 +3143,11 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
     ws['B%d' % row] = member_name
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Сумма вклада:'
+    ws['A%d' % row] = 'Сумма паевого взноса:'
     ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Ставка:'
+    ws['A%d' % row] = 'Доходность:'
     ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
     ws['A%d' % row].font = Font(bold=True)
     row += 1
@@ -3179,7 +3179,7 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
     ws['A%d' % row].font = Font(bold=True, size=12)
     row += 1
 
-    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата процентов', 'interest_accrual': 'Начисление процентов', 'term_change': 'Изменение срока', 'rate_change': 'Изменение ставки', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
+    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изменение срока', 'rate_change': 'Изменение доходности', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
     headers = ['№', 'Дата', 'Сумма', 'Тип операции', 'Описание']
     for ci, h in enumerate(headers, 1):
         c = ws.cell(row=row, column=ci, value=h)
@@ -3231,13 +3231,13 @@ def generate_saving_transactions_pdf(saving, transactions, member_name, org=None
     footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
     desc_style = ParagraphStyle('D', fontName=font_r, fontSize=6.5, leading=8)
 
-    story.append(Paragraph('Выписка по транзакциям — договор %s' % saving.get('contract_no', ''), title_style))
+    story.append(Paragraph('Выписка по транзакциям — договор паевого счета %s' % saving.get('contract_no', ''), title_style))
     story.append(Spacer(1, 4))
 
     status_map = {'active': 'Активен', 'closed': 'Закрыт', 'early_closed': 'Досрочно закрыт'}
     info = [
-        ['Пайщик:', member_name, 'Сумма:', '%s руб.' % fmt_money(saving.get('amount'))],
-        ['Ставка:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
+        ['Пайщик:', member_name, 'Сумма паевого взноса:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Доходность:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
         ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Баланс:', '%s руб.' % fmt_money(saving.get('current_balance'))],
         ['Статус:', status_map.get(saving.get('status', ''), saving.get('status', '')), '', ''],
     ]
@@ -3251,7 +3251,7 @@ def generate_saving_transactions_pdf(saving, transactions, member_name, org=None
     story.append(Spacer(1, 6))
 
     story.append(Paragraph('Транзакции', sub_style))
-    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата %', 'interest_accrual': 'Начисление %', 'term_change': 'Изм. срока', 'rate_change': 'Изм. ставки', 'early_close': 'Досрочное закр.', 'closing': 'Закрытие'}
+    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изм. срока', 'rate_change': 'Изм. доходности', 'early_close': 'Досрочное закр.', 'closing': 'Закрытие'}
     tdata = [['№', 'Дата', 'Сумма', 'Тип', 'Описание']]
     for idx, t in enumerate(transactions, 1):
         tt = t.get('transaction_type', '')
@@ -3770,7 +3770,7 @@ def generate_savings_list_xlsx(savings):
     from openpyxl.utils import get_column_letter
     wb = Workbook()
     ws = wb.active
-    ws.title = 'Сбережения'
+    ws.title = 'Паевые счета'
     header_font = Font(bold=True, size=10)
     header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
     header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -3782,15 +3782,15 @@ def generate_savings_list_xlsx(savings):
         ('№ договора', 'contract_no', 16),
         ('Пайщик', 'member_name', 30),
         ('Организация', 'org_short_name', 20),
-        ('Сумма вклада', 'amount', 16),
-        ('Ставка, %', 'rate', 10),
+        ('Сумма паевого взноса', 'amount', 18),
+        ('Доходность, %', 'rate', 12),
         ('Срок, мес.', 'term_months', 10),
         ('Тип выплаты', 'payout_type_label', 16),
         ('Несниж. остаток, %', 'min_balance_pct', 14),
         ('Дата начала', 'start_date', 14),
         ('Дата окончания', 'end_date', 14),
-        ('Начислено %', 'accrued_interest', 16),
-        ('Выплачено %', 'paid_interest', 16),
+        ('Начислено дохода', 'accrued_interest', 18),
+        ('Выплачено дохода', 'paid_interest', 18),
         ('Текущий баланс', 'current_balance', 16),
         ('Статус', 'status_label', 14),
     ]

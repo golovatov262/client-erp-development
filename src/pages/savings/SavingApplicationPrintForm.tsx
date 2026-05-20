@@ -47,18 +47,18 @@ function buildBody(item: SavingApplication): string {
   const email = val(item.email);
 
   return `
-<p class="center bold">В КПК «ЭКСПЕРТ ФИНАНС» ИНН 4307012081,<br/>КПК «ФИН ФОРМУЛА» ИНН 3666209530</p>
-<p class="center bold">Заявка на личные сбережения № ${appNo}.${currentDate}</p>
+<p class="center bold">В ПККО «ЭКСПЕРТ ФИНАНС» ИНН 4307012081,<br/>Организация «ФИН ФОРМУЛА» ИНН 3666209530</p>
+<p class="center bold">Заявление на паевой взнос № ${appNo}.${currentDate}</p>
 
-<p>Я, <b>${fullName}</b>, прошу рассмотреть возможность размещения личных сбережений на следующих условиях:</p>
+<p>Я, <b>${fullName}</b>, прошу рассмотреть возможность внесения паевого взноса на следующих условиях:</p>
 
 <table>
-  <tr><td colspan="2" class="section-header">Параметры вклада</td></tr>
-  <tr><td style="width:45%">Сумма вклада</td><td>${amount} руб. (${amountWords})</td></tr>
+  <tr><td colspan="2" class="section-header">Параметры паевого взноса</td></tr>
+  <tr><td style="width:45%">Сумма паевого взноса</td><td>${amount} руб. (${amountWords})</td></tr>
   <tr><td>Срок</td><td>${termMonths} мес.</td></tr>
-  <tr><td>Процентная ставка</td><td>${rate} % годовых</td></tr>
-  <tr><td>Выплата процентов</td><td>${payoutType}</td></tr>
-  <tr><td colspan="2" class="section-header" style="padding-top:8pt">Данные вкладчика</td></tr>
+  <tr><td>Доходность</td><td>${rate} % годовых</td></tr>
+  <tr><td>Выплата дохода</td><td>${payoutType}</td></tr>
+  <tr><td colspan="2" class="section-header" style="padding-top:8pt">Данные пайщика</td></tr>
   <tr><td>ФИО</td><td>${fullName}</td></tr>
   <tr><td>Дата и место рождения</td><td>${birthDate} ${birthPlace}</td></tr>
   <tr><td>Паспорт гражданина РФ</td><td>${passportSeries} ${passportNumber} выдан ${passportIssuedBy} ${passportIssueDate} код подр. ${passportDeptCode}</td></tr>
@@ -69,10 +69,10 @@ function buildBody(item: SavingApplication): string {
 </table>
 
 <p class="justify" style="margin-top:12pt">
-  Настоящим заявлением подтверждаю, что знакомлен(на) и согласен(на) с положением по привлечению личных сбережений
-  в КПК «ЭКСПЕРТ ФИНАНС» ИНН 4307012081, и КПК «ФИН ФОРМУЛА» ИНН 3666209530.
-  Согласен(на) с тем, что заявка будет рассматриваться в обеих КПК, стороной по договору личных сбережений может
-  выступать одно из КПК, в которые я направляю заявление.
+  Настоящим заявлением подтверждаю, что ознакомлен(на) и согласен(на) с Положением по формированию и использованию
+  паевого фонда Организации «ЭКСПЕРТ ФИНАНС» ИНН 4307012081 и Организации «ФИН ФОРМУЛА» ИНН 3666209530.
+  Согласен(на) с тем, что заявление будет рассматриваться в обеих Организациях, стороной по договору паевого счета
+  может выступать одна из Организаций, в которые я направляю заявление.
 </p>
 
 <p style="margin-top:24pt">___________________________&nbsp;&nbsp;${fullName}</p>
@@ -87,16 +87,16 @@ function buildBody(item: SavingApplication): string {
 </p>
 
 <p class="justify">
-  настоящим даю своё согласие КПК «ЭКСПЕРТ ФИНАНС» ИНН 4307012081, КПК «ФИН ФОРМУЛА» ИНН 3666209530
+  настоящим даю своё согласие Организации «ЭКСПЕРТ ФИНАНС» ИНН 4307012081 и Организации «ФИН ФОРМУЛА» ИНН 3666209530
   на обработку моих персональных данных, включая сбор, систематизацию, накопление, хранение, уточнение
   (обновление, изменение), использование, распространение (в том числе передачу), обезличивание,
-  блокирование, уничтожение персональных данных в целях заключения и исполнения договора личных сбережений,
+  блокирование, уничтожение персональных данных в целях заключения и исполнения договора паевого счета,
   а также в иных целях, не противоречащих законодательству Российской Федерации.
 </p>
 
 <p class="justify">
   Настоящее согласие действует с момента его подписания и может быть отозвано путём подачи письменного
-  заявления в КПК. Отзыв согласия не влияет на законность обработки, осуществлённой до его получения.
+  заявления в Организацию. Отзыв согласия не влияет на законность обработки, осуществлённой до его получения.
 </p>
 
 <p class="justify">
@@ -120,7 +120,7 @@ function buildBody(item: SavingApplication): string {
 }
 
 export function SavingApplicationDocButtons({ item }: Props) {
-  const title = `Заявка на сбережение ${item.application_no || ""}`;
+  const title = `Заявление на паевой взнос ${item.application_no || ""}`;
 
   const handlePrint = () => {
     openPrintWindow(title, buildBody(item));
@@ -128,7 +128,7 @@ export function SavingApplicationDocButtons({ item }: Props) {
 
   const handleDocx = () => {
     const html = buildHtmlDoc(title, buildBody(item));
-    downloadDocx(`Заявка_на_сбережение_${item.application_no || "б-н"}.doc`, html);
+    downloadDocx(`Заявление_на_паевой_взнос_${item.application_no || "б-н"}.doc`, html);
   };
 
   return (
