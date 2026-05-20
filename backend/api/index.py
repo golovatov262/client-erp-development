@@ -2962,12 +2962,8 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     ws['B%d' % row] = member_name
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Сумма паевого взноса:'
+    ws['A%d' % row] = 'Баланс паевого счета:'
     ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
-    ws['A%d' % row].font = Font(bold=True)
-    row += 1
-    ws['A%d' % row] = 'Доходность:'
-    ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
     ws['A%d' % row].font = Font(bold=True)
     row += 1
     ws['A%d' % row] = 'Срок:'
@@ -2983,8 +2979,8 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
     ws['A%d' % row].font = Font(bold=True)
     row += 2
 
-    ws.column_dimensions['A'].width = 18
-    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['A'].width = 28
+    ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 18
     ws.column_dimensions['D'].width = 18
     ws.column_dimensions['E'].width = 18
@@ -3019,20 +3015,19 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None)
         ws['A%d' % row] = 'ОПЕРАЦИИ'
         ws['A%d' % row].font = Font(bold=True, size=12)
         row += 1
-        t_headers = ['Дата', 'Сумма', 'Тип', 'Описание']
+        t_headers = ['Дата', 'Сумма', 'Тип']
         for ci, h in enumerate(t_headers, 1):
             c = ws.cell(row=row, column=ci, value=h)
             c.font = header_font
             c.fill = header_fill
             c.border = border
         row += 1
-        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата дохода', 'early_close': 'Досрочное закрытие'}
+        type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изменение срока', 'rate_change': 'Изменение доходности', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
         for t in transactions:
             ws.cell(row=row, column=1, value=fmt_date(t.get('transaction_date'))).border = border
             ws.cell(row=row, column=2, value=float(t.get('amount', 0))).border = border
             ws.cell(row=row, column=2).number_format = '#,##0.00'
             ws.cell(row=row, column=3, value=type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', ''))).border = border
-            ws.cell(row=row, column=4, value=t.get('description', '')).border = border
             row += 1
 
     row += 1
@@ -3066,11 +3061,11 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     story.append(Spacer(1, 4))
 
     info = [
-        ['Пайщик:', member_name, 'Сумма паевого взноса:', '%s руб.' % fmt_money(saving.get('amount'))],
-        ['Доходность:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
-        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Начислено дохода:', '%s руб.' % fmt_money(saving.get('accrued_interest'))],
+        ['Пайщик:', member_name, 'Баланс паевого счета:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Срок:', '%s мес.' % saving.get('term_months', ''), 'Начислено дохода:', '%s руб.' % fmt_money(saving.get('accrued_interest'))],
+        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), '', ''],
     ]
-    it = Table(info, colWidths=[55, 150, 60, 150])
+    it = Table(info, colWidths=[55, 150, 110, 130])
     it.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (2, 0), (2, -1), font_b),
@@ -3098,12 +3093,12 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     if transactions:
         story.append(Spacer(1, 6))
         story.append(Paragraph('Операции', sub_style))
-        tdata = [['Дата', 'Сумма', 'Тип', 'Описание']]
-        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата дохода', 'early_close': 'Досрочное закрытие'}
+        tdata = [['Дата', 'Сумма', 'Тип']]
+        type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изменение срока', 'rate_change': 'Изменение доходности', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
         for t in transactions:
             tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
-                           type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
-        tt = Table(tdata, colWidths=[58, 68, 100, 170], repeatRows=1)
+                           type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', ''))])
+        tt = Table(tdata, colWidths=[80, 100, 180], repeatRows=1)
         tt.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
             ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d6eaf8')),
@@ -3143,12 +3138,8 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
     ws['B%d' % row] = member_name
     ws['A%d' % row].font = Font(bold=True)
     row += 1
-    ws['A%d' % row] = 'Сумма паевого взноса:'
+    ws['A%d' % row] = 'Баланс паевого счета:'
     ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
-    ws['A%d' % row].font = Font(bold=True)
-    row += 1
-    ws['A%d' % row] = 'Доходность:'
-    ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
     ws['A%d' % row].font = Font(bold=True)
     row += 1
     ws['A%d' % row] = 'Срок:'
@@ -3169,18 +3160,18 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
     ws['A%d' % row].font = Font(bold=True)
     row += 2
 
-    ws.column_dimensions['A'].width = 8
-    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['A'].width = 28
+    ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 18
-    ws.column_dimensions['D'].width = 22
-    ws.column_dimensions['E'].width = 40
+    ws.column_dimensions['D'].width = 28
+    ws.column_dimensions['E'].width = 18
 
     ws['A%d' % row] = 'ТРАНЗАКЦИИ'
     ws['A%d' % row].font = Font(bold=True, size=12)
     row += 1
 
     type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изменение срока', 'rate_change': 'Изменение доходности', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
-    headers = ['№', 'Дата', 'Сумма', 'Тип операции', 'Описание']
+    headers = ['№', 'Дата', 'Сумма', 'Тип операции']
     for ci, h in enumerate(headers, 1):
         c = ws.cell(row=row, column=ci, value=h)
         c.font = header_font
@@ -3198,7 +3189,6 @@ def generate_saving_transactions_xlsx(saving, transactions, member_name, org=Non
         ws.cell(row=row, column=3, value=amt).border = border
         ws.cell(row=row, column=3).number_format = '#,##0.00'
         ws.cell(row=row, column=4, value=type_labels.get(tt, tt)).border = border
-        ws.cell(row=row, column=5, value=t.get('description', '')).border = border
         row += 1
 
     row += 1
@@ -3236,12 +3226,11 @@ def generate_saving_transactions_pdf(saving, transactions, member_name, org=None
 
     status_map = {'active': 'Активен', 'closed': 'Закрыт', 'early_closed': 'Досрочно закрыт'}
     info = [
-        ['Пайщик:', member_name, 'Сумма паевого взноса:', '%s руб.' % fmt_money(saving.get('amount'))],
-        ['Доходность:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
-        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Баланс:', '%s руб.' % fmt_money(saving.get('current_balance'))],
-        ['Статус:', status_map.get(saving.get('status', ''), saving.get('status', '')), '', ''],
+        ['Пайщик:', member_name, 'Баланс паевого счета:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Срок:', '%s мес.' % saving.get('term_months', ''), 'Текущий баланс:', '%s руб.' % fmt_money(saving.get('current_balance'))],
+        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Статус:', status_map.get(saving.get('status', ''), saving.get('status', ''))],
     ]
-    it = Table(info, colWidths=[55, 150, 55, 150])
+    it = Table(info, colWidths=[55, 150, 110, 130])
     it.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (2, 0), (2, -1), font_b),
@@ -3251,14 +3240,13 @@ def generate_saving_transactions_pdf(saving, transactions, member_name, org=None
     story.append(Spacer(1, 6))
 
     story.append(Paragraph('Транзакции', sub_style))
-    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изм. срока', 'rate_change': 'Изм. доходности', 'early_close': 'Досрочное закр.', 'closing': 'Закрытие'}
-    tdata = [['№', 'Дата', 'Сумма', 'Тип', 'Описание']]
+    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата дохода', 'interest_accrual': 'Начисление дохода', 'term_change': 'Изменение срока', 'rate_change': 'Изменение доходности', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
+    tdata = [['№', 'Дата', 'Сумма', 'Тип']]
     for idx, t in enumerate(transactions, 1):
         tt = t.get('transaction_type', '')
-        desc_text = t.get('description', '') or ''
         tdata.append([str(idx), fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
-                       type_labels.get(tt, tt), Paragraph(desc_text, desc_style)])
-    tt_table = Table(tdata, colWidths=[22, 58, 68, 75, 170], repeatRows=1)
+                       type_labels.get(tt, tt)])
+    tt_table = Table(tdata, colWidths=[30, 90, 110, 163], repeatRows=1)
     tt_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
         ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8daef')),
