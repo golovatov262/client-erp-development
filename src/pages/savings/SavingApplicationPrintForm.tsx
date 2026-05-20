@@ -1,15 +1,10 @@
-import { SavingApplication } from "@/lib/api";
-import { numToWords } from "@/lib/num-to-words";
+import { SavingApplication, Organization } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import { buildHtmlDoc, downloadDocx, openPrintWindow } from "@/lib/doc-utils";
 
-type Props = { item: SavingApplication };
+type Props = { item: SavingApplication; orgs?: Organization[] };
 
-function fmt(n: number | null | undefined) {
-  if (n == null) return "___________";
-  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n);
-}
 function fmtDate(s: string | null | undefined) {
   if (!s) return "___________";
   return new Date(s).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -21,20 +16,13 @@ function val(s: string | null | undefined, fallback = "___________") {
   return s?.trim() || fallback;
 }
 
-function buildBody(item: SavingApplication): string {
-  const appNo = val(item.application_no, "___");
+function buildBody(item: SavingApplication, orgs: Organization[] = []): string {
   const currentDate = today();
 
   const fullName = [item.last_name, item.first_name, item.middle_name].filter(Boolean).join(" ") || "___________";
-  const amount = item.amount != null ? fmt(item.amount) : "___________";
-  const amountWords = item.amount != null ? numToWords(Number(item.amount)) : "___________";
-  const termMonths = item.term_months != null ? `${item.term_months}` : "___";
-  const rate = item.rate != null ? `${item.rate}` : "___";
-  const payoutType = item.payout_type === "monthly" ? "ежемесячно" : item.payout_type === "end_of_term" ? "в конце срока" : "___________";
 
   const birthDate = fmtDate(item.birth_date);
   const birthPlace = val(item.birth_place);
-  const inn = val(item.inn);
 
   const passportSeries = val(item.passport_series, "____");
   const passportNumber = val(item.passport_number, "______");
@@ -43,42 +31,16 @@ function buildBody(item: SavingApplication): string {
   const passportDeptCode = val(item.passport_dept_code);
 
   const address = val(item.registration_address);
-  const phone = val(item.phone);
-  const email = val(item.email);
+
+  const orgShortNames = orgs
+    .map(o => (o.short_name || o.name || "").trim())
+    .filter(Boolean);
+  const orgsStr = orgShortNames.length > 0
+    ? orgShortNames.join(" и ")
+    : "___________";
 
   return `
-<p class="center bold">В ПККО «ЭКСПЕРТ ФИНАНС» ИНН 4307012081,<br/>Организация «ФИН ФОРМУЛА» ИНН 3666209530</p>
-<p class="center bold">Заявление на паевой взнос № ${appNo}.${currentDate}</p>
-
-<p>Я, <b>${fullName}</b>, прошу рассмотреть возможность внесения паевого взноса на следующих условиях:</p>
-
-<table>
-  <tr><td colspan="2" class="section-header">Параметры паевого взноса</td></tr>
-  <tr><td style="width:45%">Сумма паевого взноса</td><td>${amount} руб. (${amountWords})</td></tr>
-  <tr><td>Срок</td><td>${termMonths} мес.</td></tr>
-  <tr><td>Доходность</td><td>${rate} % годовых</td></tr>
-  <tr><td>Выплата дохода</td><td>${payoutType}</td></tr>
-  <tr><td colspan="2" class="section-header" style="padding-top:8pt">Данные пайщика</td></tr>
-  <tr><td>ФИО</td><td>${fullName}</td></tr>
-  <tr><td>Дата и место рождения</td><td>${birthDate} ${birthPlace}</td></tr>
-  <tr><td>Паспорт гражданина РФ</td><td>${passportSeries} ${passportNumber} выдан ${passportIssuedBy} ${passportIssueDate} код подр. ${passportDeptCode}</td></tr>
-  <tr><td>ИНН</td><td>${inn}</td></tr>
-  <tr><td>Адрес регистрации</td><td>${address}</td></tr>
-  <tr><td>Телефон</td><td>${phone}</td></tr>
-  <tr><td>Email</td><td>${email}</td></tr>
-</table>
-
-<p class="justify" style="margin-top:12pt">
-  Настоящим заявлением подтверждаю, что ознакомлен(на) и согласен(на) с Положением по формированию и использованию
-  паевого фонда Организации «ЭКСПЕРТ ФИНАНС» ИНН 4307012081 и Организации «ФИН ФОРМУЛА» ИНН 3666209530.
-  Согласен(на) с тем, что заявление будет рассматриваться в обеих Организациях, стороной по договору паевого счета
-  может выступать одна из Организаций, в которые я направляю заявление.
-</p>
-
-<p style="margin-top:24pt">___________________________&nbsp;&nbsp;${fullName}</p>
-<p>${currentDate}</p>
-
-<p class="center bold page-break">Согласие на обработку персональных данных</p>
+<p class="center bold">Согласие на обработку персональных данных</p>
 
 <p class="justify">
   Я, <b>${fullName}</b>, дата рождения ${birthDate}, место рождения ${birthPlace},
@@ -87,7 +49,7 @@ function buildBody(item: SavingApplication): string {
 </p>
 
 <p class="justify">
-  настоящим даю своё согласие Организации «ЭКСПЕРТ ФИНАНС» ИНН 4307012081 и Организации «ФИН ФОРМУЛА» ИНН 3666209530
+  настоящим даю своё согласие ${orgsStr}
   на обработку моих персональных данных, включая сбор, систематизацию, накопление, хранение, уточнение
   (обновление, изменение), использование, распространение (в том числе передачу), обезличивание,
   блокирование, уничтожение персональных данных в целях заключения и исполнения договора паевого счета,
@@ -119,16 +81,16 @@ function buildBody(item: SavingApplication): string {
 `;
 }
 
-export function SavingApplicationDocButtons({ item }: Props) {
-  const title = `Заявление на паевой взнос ${item.application_no || ""}`;
+export function SavingApplicationDocButtons({ item, orgs }: Props) {
+  const title = `Согласие на обработку ПДн ${item.application_no || ""}`;
 
   const handlePrint = () => {
-    openPrintWindow(title, buildBody(item));
+    openPrintWindow(title, buildBody(item, orgs));
   };
 
   const handleDocx = () => {
-    const html = buildHtmlDoc(title, buildBody(item));
-    downloadDocx(`Заявление_на_паевой_взнос_${item.application_no || "б-н"}.doc`, html);
+    const html = buildHtmlDoc(title, buildBody(item, orgs));
+    downloadDocx(`Согласие_на_обработку_ПДн_${item.application_no || "б-н"}.doc`, html);
   };
 
   return (
