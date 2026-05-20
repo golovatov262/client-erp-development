@@ -65,7 +65,7 @@ const SavingDepositQR = ({ detail, orgs }: { detail: SavingDetail; orgs?: Organi
     payeeINN: org.inn || "",
     kpp: org.kpp || "",
     lastName: detail.member_name,
-    purpose: `Пополнение сбережений по договору ${detail.contract_no}. ${detail.member_name}`,
+    purpose: `Пополнение лицевого счета № ${detail.contract_no} ${detail.member_name}`,
   });
   return (
     <div className="mt-2">
