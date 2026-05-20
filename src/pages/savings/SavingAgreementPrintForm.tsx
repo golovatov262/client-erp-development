@@ -3,7 +3,7 @@ import { SavingDetail, MemberDetail, Organization } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import api from "@/lib/api";
-import { buildHtmlDoc, downloadDocx, openPrintWindow } from "@/lib/doc-utils";
+import { buildHtmlDoc, downloadDocx } from "@/lib/doc-utils";
 
 type Props = {
   detail: SavingDetail;
@@ -284,38 +284,33 @@ ${items.join("\n")}
 `;
 }
 
+async function loadAgreementData(detail: SavingDetail, orgs?: Organization[]): Promise<{ member: MemberDetail | null; org: Organization | null }> {
+  const [memberRes, orgRes] = await Promise.all([
+    detail.member_id ? api.members.get(detail.member_id).catch(() => null) : Promise.resolve(null),
+    detail.org_id && orgs ? Promise.resolve(orgs.find(o => o.id === detail.org_id) || null) : Promise.resolve(null),
+  ]);
+  return { member: memberRes, org: orgRes };
+}
+
+export async function downloadAgreementDocx(detail: SavingDetail, orgs?: Organization[]) {
+  const changes = detectChanges(detail);
+  if (!changes.hasRateChange && !changes.hasTermChange) return;
+  const { member, org } = await loadAgreementData(detail, orgs);
+  const title = `Доп. соглашение к договору ${detail.contract_no}`;
+  const html = buildHtmlDoc(title, buildBody(detail, member, org, changes));
+  downloadDocx(`Доп_соглашение_${detail.contract_no || "б-н"}.doc`, html);
+}
+
 export function SavingAgreementDocButtons({ detail, orgs }: Props) {
   const [loading, setLoading] = useState(false);
-
-  const loadData = async (): Promise<{ member: MemberDetail | null; org: Organization | null }> => {
-    const [memberRes, orgRes] = await Promise.all([
-      detail.member_id ? api.members.get(detail.member_id).catch(() => null) : Promise.resolve(null),
-      detail.org_id && orgs ? Promise.resolve(orgs.find(o => o.id === detail.org_id) || null) : Promise.resolve(null),
-    ]);
-    return { member: memberRes, org: orgRes };
-  };
 
   const changes = detectChanges(detail);
   if (!changes.hasRateChange && !changes.hasTermChange) return null;
 
-  const handlePrint = async () => {
-    setLoading(true);
-    try {
-      const { member, org } = await loadData();
-      const title = `Доп. соглашение к договору ${detail.contract_no}`;
-      openPrintWindow(title, buildBody(detail, member, org, changes));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDocx = async () => {
     setLoading(true);
     try {
-      const { member, org } = await loadData();
-      const title = `Доп. соглашение к договору ${detail.contract_no}`;
-      const html = buildHtmlDoc(title, buildBody(detail, member, org, changes));
-      downloadDocx(`Доп_соглашение_${detail.contract_no || "б-н"}.doc`, html);
+      await downloadAgreementDocx(detail, orgs);
     } finally {
       setLoading(false);
     }
@@ -323,13 +318,9 @@ export function SavingAgreementDocButtons({ detail, orgs }: Props) {
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={handlePrint} disabled={loading} title="Печать доп. соглашения">
-        <Icon name="FileSignature" size={15} className="mr-1.5" />
-        Печать ДС
-      </Button>
       <Button variant="outline" size="sm" onClick={handleDocx} disabled={loading} title="Скачать доп. соглашение DOCX">
         <Icon name="FileDown" size={15} className="mr-1.5" />
-        ДС DOCX
+        Доп. соглашение DOCX
       </Button>
     </>
   );

@@ -10,7 +10,8 @@ import DataTable, { Column } from "@/components/ui/data-table";
 import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem, Organization } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
-import { SavingContractDocButtons } from "./SavingContractPrintForm";
+import { downloadContractDocx } from "./SavingContractPrintForm";
+import { downloadAgreementDocx, hasContractChanges } from "./SavingAgreementPrintForm";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -311,24 +312,94 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           </TabsContent>
 
           <TabsContent value="documents">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Icon name="FileText" size={18} />
-                  Договор сбережений № {detail.contract_no}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="text-sm text-muted-foreground">
-                  Печатная форма договора с автоматически подставленными реквизитами организации и пайщика. Скачайте в формате DOCX или отправьте на печать.
-                </div>
-                <SavingContractDocButtons detail={detail} orgs={props.orgs} />
-              </CardContent>
-            </Card>
+            <DocumentsTab detail={detail} orgs={props.orgs} />
           </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+};
+
+type DocItem = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  available: boolean;
+  unavailableHint?: string;
+  onDownload: () => Promise<void>;
+};
+
+const DocumentsTab = ({ detail, orgs }: { detail: SavingDetail; orgs?: Organization[] }) => {
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const docs: DocItem[] = useMemo(() => {
+    const changesExist = hasContractChanges(detail);
+    return [
+      {
+        id: "contract",
+        title: `Договор паевого счёта № ${detail.contract_no}`,
+        description: "Основной договор с реквизитами организации и пайщика, графиком и условиями. Формируется автоматически.",
+        icon: "FileText",
+        available: true,
+        onDownload: () => downloadContractDocx(detail, orgs),
+      },
+      {
+        id: "agreement",
+        title: "Дополнительное соглашение к договору",
+        description: changesExist
+          ? "Фиксирует изменение ставки и/или срока договора. Параметры подставляются из истории изменений."
+          : "Будет доступно после первого изменения ставки или срока действия договора.",
+        icon: "FileSignature",
+        available: changesExist,
+        unavailableHint: "Нет изменений ставки или срока — соглашение не требуется",
+        onDownload: () => downloadAgreementDocx(detail, orgs),
+      },
+    ];
+  }, [detail, orgs]);
+
+  const handleDownload = async (doc: DocItem) => {
+    setLoadingId(doc.id);
+    try {
+      await doc.onDownload();
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-muted-foreground">
+        Документы формируются автоматически в формате DOCX (Microsoft Word) на основе данных договора и реквизитов организации.
+      </div>
+      <div className="space-y-2">
+        {docs.map((doc) => (
+          <Card key={doc.id} className={doc.available ? "" : "opacity-60"}>
+            <CardContent className="p-4 flex items-start gap-3">
+              <div className="shrink-0 mt-0.5 rounded-md bg-muted p-2">
+                <Icon name={doc.icon} size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium">{doc.title}</div>
+                <div className="text-sm text-muted-foreground mt-0.5">{doc.description}</div>
+              </div>
+              <div className="shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!doc.available || loadingId === doc.id}
+                  onClick={() => handleDownload(doc)}
+                  title={doc.available ? "Скачать DOCX" : doc.unavailableHint}
+                >
+                  <Icon name={loadingId === doc.id ? "Loader2" : "FileDown"} size={15} className={`mr-1.5 ${loadingId === doc.id ? "animate-spin" : ""}`} />
+                  Скачать DOCX
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 };
 
