@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import api from "@/lib/api";
 import { buildHtmlDoc, downloadDocx, openPrintWindow } from "@/lib/doc-utils";
+import { SavingAgreementDocButtons } from "./SavingAgreementPrintForm";
 
 type Props = {
   detail: SavingDetail;
@@ -333,7 +334,7 @@ export function SavingContractDocButtons({ detail, orgs }: Props) {
   };
 
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-2 flex-wrap">
       <Button variant="outline" size="sm" onClick={handlePrint} disabled={loading} title="Открыть для печати">
         <Icon name="Printer" size={15} className="mr-1.5" />
         Печать
@@ -342,6 +343,7 @@ export function SavingContractDocButtons({ detail, orgs }: Props) {
         <Icon name="FileDown" size={15} className="mr-1.5" />
         Скачать DOCX
       </Button>
+      <SavingAgreementDocButtons detail={detail} orgs={orgs} />
     </div>
   );
 }
