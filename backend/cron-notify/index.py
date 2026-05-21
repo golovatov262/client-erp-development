@@ -139,6 +139,39 @@ def get_sms_settings(cur):
         return {}
 
 
+def extract_org_short_name(name, short_name):
+    import re as _re
+    for src in (short_name, name):
+        if not src:
+            continue
+        m = _re.search(r'[«"\']([^»"\']+)[»"\']', src)
+        if m:
+            return m.group(1).strip()
+    return (short_name or name or '').strip()
+
+
+def get_org_for_member(cur, member_id):
+    try:
+        if member_id:
+            cur.execute("""
+                SELECT o.name, o.short_name, o.phone
+                FROM member_organizations mo
+                JOIN organizations o ON o.id = mo.org_id
+                WHERE mo.member_id = %d AND mo.excluded_at IS NULL AND o.is_active = true
+                ORDER BY mo.joined_at DESC LIMIT 1
+            """ % int(member_id))
+            row = cur.fetchone()
+            if row:
+                return {'name': extract_org_short_name(row[0], row[1]), 'phone': row[2] or ''}
+        cur.execute("SELECT name, short_name, phone FROM organizations WHERE is_active=true ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        if row:
+            return {'name': extract_org_short_name(row[0], row[1]), 'phone': row[2] or ''}
+    except Exception:
+        pass
+    return {'name': '', 'phone': ''}
+
+
 def send_smsaero(phone, text):
     email = os.environ.get('SMSAERO_EMAIL', '')
     api_key = os.environ.get('SMSAERO_API_KEY', '')
@@ -900,7 +933,11 @@ def send_sms_payment_reminders(cur, conn, check_date, settings):
             phone = row[0]
 
             amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-            text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+            org = get_org_for_member(cur, member_id)
+            try:
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+            except Exception:
+                text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
             ok, err = send_smsaero(phone, text)
             if ok:
@@ -975,7 +1012,11 @@ def send_sms_savings_reminders(cur, conn, check_date, settings):
             phone = row[0]
 
             amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-            text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+            org = get_org_for_member(cur, member_id)
+            try:
+                text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+            except Exception:
+                text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
             ok, err = send_smsaero(phone, text)
             if ok:

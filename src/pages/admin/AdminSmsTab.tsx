@@ -471,7 +471,7 @@ const AdminSmsTab = () => {
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm text-muted-foreground">
-                Переменные: <code className="bg-muted px-1 rounded text-xs">{"{contract_no}"}</code> — номер договора, <code className="bg-muted px-1 rounded text-xs">{"{amount}"}</code> — сумма, <code className="bg-muted px-1 rounded text-xs">{"{days}"}</code> — кол-во дней. SMS не поддерживает HTML — текст уйдёт как есть.
+                Переменные: <code className="bg-muted px-1 rounded text-xs">{"{contract_no}"}</code> — номер договора, <code className="bg-muted px-1 rounded text-xs">{"{amount}"}</code> — сумма, <code className="bg-muted px-1 rounded text-xs">{"{days}"}</code> — кол-во дней, <code className="bg-muted px-1 rounded text-xs">{"{org_name}"}</code> — наименование организации без аббревиатуры (например, Эксперт Финанс), <code className="bg-muted px-1 rounded text-xs">{"{org_phone}"}</code> — телефон организации. В ручной рассылке подстановка тоже работает. SMS не поддерживает HTML — текст уйдёт как есть.
               </p>
             </div>
 
@@ -483,7 +483,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_today || "Сегодня платеж по займу {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_today: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_today || "Сегодня платеж по займу {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_today: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -495,7 +495,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_tomorrow || "Завтра платеж по займу {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_tomorrow: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_tomorrow || "Завтра платеж по займу {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_tomorrow: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -507,7 +507,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_days || "Через {days} дн. платеж по займу {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_days: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_days || "Через {days} дн. платеж по займу {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_days: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -519,7 +519,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_overdue || "Просрочка по займу {contract_no}, сумма {amount} руб. Оплатите во избежание пени. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_overdue: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_overdue || "Просрочка по займу {contract_no}, сумма {amount} руб. Оплатите во избежание пени. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_overdue: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -531,7 +531,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_today || "Сегодня окончание договора сбережений {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_today: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_today || "Сегодня окончание договора сбережений {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_today: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -543,7 +543,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_tomorrow || "Завтра окончание договора сбережений {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_tomorrow: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_tomorrow || "Завтра окончание договора сбережений {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_tomorrow: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -555,7 +555,7 @@ const AdminSmsTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_days || "Через {days} дн. окончание договора сбережений {contract_no}, сумма {amount} руб. КПК"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_days: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_days || "Через {days} дн. окончание договора сбережений {contract_no}, сумма {amount} руб. Ваш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_days: e.target.value }))} />
               </CardContent>
             </Card>
 

@@ -4357,6 +4357,39 @@ def send_smsaero(phone, text):
     except Exception as e:
         return False, str(e)
 
+def extract_org_short_name(name, short_name):
+    import re as _re
+    for src in (short_name, name):
+        if not src:
+            continue
+        m = _re.search(r'[«"\']([^»"\']+)[»"\']', src)
+        if m:
+            return m.group(1).strip()
+    return (short_name or name or '').strip()
+
+
+def get_org_for_member(cur, member_id):
+    try:
+        if member_id:
+            cur.execute("""
+                SELECT o.name, o.short_name, o.phone
+                FROM member_organizations mo
+                JOIN organizations o ON o.id = mo.org_id
+                WHERE mo.member_id = %d AND mo.excluded_at IS NULL AND o.is_active = true
+                ORDER BY mo.joined_at DESC LIMIT 1
+            """ % int(member_id))
+            row = cur.fetchone()
+            if row:
+                return {'name': extract_org_short_name(row[0], row[1]), 'phone': row[2] or ''}
+        cur.execute("SELECT name, short_name, phone FROM organizations WHERE is_active=true ORDER BY id LIMIT 1")
+        row = cur.fetchone()
+        if row:
+            return {'name': extract_org_short_name(row[0], row[1]), 'phone': row[2] or ''}
+    except Exception:
+        pass
+    return {'name': '', 'phone': ''}
+
+
 def generate_token():
     return secrets.token_hex(32)
 
@@ -6019,8 +6052,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         if not os.environ.get('SMSAERO_EMAIL') or not os.environ.get('SMSAERO_API_KEY'):
             return {'error': 'SMSAero не настроен (нет SMSAERO_EMAIL / SMSAERO_API_KEY)'}
 
-        text = (title + '. ' + msg_body) if title else msg_body
-        text = text[:480]
+        base_text = (title + '. ' + msg_body) if title else msg_body
 
         if target == 'all':
             cur.execute("""SELECT id, phone FROM members
@@ -6044,6 +6076,12 @@ def handle_notifications(method, params, body, staff, cur, conn):
         sent = 0
         failed = 0
         for member_id, phone in recipients:
+            org = get_org_for_member(cur, member_id)
+            try:
+                text = base_text.format(org_name=org['name'], org_phone=org['phone'])
+            except Exception:
+                text = base_text.replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
+            text = text[:480]
             ok, err = send_smsaero(phone, text)
             if ok:
                 sent += 1
