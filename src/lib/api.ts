@@ -385,6 +385,12 @@ export const api = {
     maxWebhookInfo: () => request<{ url: string; update_types?: string[]; error?: string }>("POST", undefined, { entity: "notifications", action: "max_webhook_info" }),
     getMaxSettings: () => request<Record<string, string>>("GET", { entity: "notifications", action: "get_max_settings" }),
     saveMaxSettings: (settings: Record<string, string>) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_max_settings", settings }),
+    smsRecipients: () => request<SmsRecipient[]>("GET", { entity: "notifications", action: "sms_recipients" }),
+    sendSms: (data: { title?: string; body: string; target?: string; target_member_ids?: number[] }) =>
+      request<{ success: boolean; notification_id: number; sent: number; failed: number }>("POST", undefined, { entity: "notifications", action: "send_sms", ...data }),
+    testSms: (phone: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_sms", phone }),
+    getSmsSettings: () => request<Record<string, string>>("GET", { entity: "notifications", action: "get_sms_settings" }),
+    saveSmsSettings: (settings: Record<string, string>) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_sms_settings", settings }),
   },
 
   organizations: {
@@ -1331,9 +1337,22 @@ export interface NotificationStats {
   telegram_subscribers: number;
   max_subscribers: number;
   email_users: number;
+  sms_recipients: number;
   telegram_messages: number;
   max_messages: number;
   email_messages: number;
+  sms_messages: number;
+}
+
+export interface SmsRecipient {
+  id: number;
+  member_no: string;
+  member_type: string;
+  last_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  company_name: string | null;
+  phone: string;
 }
 
 export interface ChatConversation {

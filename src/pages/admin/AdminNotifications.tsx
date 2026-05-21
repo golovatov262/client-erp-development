@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 import AdminPushMessages from "./AdminPushMessages";
 import AdminTelegramTab from "./AdminTelegramTab";
 import AdminMaxTab from "./AdminMaxTab";
+import AdminSmsTab from "./AdminSmsTab";
 import AdminEmailTab from "./AdminEmailTab";
 
 const AdminNotifications = () => {
@@ -25,6 +26,10 @@ const AdminNotifications = () => {
             <Icon name="MessageCircle" size={15} />
             MAX
           </TabsTrigger>
+          <TabsTrigger value="sms" className="flex items-center gap-1.5">
+            <Icon name="MessageSquare" size={15} />
+            SMS
+          </TabsTrigger>
           <TabsTrigger value="email" className="flex items-center gap-1.5">
             <Icon name="Mail" size={15} />
             Email
@@ -41,6 +46,10 @@ const AdminNotifications = () => {
 
         <TabsContent value="max" className="mt-4">
           <AdminMaxTab />
+        </TabsContent>
+
+        <TabsContent value="sms" className="mt-4">
+          <AdminSmsTab />
         </TabsContent>
 
         <TabsContent value="email" className="mt-4">

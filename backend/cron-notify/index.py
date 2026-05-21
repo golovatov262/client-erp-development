@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import psycopg2
@@ -39,10 +40,13 @@ def handler(event, context):
         tg_savings_result = {'skipped': True, 'reason': 'time mismatch'}
         max_result = {'skipped': True, 'reason': 'time mismatch'}
         max_savings_result = {'skipped': True, 'reason': 'time mismatch'}
+        sms_result = {'skipped': True, 'reason': 'time mismatch'}
+        sms_savings_result = {'skipped': True, 'reason': 'time mismatch'}
 
         push_settings = get_push_settings(cur)
         tg_settings = get_telegram_settings(cur)
         max_settings = get_max_settings(cur)
+        sms_settings = get_sms_settings(cur)
 
         push_loan_hour = parse_hour(push_settings.get('remind_time', '09:00'))
         push_savings_hour = parse_hour(push_settings.get('savings_remind_time', '09:00'))
@@ -50,6 +54,8 @@ def handler(event, context):
         tg_savings_hour = parse_hour(tg_settings.get('savings_remind_time', '09:00'))
         max_loan_hour = parse_hour(max_settings.get('remind_time', '09:00'))
         max_savings_hour = parse_hour(max_settings.get('savings_remind_time', '09:00'))
+        sms_loan_hour = parse_hour(sms_settings.get('remind_time', '10:00'))
+        sms_savings_hour = parse_hour(sms_settings.get('savings_remind_time', '10:00'))
 
         if force or current_hour == push_loan_hour:
             push_result = send_payment_reminders(cur, conn, today_str, push_settings)
@@ -63,6 +69,10 @@ def handler(event, context):
             max_result = send_max_payment_reminders(cur, conn, today_str, max_settings)
         if force or current_hour == max_savings_hour:
             max_savings_result = send_max_savings_reminders(cur, conn, today_str, max_settings)
+        if force or current_hour == sms_loan_hour:
+            sms_result = send_sms_payment_reminders(cur, conn, today_str, sms_settings)
+        if force or current_hour == sms_savings_hour:
+            sms_savings_result = send_sms_savings_reminders(cur, conn, today_str, sms_settings)
 
         conn.commit()
 
@@ -75,7 +85,9 @@ def handler(event, context):
             'telegram_reminders': tg_result,
             'telegram_savings_reminders': tg_savings_result,
             'max_reminders': max_result,
-            'max_savings_reminders': max_savings_result
+            'max_savings_reminders': max_savings_result,
+            'sms_reminders': sms_result,
+            'sms_savings_reminders': sms_savings_result
         }
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
@@ -117,6 +129,38 @@ def get_max_settings(cur):
         return {r[0]: r[1] for r in cur.fetchall()}
     except Exception:
         return {}
+
+
+def get_sms_settings(cur):
+    try:
+        cur.execute("SELECT key, value FROM sms_settings")
+        return {r[0]: r[1] for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def send_smsaero(phone, text):
+    email = os.environ.get('SMSAERO_EMAIL', '')
+    api_key = os.environ.get('SMSAERO_API_KEY', '')
+    if not email or not api_key:
+        return False, 'SMS-сервис не настроен'
+    clean = ''.join(c for c in phone if c.isdigit())
+    if len(clean) == 11 and clean[0] == '8':
+        clean = '7' + clean[1:]
+    if not clean.startswith('7') or len(clean) != 11:
+        return False, 'Неверный формат номера телефона'
+    params = urllib.parse.urlencode({'number': clean, 'text': text, 'sign': 'SMS Aero', 'channel': 'DIRECT'})
+    url = 'https://gate.smsaero.ru/v2/sms/send?' + params
+    credentials = base64.b64encode(('%s:%s' % (email, api_key)).encode()).decode()
+    req = urllib.request.Request(url, headers={'Authorization': 'Basic ' + credentials, 'Accept': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get('success'):
+                return True, None
+            return False, data.get('message', 'Ошибка отправки SMS')
+    except Exception as e:
+        return False, str(e)
 
 
 def get_bot_token(cur):
@@ -786,5 +830,163 @@ def send_max_savings_reminders(cur, conn, check_date, settings):
                         VALUES (%d, 0, %d, '%s')
                         ON CONFLICT DO NOTHING
                     """ % (s_id, user_id, rtype))
+
+    return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}
+
+
+def send_sms_payment_reminders(cur, conn, check_date, settings):
+    if settings.get('enabled', 'false') != 'true':
+        return {'skipped': True, 'reason': 'SMS reminders disabled'}
+    if not os.environ.get('SMSAERO_EMAIL') or not os.environ.get('SMSAERO_API_KEY'):
+        return {'skipped': True, 'reason': 'SMSAero not configured'}
+
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
+
+    reminder_days = []
+    for d in settings.get('reminder_days', '3,1,0').split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
+
+    tpl_payment_today = settings.get('tpl_payment_today', 'Сегодня платеж по займу {contract_no}, сумма {amount} руб. КПК')
+    tpl_payment_tomorrow = settings.get('tpl_payment_tomorrow', 'Завтра платеж по займу {contract_no}, сумма {amount} руб. КПК')
+    tpl_payment_days = settings.get('tpl_payment_days', 'Через {days} дн. платеж по займу {contract_no}, сумма {amount} руб. КПК')
+    tpl_overdue = settings.get('tpl_overdue', 'Просрочка по займу {contract_no}, сумма {amount} руб. Оплатите во избежание пени. КПК')
+
+    reminders = []
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            reminders.append(('sms_reminder_today', target_date, 'pending', tpl_payment_today))
+        elif days == 1:
+            reminders.append(('sms_reminder_1d', target_date, 'pending', tpl_payment_tomorrow))
+        else:
+            reminders.append(('sms_reminder_%dd' % days, target_date, 'pending',
+                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
+
+    if overdue_enabled:
+        reminders.append(('sms_overdue_1d', today_str, 'overdue', tpl_overdue))
+
+    sent_total = 0
+    failed_total = 0
+    errors = []
+
+    for rtype, target_date, sched_status, body_tpl in reminders:
+        cur.execute("""
+            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+            FROM loan_schedule ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE ls.payment_date = '%s'
+              AND ls.status = '%s'
+              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+        """ % (target_date, sched_status))
+        schedules = cur.fetchall()
+
+        for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
+            cur.execute("""
+                SELECT id FROM sms_auto_log
+                WHERE loan_id=%d AND schedule_id=%d AND member_id=%d AND reminder_type='%s'
+            """ % (loan_id, ls_id, member_id, rtype))
+            if cur.fetchone():
+                continue
+
+            cur.execute("SELECT phone FROM members WHERE id=%d AND status='active'" % member_id)
+            row = cur.fetchone()
+            if not row or not row[0]:
+                continue
+            phone = row[0]
+
+            amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
+            text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+
+            ok, err = send_smsaero(phone, text)
+            if ok:
+                sent_total += 1
+                cur.execute("""
+                    INSERT INTO sms_auto_log (loan_id, schedule_id, member_id, reminder_type)
+                    VALUES (%d, %d, %d, '%s')
+                    ON CONFLICT DO NOTHING
+                """ % (loan_id, ls_id, member_id, rtype))
+            else:
+                failed_total += 1
+                errors.append((err or '')[:200])
+
+    return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}
+
+
+def send_sms_savings_reminders(cur, conn, check_date, settings):
+    if settings.get('savings_enabled', 'false') != 'true':
+        return {'skipped': True, 'reason': 'SMS savings reminders disabled'}
+    if not os.environ.get('SMSAERO_EMAIL') or not os.environ.get('SMSAERO_API_KEY'):
+        return {'skipped': True, 'reason': 'SMSAero not configured'}
+
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
+
+    reminder_days = []
+    for d in settings.get('savings_reminder_days', '7,1,0').split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    tpl_savings_today = settings.get('tpl_savings_today', 'Сегодня окончание договора сбережений {contract_no}, сумма {amount} руб. КПК')
+    tpl_savings_tomorrow = settings.get('tpl_savings_tomorrow', 'Завтра окончание договора сбережений {contract_no}, сумма {amount} руб. КПК')
+    tpl_savings_days = settings.get('tpl_savings_days', 'Через {days} дн. окончание договора сбережений {contract_no}, сумма {amount} руб. КПК')
+
+    sent_total = 0
+    failed_total = 0
+    errors = []
+
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            rtype = 'sms_savings_end_today'
+            body_tpl = tpl_savings_today
+        elif days == 1:
+            rtype = 'sms_savings_end_1d'
+            body_tpl = tpl_savings_tomorrow
+        else:
+            rtype = 'sms_savings_end_%dd' % days
+            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
+
+        cur.execute("""
+            SELECT s.id, s.contract_no, s.current_balance, s.member_id
+            FROM savings s
+            WHERE s.status = 'active'
+              AND s.end_date = '%s'
+        """ % target_date)
+        savings_rows = cur.fetchall()
+
+        for s_id, contract_no, balance, member_id in savings_rows:
+            cur.execute("""
+                SELECT id FROM sms_auto_log
+                WHERE loan_id=%d AND schedule_id=0 AND member_id=%d AND reminder_type='%s'
+            """ % (s_id, member_id, rtype))
+            if cur.fetchone():
+                continue
+
+            cur.execute("SELECT phone FROM members WHERE id=%d AND status='active'" % member_id)
+            row = cur.fetchone()
+            if not row or not row[0]:
+                continue
+            phone = row[0]
+
+            amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
+            text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+
+            ok, err = send_smsaero(phone, text)
+            if ok:
+                sent_total += 1
+                cur.execute("""
+                    INSERT INTO sms_auto_log (loan_id, schedule_id, member_id, reminder_type)
+                    VALUES (%d, 0, %d, '%s')
+                    ON CONFLICT DO NOTHING
+                """ % (s_id, member_id, rtype))
+            else:
+                failed_total += 1
+                errors.append((err or '')[:200])
 
     return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}

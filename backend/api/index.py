@@ -5567,7 +5567,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         channel = body.get('channel', '')
         enabled = body.get('enabled')
         settings = body.get('settings', {})
-        if channel not in ('push', 'telegram', 'email', 'max'):
+        if channel not in ('push', 'telegram', 'email', 'max', 'sms'):
             return {'error': 'Неизвестный канал'}
         parts = []
         if enabled is not None:
@@ -5763,6 +5763,8 @@ def handle_notifications(method, params, body, staff, cur, conn):
         max_subs = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM users WHERE email IS NOT NULL AND email != '' AND status='active'")
         email_users = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM members WHERE status='active' AND phone IS NOT NULL AND phone <> ''")
+        sms_recipients = cur.fetchone()[0]
         cur.execute("SELECT channel, COUNT(*) as cnt FROM notification_history GROUP BY channel")
         channel_counts = {}
         for r in cur.fetchall():
@@ -5771,9 +5773,11 @@ def handle_notifications(method, params, body, staff, cur, conn):
             'telegram_subscribers': tg_subs,
             'max_subscribers': max_subs,
             'email_users': email_users,
+            'sms_recipients': sms_recipients,
             'telegram_messages': channel_counts.get('telegram', 0),
             'max_messages': channel_counts.get('max', 0),
-            'email_messages': channel_counts.get('email', 0)
+            'email_messages': channel_counts.get('email', 0),
+            'sms_messages': channel_counts.get('sms', 0)
         }
 
     if action == 'test_telegram':
@@ -5994,6 +5998,93 @@ def handle_notifications(method, params, body, staff, cur, conn):
                 cur.execute("UPDATE max_settings SET value='%s', updated_at=NOW() WHERE key='%s'" % (val, k))
             else:
                 cur.execute("INSERT INTO max_settings (key, value) VALUES ('%s', '%s')" % (k, val))
+        conn.commit()
+        return {'success': True}
+
+    if action == 'sms_recipients':
+        cur.execute("""SELECT m.id, m.member_no, m.last_name, m.first_name, m.middle_name, m.company_name, m.member_type, m.phone
+            FROM members m
+            WHERE m.status='active' AND m.phone IS NOT NULL AND m.phone <> ''
+            ORDER BY m.last_name, m.first_name""")
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    if action == 'send_sms':
+        title = body.get('title', '').strip()
+        msg_body = body.get('body', '').strip()
+        target = body.get('target', 'all')
+        target_member_ids = body.get('target_member_ids', [])
+        if not msg_body:
+            return {'error': 'Введите текст сообщения'}
+        if not os.environ.get('SMSAERO_EMAIL') or not os.environ.get('SMSAERO_API_KEY'):
+            return {'error': 'SMSAero не настроен (нет SMSAERO_EMAIL / SMSAERO_API_KEY)'}
+
+        text = (title + '. ' + msg_body) if title else msg_body
+        text = text[:480]
+
+        if target == 'all':
+            cur.execute("""SELECT id, phone FROM members
+                WHERE status='active' AND phone IS NOT NULL AND phone <> ''""")
+        elif target == 'selected' and target_member_ids:
+            ids_str = ','.join(str(int(i)) for i in target_member_ids)
+            cur.execute("""SELECT id, phone FROM members
+                WHERE id IN (%s) AND status='active' AND phone IS NOT NULL AND phone <> ''""" % ids_str)
+        else:
+            return {'error': 'Неверный тип рассылки'}
+
+        recipients = cur.fetchall()
+        cur.execute("""INSERT INTO notification_history (channel, title, body, target, target_user_ids, created_by, status)
+            VALUES ('sms', '%s', '%s', '%s', %s, %d, 'sending') RETURNING id""" % (
+            title.replace("'", "''"), msg_body.replace("'", "''"), target.replace("'", "''"),
+            "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_member_ids) if target_member_ids else 'NULL',
+            staff['user_id']))
+        notif_id = cur.fetchone()[0]
+        conn.commit()
+
+        sent = 0
+        failed = 0
+        for member_id, phone in recipients:
+            ok, err = send_smsaero(phone, text)
+            if ok:
+                sent += 1
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status) VALUES (%d, NULL, 'sms', 'sent')" % notif_id)
+            else:
+                failed += 1
+                err_text = (err or '').replace("'", "''")[:500]
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status, error_text) VALUES (%d, NULL, 'sms', 'failed', '%s')" % (notif_id, err_text))
+
+        cur.execute("UPDATE notification_history SET status='sent', sent_count=%d, failed_count=%d, sent_at=NOW() WHERE id=%d" % (sent, failed, notif_id))
+        conn.commit()
+        return {'success': True, 'notification_id': notif_id, 'sent': sent, 'failed': failed}
+
+    if action == 'test_sms':
+        phone = body.get('phone', '').strip()
+        if not phone:
+            return {'error': 'Укажите номер телефона'}
+        ok, err = send_smsaero(phone, 'Тестовое уведомление КПК')
+        if ok:
+            return {'success': True}
+        return {'error': err or 'Ошибка отправки SMS'}
+
+    if action == 'get_sms_settings':
+        cur.execute("SELECT key, value FROM sms_settings")
+        return {r[0]: r[1] for r in cur.fetchall()}
+
+    if action == 'save_sms_settings':
+        settings = body.get('settings', {})
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time', 'savings_remind_time',
+                   'savings_enabled', 'savings_reminder_days',
+                   'tpl_payment_today', 'tpl_payment_tomorrow', 'tpl_payment_days', 'tpl_overdue',
+                   'tpl_savings_today', 'tpl_savings_tomorrow', 'tpl_savings_days'}
+        for k, v in settings.items():
+            if k not in allowed:
+                continue
+            val = str(v).replace("'", "''")
+            cur.execute("SELECT id FROM sms_settings WHERE key='%s'" % k)
+            if cur.fetchone():
+                cur.execute("UPDATE sms_settings SET value='%s', updated_at=NOW() WHERE key='%s'" % (val, k))
+            else:
+                cur.execute("INSERT INTO sms_settings (key, value) VALUES ('%s', '%s')" % (k, val))
         conn.commit()
         return {'success': True}
 
