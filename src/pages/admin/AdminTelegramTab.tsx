@@ -468,7 +468,7 @@ const AdminTelegramTab = () => {
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm text-muted-foreground">
-                Используйте переменные: <code className="bg-muted px-1 rounded text-xs">{"{contract_no}"}</code> — номер договора, <code className="bg-muted px-1 rounded text-xs">{"{amount}"}</code> — сумма, <code className="bg-muted px-1 rounded text-xs">{"{days}"}</code> — кол-во дней (для шаблона «за N дней»). Поддерживается HTML: <code className="bg-muted px-1 rounded text-xs">{"<b>жирный</b>"}</code>
+                Используйте переменные: <code className="bg-muted px-1 rounded text-xs">{"{contract_no}"}</code> — номер договора, <code className="bg-muted px-1 rounded text-xs">{"{amount}"}</code> — сумма, <code className="bg-muted px-1 rounded text-xs">{"{days}"}</code> — кол-во дней (для шаблона «за N дней»), <code className="bg-muted px-1 rounded text-xs">{"{org_name}"}</code> — наименование организации без аббревиатуры (например, Эксперт Финанс), <code className="bg-muted px-1 rounded text-xs">{"{org_phone}"}</code> — телефон организации. В ручной рассылке подстановка тоже работает. Поддерживается HTML: <code className="bg-muted px-1 rounded text-xs">{"<b>жирный</b>"}</code>
               </p>
             </div>
 
@@ -480,7 +480,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_today || "Сегодня дата платежа по займу <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_today: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_today || "Сегодня дата платежа по займу <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_today: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -492,7 +492,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_tomorrow || "До даты платежа по займу <b>{contract_no}</b> остался <b>1 день</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_tomorrow: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_tomorrow || "До даты платежа по займу <b>{contract_no}</b> остался <b>1 день</b>.\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_tomorrow: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -504,7 +504,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_payment_days || "До даты платежа по займу <b>{contract_no}</b> осталось <b>{days} дн.</b>\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_days: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_payment_days || "До даты платежа по займу <b>{contract_no}</b> осталось <b>{days} дн.</b>\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_payment_days: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -516,7 +516,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_overdue || "Платёж по займу <b>{contract_no}</b> просрочен.\nСумма: <b>{amount}</b> руб.\n\nВо избежание пени оплатите как можно скорее."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_overdue: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_overdue || "Платёж по займу <b>{contract_no}</b> просрочен.\nСумма: <b>{amount}</b> руб.\n\nВо избежание пени оплатите как можно скорее.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_overdue: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -528,7 +528,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_today || "Сегодня истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_today: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_today || "Сегодня истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_today: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -540,7 +540,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_tomorrow || "Завтра истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_tomorrow: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_tomorrow || "Завтра истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_tomorrow: e.target.value }))} />
               </CardContent>
             </Card>
 
@@ -552,7 +552,7 @@ const AdminTelegramTab = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea rows={3} value={autoSettings.tpl_savings_days || "Через <b>{days} дн.</b> истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб."} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_days: e.target.value }))} />
+                <Textarea rows={3} value={autoSettings.tpl_savings_days || "Через <b>{days} дн.</b> истекает срок договора сбережений <b>{contract_no}</b>.\nСумма: <b>{amount}</b> руб.\nВаш \"{org_name}\", {org_phone}"} onChange={e => setAutoSettings(prev => ({ ...prev, tpl_savings_days: e.target.value }))} />
               </CardContent>
             </Card>
 

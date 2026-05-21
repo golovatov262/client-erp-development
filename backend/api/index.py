@@ -4368,6 +4368,18 @@ def extract_org_short_name(name, short_name):
     return (short_name or name or '').strip()
 
 
+def get_org_for_user(cur, user_id):
+    try:
+        if user_id:
+            cur.execute("SELECT member_id FROM users WHERE id = %d" % int(user_id))
+            r = cur.fetchone()
+            if r and r[0]:
+                return get_org_for_member(cur, r[0])
+    except Exception:
+        pass
+    return get_org_for_member(cur, None)
+
+
 def get_org_for_member(cur, member_id):
     try:
         if member_id:
@@ -5643,7 +5655,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         if not bot_token:
             return {'error': 'Не указан токен бота Telegram'}
 
-        text = title + '\n\n' + msg_body if title else msg_body
+        base_text = title + '\n\n' + msg_body if title else msg_body
 
         if target == 'all':
             cur.execute("SELECT id, user_id, chat_id FROM telegram_subscribers WHERE active=true")
@@ -5667,6 +5679,11 @@ def handle_notifications(method, params, body, staff, cur, conn):
         for sub_row in subs:
             sub_id, user_id, chat_id = sub_row
             try:
+                org = get_org_for_user(cur, user_id)
+                try:
+                    text = base_text.format(org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = base_text.replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
                 url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
                 data = json.dumps({'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}).encode('utf-8')
                 req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
@@ -5889,7 +5906,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         bot_token = os.environ.get('MAX_BOT_TOKEN', '')
         if not bot_token:
             return {'error': 'Токен MAX-бота не настроен'}
-        text = title + '\n\n' + msg_body if title else msg_body
+        base_text = title + '\n\n' + msg_body if title else msg_body
         if target == 'all':
             cur.execute("SELECT id, user_id, chat_id FROM max_subscribers WHERE active=true")
         elif target == 'selected' and target_user_ids:
@@ -5910,6 +5927,11 @@ def handle_notifications(method, params, body, staff, cur, conn):
         for sub_row in subs:
             sub_id, user_id, chat_id = sub_row
             try:
+                org = get_org_for_user(cur, user_id)
+                try:
+                    text = base_text.format(org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = base_text.replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
                 url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(bot_token), chat_id)
                 data = json.dumps({'text': text, 'format': 'html'}).encode('utf-8')
                 req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})

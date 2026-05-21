@@ -275,8 +275,8 @@ def send_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('reminder_1d', target_date, 'pending', tpl_payment_tomorrow_title, tpl_payment_tomorrow_body))
         else:
             reminders.append(('reminder_%dd' % days, target_date, 'pending',
-                tpl_payment_days_title.format(days=days),
-                tpl_payment_days_body.format(contract_no='{contract_no}', amount='{amount}', days=days)))
+                tpl_payment_days_title.replace('{days}', str(days)),
+                tpl_payment_days_body.replace('{days}', str(days))))
 
     if overdue_enabled:
         reminders.append(('overdue_1d', today_str, 'overdue', tpl_overdue_title, tpl_overdue_body))
@@ -400,8 +400,8 @@ def send_savings_reminders(cur, conn, check_date, settings):
             body_tpl = tpl_savings_tomorrow_body
         else:
             rtype = 'savings_end_%dd' % days
-            title = tpl_savings_days_title.format(days=days)
-            body_tpl = tpl_savings_days_body.format(contract_no='{contract_no}', amount='{amount}', days=days)
+            title = tpl_savings_days_title.replace('{days}', str(days))
+            body_tpl = tpl_savings_days_body.replace('{days}', str(days))
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -501,7 +501,7 @@ def send_telegram_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('tg_reminder_1d', target_date, 'pending', tpl_payment_tomorrow))
         else:
             reminders.append(('tg_reminder_%dd' % days, target_date, 'pending',
-                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
+                tpl_payment_days.replace('{days}', str(days))))
 
     if overdue_enabled:
         reminders.append(('tg_overdue_1d', today_str, 'overdue', tpl_overdue))
@@ -545,7 +545,11 @@ def send_telegram_payment_reminders(cur, conn, check_date, settings):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+                org = get_org_for_member(cur, member_id)
+                try:
+                    text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
                 sub_sent = False
                 for (chat_id,) in tg_subs:
@@ -603,7 +607,7 @@ def send_telegram_savings_reminders(cur, conn, check_date, settings):
             body_tpl = tpl_savings_tomorrow
         else:
             rtype = 'tg_savings_end_%dd' % days
-            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
+            body_tpl = tpl_savings_days.replace('{days}', str(days))
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -637,7 +641,11 @@ def send_telegram_savings_reminders(cur, conn, check_date, settings):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+                org = get_org_for_member(cur, member_id)
+                try:
+                    text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
                 sub_sent = False
                 for (chat_id,) in tg_subs:
@@ -693,7 +701,7 @@ def send_max_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('max_reminder_1d', target_date, 'pending', tpl_payment_tomorrow))
         else:
             reminders.append(('max_reminder_%dd' % days, target_date, 'pending',
-                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
+                tpl_payment_days.replace('{days}', str(days))))
 
     if overdue_enabled:
         reminders.append(('max_overdue_1d', today_str, 'overdue', tpl_overdue))
@@ -745,7 +753,11 @@ def send_max_payment_reminders(cur, conn, check_date, settings):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
-                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+                org = get_org_for_member(cur, member_id)
+                try:
+                    text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
                 sub_sent = False
                 for (chat_id,) in max_subs:
@@ -803,7 +815,7 @@ def send_max_savings_reminders(cur, conn, check_date, settings):
             body_tpl = tpl_savings_tomorrow
         else:
             rtype = 'max_savings_end_%dd' % days
-            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
+            body_tpl = tpl_savings_days.replace('{days}', str(days))
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
@@ -845,7 +857,11 @@ def send_max_savings_reminders(cur, conn, check_date, settings):
                     continue
 
                 amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
-                text = body_tpl.format(contract_no=contract_no, amount=amount_str)
+                org = get_org_for_member(cur, member_id)
+                try:
+                    text = body_tpl.format(contract_no=contract_no, amount=amount_str, org_name=org['name'], org_phone=org['phone'])
+                except Exception:
+                    text = body_tpl.replace('{contract_no}', str(contract_no)).replace('{amount}', amount_str).replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
 
                 sub_sent = False
                 for (chat_id,) in max_subs:
@@ -898,7 +914,7 @@ def send_sms_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('sms_reminder_1d', target_date, 'pending', tpl_payment_tomorrow))
         else:
             reminders.append(('sms_reminder_%dd' % days, target_date, 'pending',
-                tpl_payment_days.format(contract_no='{contract_no}', amount='{amount}', days=days)))
+                tpl_payment_days.replace('{days}', str(days))))
 
     if overdue_enabled:
         reminders.append(('sms_overdue_1d', today_str, 'overdue', tpl_overdue))
@@ -987,7 +1003,7 @@ def send_sms_savings_reminders(cur, conn, check_date, settings):
             body_tpl = tpl_savings_tomorrow
         else:
             rtype = 'sms_savings_end_%dd' % days
-            body_tpl = tpl_savings_days.format(contract_no='{contract_no}', amount='{amount}', days=days)
+            body_tpl = tpl_savings_days.replace('{days}', str(days))
 
         cur.execute("""
             SELECT s.id, s.contract_no, s.current_balance, s.member_id
