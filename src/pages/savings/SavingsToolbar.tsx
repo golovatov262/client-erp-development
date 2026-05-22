@@ -32,6 +32,7 @@ const SavingsToolbar = ({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all">Все статусы</SelectItem>
+        <SelectItem value="awaiting_funds">Ожидает взноса</SelectItem>
         <SelectItem value="active">Активен</SelectItem>
         <SelectItem value="early_closed">Досрочно закрыт</SelectItem>
         <SelectItem value="closed">Закрыт</SelectItem>

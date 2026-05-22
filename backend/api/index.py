@@ -1682,12 +1682,11 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                     return {'statusCode': 400, 'headers': cors, 'body': json.dumps({'error': 'Договор с номером %s уже существует' % cn})}
             schedule = calc_savings_schedule(a, r, t, sd, pt)
             ed = add_months(sd, t)
-            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s,%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp, org_id if org_id else 'NULL'))
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',0,'awaiting_funds',%s,%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), mbp, org_id if org_id else 'NULL'))
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'opening','Открытие договора. Сумма: %s руб., ставка: %s%%, срок: %s мес.')" % (sid, sd.isoformat(), a, fmt_money(a), r, t))
-            audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес., несниж.остаток: %s%%' % (a, r, t, mbp), ip)
+            audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес., несниж.остаток: %s%% (ожидает первый взнос)' % (a, r, t, mbp), ip)
             conn.commit()
             return {'id': sid, 'contract_no': cn, 'schedule': schedule}
 
@@ -1698,16 +1697,31 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             td = body.get('transaction_date', date.today().isoformat())
             ic = body.get('is_cash', False)
             d = body.get('description', '')
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',%s,'%s')" % (sid, td, a, tt, ic, esc(d)))
             if tt == 'deposit':
-                cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (a, a, sid))
-                cur.execute("SELECT amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s" % sid)
+                cur.execute("SELECT status, current_balance, amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s" % sid)
                 sv = cur.fetchone()
-                recalc_savings_schedule(cur, sid, float(sv[0]), float(sv[1]), int(sv[2]), date.fromisoformat(str(sv[3])), sv[4])
-            elif tt == 'withdrawal':
-                cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (a, sid))
-            elif tt == 'interest_payout':
-                cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, updated_at=NOW() WHERE id=%s" % (a, sid))
+                s_status = sv[0]
+                s_balance = float(sv[1] or 0)
+                s_amount = float(sv[2] or 0)
+                is_first = (s_status == 'awaiting_funds') or (s_balance == 0)
+                actual_tt = 'opening' if is_first else 'deposit'
+                actual_desc = d or ('Первичный взнос' if is_first else 'Довложение')
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',%s,'%s')" % (sid, td, a, actual_tt, ic, esc(actual_desc)))
+                new_balance = s_balance + a
+                new_amount = max(s_amount, new_balance)
+                if is_first:
+                    cur.execute("UPDATE savings SET current_balance=%s, amount=%s, start_date='%s', status='active', updated_at=NOW() WHERE id=%s" % (new_balance, new_amount, td, sid))
+                else:
+                    cur.execute("UPDATE savings SET current_balance=%s, amount=%s, updated_at=NOW() WHERE id=%s" % (new_balance, new_amount, sid))
+                cur.execute("SELECT amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s" % sid)
+                sv2 = cur.fetchone()
+                recalc_savings_schedule(cur, sid, float(sv2[0]), float(sv2[1]), int(sv2[2]), date.fromisoformat(str(sv2[3])), sv2[4])
+            else:
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',%s,'%s')" % (sid, td, a, tt, ic, esc(d)))
+                if tt == 'withdrawal':
+                    cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (a, sid))
+                elif tt == 'interest_payout':
+                    cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, updated_at=NOW() WHERE id=%s" % (a, sid))
             tt_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %'}
             audit_log(cur, staff, 'transaction', 'saving', sid, '', '%s: %s' % (tt_labels.get(tt, tt), a), ip)
             conn.commit()
@@ -8224,13 +8238,12 @@ def handle_saving_applications(method, params, body, cur, conn, staff=None, ip='
             cn = '%s-%s' % (nn, sd.strftime('%d%m%Y'))
             schedule = calc_savings_schedule(amt, rt, term, sd, pt)
             ed = add_months(sd, term)
-            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',0,%s) RETURNING id" % (esc(cn), mid, amt, rt, term, pt, sd.isoformat(), ed.isoformat(), amt, org_id if org_id else 'NULL'))
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',0,'awaiting_funds',0,%s) RETURNING id" % (esc(cn), mid, amt, rt, term, pt, sd.isoformat(), ed.isoformat(), org_id if org_id else 'NULL'))
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'opening','Открытие договора. Сумма: %s руб., ставка: %s%%, срок: %s мес.')" % (sid, sd.isoformat(), amt, amt, rt, term))
             cur.execute("UPDATE saving_applications SET status='concluded', created_saving_id=%s, updated_at=NOW() WHERE id=%s" % (sid, app_id))
-            audit_log(cur, staff, 'conclude', 'saving_app', app_id, '', 'Создан договор сбережений #%s' % sid, ip)
+            audit_log(cur, staff, 'conclude', 'saving_app', app_id, '', 'Создан договор сбережений #%s (ожидает первый взнос)' % sid, ip)
             conn.commit()
             return {'success': True, 'saving_id': sid, 'contract_no': cn}
 

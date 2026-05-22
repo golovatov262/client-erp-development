@@ -967,13 +967,27 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
 
 
 def process_savings_deposit(cur, conn, saving_id, amount, payment_date, description):
-    cur.execute("SELECT current_balance, status FROM savings WHERE id=%s" % saving_id)
+    cur.execute("SELECT current_balance, status, amount FROM savings WHERE id=%s" % saving_id)
     sav = cur.fetchone()
-    if not sav or sav[1] != 'active':
+    if not sav:
+        return None, 'Saving not found'
+    s_status = sav[1]
+    if s_status not in ('active', 'awaiting_funds'):
         return None, 'Saving not active'
+    s_balance = float(sav[0] or 0)
+    s_amount = float(sav[2] or 0)
     amt = float(amount)
-    cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'deposit',false,'%s')" % (saving_id, payment_date, amt, esc(description)))
-    cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (amt, amt, saving_id))
+    is_first = (s_status == 'awaiting_funds') or (s_balance == 0)
+    tt = 'opening' if is_first else 'deposit'
+    desc_prefix = 'Первичный взнос. ' if is_first else ''
+    full_desc = desc_prefix + (description or '')
+    cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',false,'%s')" % (saving_id, payment_date, amt, tt, esc(full_desc)))
+    new_balance = s_balance + amt
+    new_amount = max(s_amount, new_balance)
+    if is_first:
+        cur.execute("UPDATE savings SET current_balance=%s, amount=%s, start_date='%s', status='active', updated_at=NOW() WHERE id=%s" % (new_balance, new_amount, payment_date, saving_id))
+    else:
+        cur.execute("UPDATE savings SET current_balance=%s, amount=%s, updated_at=NOW() WHERE id=%s" % (new_balance, new_amount, saving_id))
     return True, None
 
 

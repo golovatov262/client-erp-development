@@ -163,8 +163,18 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
             <DialogTitle>{detail.contract_no}</DialogTitle>
             <div className="text-sm text-muted-foreground mt-1">{detail.member_name}</div>
           </div>
-          <Badge variant={detail.status === "active" ? "default" : "secondary"}>{detail.status === "active" ? "Активен" : detail.status === "early_closed" ? "Досрочно" : "Закрыт"}</Badge>
+          <Badge variant={detail.status === "active" ? "default" : detail.status === "awaiting_funds" ? "warning" : "secondary"}>{detail.status === "active" ? "Активен" : detail.status === "awaiting_funds" ? "Ожидает взноса" : detail.status === "early_closed" ? "Досрочно" : "Закрыт"}</Badge>
         </DialogHeader>
+
+        {detail.status === "awaiting_funds" && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-100">
+            <Icon name="Clock" size={16} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <span className="font-medium">Договор открыт, ожидает первый взнос.</span>
+              <span className="text-amber-800/80 dark:text-amber-200/80"> Проценты начнут начисляться с даты первого поступления (нал/безнал, можно частями).</span>
+            </div>
+          </div>
+        )}
 
         {lastReactivation && (
           <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-100">
@@ -193,6 +203,9 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           <div className="flex flex-wrap gap-2 justify-between">
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={props.onEdit}><Icon name="Pencil" size={14} className="mr-1" />Редактировать</Button>
+              {detail.status === "awaiting_funds" && (
+                <Button size="sm" onClick={props.onDeposit}><Icon name="Plus" size={14} className="mr-1" />Внести первый взнос</Button>
+              )}
               {detail.status === "active" && (<>
                 <Button size="sm" onClick={props.onDeposit}><Icon name="Plus" size={14} className="mr-1" />Пополнение</Button>
                 <Button size="sm" onClick={props.onInterest} disabled={detail.accrued_interest <= 0}><Icon name="DollarSign" size={14} className="mr-1" />Выплатить %</Button>
