@@ -8142,18 +8142,74 @@ def handle_saving_applications(method, params, body, cur, conn, staff=None, ip='
             row = dict(zip([d[0] for d in cur.description], app)) if not isinstance(app, dict) else app
             mid = row.get('member_id')
             if not mid:
-                ln = esc(row.get('last_name') or '')
-                fn = esc(row.get('first_name') or '')
-                mn = esc(row.get('middle_name') or '')
+                ln = (row.get('last_name') or '').strip()
+                fn = (row.get('first_name') or '').strip()
+                mn = (row.get('middle_name') or '').strip()
                 if not ln:
                     return {'error': 'Для заключения договора укажите Фамилию вкладчика'}
-                cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(member_no FROM '[0-9]+$') AS INTEGER)),0)+1 FROM members WHERE member_no ~ '[0-9]+$'")
-                mno = 'П-%06d' % (cur.fetchone()[0] or 1)
-                phn = esc(row.get('phone') or '')
-                inn_v = esc(row.get('inn') or '')
-                addr = esc(row.get('registration_address') or '')
-                cur.execute("INSERT INTO members (member_no, member_type, last_name, first_name, middle_name, phone, inn, registration_address, status) VALUES ('%s','FL','%s','%s','%s','%s','%s','%s','active') RETURNING id" % (mno, ln, fn, mn, phn, inn_v, addr))
-                mid = cur.fetchone()[0]
+                inn_v = (row.get('inn') or '').strip()
+                ps = (row.get('passport_series') or '').strip()
+                pn = (row.get('passport_number') or '').strip()
+                phn = (row.get('phone') or '').strip()
+                existing_mid = None
+                if inn_v:
+                    cur.execute("SELECT id FROM members WHERE inn='%s' LIMIT 1" % esc(inn_v))
+                    r = cur.fetchone()
+                    if r:
+                        existing_mid = r[0]
+                if not existing_mid and ps and pn:
+                    cur.execute("SELECT id FROM members WHERE passport_series='%s' AND passport_number='%s' LIMIT 1" % (esc(ps), esc(pn)))
+                    r = cur.fetchone()
+                    if r:
+                        existing_mid = r[0]
+                if not existing_mid and phn and ln and fn:
+                    cur.execute("SELECT id FROM members WHERE phone='%s' AND lower(last_name)=lower('%s') AND lower(first_name)=lower('%s') LIMIT 1" % (esc(phn), esc(ln), esc(fn)))
+                    r = cur.fetchone()
+                    if r:
+                        existing_mid = r[0]
+                if existing_mid:
+                    mid = existing_mid
+                    m_fields = ['last_name', 'first_name', 'middle_name', 'birth_date', 'birth_place',
+                                'passport_series', 'passport_number', 'passport_dept_code',
+                                'passport_issue_date', 'passport_issued_by', 'registration_address',
+                                'phone', 'email', 'telegram', 'bank_bik', 'bank_account',
+                                'marital_status', 'spouse_fio', 'spouse_phone',
+                                'extra_phone', 'extra_contact_fio']
+                    if inn_v:
+                        m_fields.append('inn')
+                    sets = []
+                    for f in m_fields:
+                        v = row.get(f)
+                        if v is None or (isinstance(v, str) and not v.strip()):
+                            continue
+                        if f in ('birth_date', 'passport_issue_date'):
+                            sets.append("%s=COALESCE(%s, '%s')" % (f, f, esc(str(v))))
+                        else:
+                            sets.append("%s=CASE WHEN COALESCE(NULLIF(TRIM(%s), ''), '') = '' THEN '%s' ELSE %s END" % (f, f, esc(str(v)), f))
+                    if sets:
+                        cur.execute("UPDATE members SET %s, updated_at=NOW() WHERE id=%s" % (','.join(sets), mid))
+                else:
+                    cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(member_no FROM '[0-9]+$') AS INTEGER)),0)+1 FROM members WHERE member_no ~ '[0-9]+$'")
+                    mno = 'П-%06d' % (cur.fetchone()[0] or 1)
+                    if not inn_v:
+                        inn_v = ''
+                    m_cols = ['member_no', 'member_type', 'status', 'last_name', 'first_name', 'middle_name', 'inn']
+                    m_vals = ["'%s'" % mno, "'FL'", "'active'", "'%s'" % esc(ln), "'%s'" % esc(fn), "'%s'" % esc(mn), "'%s'" % esc(inn_v)]
+                    optional = ['birth_date', 'birth_place', 'passport_series', 'passport_number',
+                                'passport_dept_code', 'passport_issue_date', 'passport_issued_by',
+                                'registration_address', 'phone', 'email', 'telegram',
+                                'bank_bik', 'bank_account', 'marital_status', 'spouse_fio',
+                                'spouse_phone', 'extra_phone', 'extra_contact_fio']
+                    for f in optional:
+                        v = row.get(f)
+                        if v is None:
+                            continue
+                        if isinstance(v, str) and not v.strip():
+                            continue
+                        m_cols.append(f)
+                        m_vals.append("'%s'" % esc(str(v)))
+                    cur.execute("INSERT INTO members (%s) VALUES (%s) RETURNING id" % (','.join(m_cols), ','.join(m_vals)))
+                    mid = cur.fetchone()[0]
                 cur.execute("UPDATE saving_applications SET member_id=%s WHERE id=%s" % (mid, app_id))
             amt = float(row.get('amount') or 0)
             term = int(row.get('term_months') or 0)
