@@ -1673,7 +1673,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             mbp = safe_float(body.get('min_balance_pct', 0), 'мин. остаток %')
             org_id = body.get('org_id')
             if not cn:
-                cur.execute("SELECT MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)) FROM savings WHERE contract_no ~ '^[0-9]+'")
+                cur.execute("SELECT MAX(CAST(SUBSTRING(contract_no FROM '^([0-9]+)-') AS BIGINT)) FROM savings WHERE contract_no ~ '^[0-9]+-'")
                 max_num = cur.fetchone()[0] or 0
                 cn = '%s-%s' % (max_num + 1, sd.strftime('%d%m%Y'))
             else:
@@ -8163,7 +8163,7 @@ def handle_saving_applications(method, params, body, cur, conn, staff=None, ip='
             if not amt or not term or not rt:
                 return {'error': 'Для заключения договора заполните сумму, срок и ставку'}
             sd = date.today()
-            cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)),0)+1 FROM savings WHERE contract_no ~ '^[0-9]+'")
+            cur.execute("SELECT COALESCE(MAX(CAST(SUBSTRING(contract_no FROM '^([0-9]+)-') AS BIGINT)),0)+1 FROM savings WHERE contract_no ~ '^[0-9]+-'")
             nn = cur.fetchone()[0] or 1
             cn = '%s-%s' % (nn, sd.strftime('%d%m%Y'))
             schedule = calc_savings_schedule(amt, rt, term, sd, pt)
