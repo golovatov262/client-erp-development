@@ -388,6 +388,19 @@ const Loans = () => {
     }
   };
 
+  const handleReapplyPayments = async () => {
+    if (!detail || !confirm('Переразнести все платежи по договору заново с учётом актуальных штрафов и процентов? Суммы платежей не изменятся, изменятся только их части (ОД / % / штраф).')) return;
+    try {
+      await api.loans.reapplyPayments(detail.id);
+      toast({ title: "Платежи переразнесены" });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   const handleHoliday = async () => {
     if (!detail) return;
     const months = parseInt(holidayForm.holiday_months);
@@ -559,6 +572,7 @@ const Loans = () => {
         onRebuildSchedule={handleRebuildSchedule}
         onReconciliation={() => setShowReconciliation(true)}
         onFixSchedule={handleFixSchedule}
+        onReapplyPayments={handleReapplyPayments}
         onEditLoan={() => setShowEditLoan(true)}
         onHoliday={() => {
           setHolidayForm({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: detail?.holiday_months ? String(detail.holiday_months) : "3" });

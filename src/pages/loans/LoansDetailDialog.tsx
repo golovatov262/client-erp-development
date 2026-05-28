@@ -43,6 +43,7 @@ interface LoansDetailDialogProps {
   onRecalcStatuses: () => void;
   onReconciliation: () => void;
   onFixSchedule: () => void;
+  onReapplyPayments: () => void;
   onEditLoan: () => void;
   onHoliday: () => void;
   onEndHolidayEarly: () => void;
@@ -260,6 +261,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
                 <Icon name="FileSearch" size={14} className="mr-1" />Сверка платежей
               </Button>
               {(isAdmin || isManager) && <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>}
+              {(isAdmin || isManager) && <Button size="sm" variant="outline" onClick={props.onReapplyPayments}><Icon name="Calculator" size={14} className="mr-1" />Переразнести платежи</Button>}
               {isAdmin && <>
                 <Button size="sm" variant="outline" onClick={props.onFixSchedule}><Icon name="Wrench" size={14} className="mr-1" />Исправить дубли</Button>
                 <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>

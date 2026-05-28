@@ -136,6 +136,8 @@ export const api = {
       request<CheckStatusResult>("GET", { entity: "loans", action: "check_status", loan_number: loanNumber }),
     recalcStatuses: (loanId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "recalc_statuses", loan_id: loanId }),
+    reapplyPayments: (loanId: number) =>
+      request<{ success: boolean; contract_no: string }>("POST", undefined, { entity: "loans", action: "reapply_payments", loan_id: loanId }),
     reconciliationReport: (loanId: number) =>
       request<ReconciliationReport>("GET", { entity: "loans", action: "reconciliation_report", id: loanId }),
     setHoliday: (data: { loan_id: number; holiday_start: string; holiday_months: number }) =>

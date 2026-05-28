@@ -1024,6 +1024,17 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True}
 
+        elif action == 'reapply_payments':
+            lid = int(body['loan_id'])
+            cur.execute("SELECT contract_no FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            recalc_loan_schedule_statuses(cur, lid)
+            audit_log(cur, staff, 'reapply_payments', 'loan', lid, lr[0], 'Платежи пересчитаны заново по текущему графику', ip)
+            conn.commit()
+            return {'success': True, 'contract_no': lr[0]}
+
         elif action == 'delete_all_payments':
             lid = int(body['loan_id'])
             cur.execute("SELECT amount, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
