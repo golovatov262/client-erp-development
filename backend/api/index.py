@@ -187,7 +187,72 @@ def refresh_loan_overdue_status(cur, lid):
         cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
 
+PENALTY_DAILY_RATE = Decimal('0.000547')
+
+def accrue_loan_penalties_until(cur, lid, target_date):
+    """Доначисляет пени по всем просроченным периодам займа до указанной даты (включительно).
+    Использует те же правила что cron-accrue: 0.0547% в день от непогашенного ОД периода.
+    Не уменьшает существующее значение penalty_amount — только увеличивает.
+    Учитывает кредитные каникулы (пропускает периоды и дни внутри каникул)."""
+    cur.execute("SELECT status, holiday_start, holiday_end FROM loans WHERE id=%s" % lid)
+    lrow = cur.fetchone()
+    if not lrow:
+        return Decimal('0')
+    l_status = lrow[0]
+    if l_status == 'closed':
+        return Decimal('0')
+    hol_start = lrow[1]
+    hol_end = lrow[2]
+    tgt = target_date if hasattr(target_date, 'isoformat') else date.fromisoformat(str(target_date))
+    if hol_start and hol_end:
+        hs = hol_start if hasattr(hol_start, 'isoformat') else date.fromisoformat(str(hol_start))
+        he = hol_end if hasattr(hol_end, 'isoformat') else date.fromisoformat(str(hol_end))
+        if hs <= tgt < he:
+            return Decimal('0')
+
+    cur.execute("""
+        SELECT id, payment_date, principal_amount, COALESCE(paid_amount,0), COALESCE(penalty_amount,0), status
+        FROM loan_schedule
+        WHERE loan_id=%s
+          AND payment_date < '%s'
+          AND status IN ('pending','partial','overdue')
+    """ % (lid, tgt.isoformat()))
+    rows = cur.fetchall()
+    total_added = Decimal('0')
+    for r in rows:
+        sid = r[0]
+        sch_date = r[1] if hasattr(r[1], 'isoformat') else date.fromisoformat(str(r[1]))
+        principal = Decimal(str(r[2]))
+        paid = Decimal(str(r[3]))
+        cur_pen = Decimal(str(r[4]))
+        overdue_principal = principal - min(paid, principal)
+        if overdue_principal <= 0:
+            continue
+        days = (tgt - sch_date).days
+        if hol_start and hol_end:
+            hs = hol_start if hasattr(hol_start, 'isoformat') else date.fromisoformat(str(hol_start))
+            he = hol_end if hasattr(hol_end, 'isoformat') else date.fromisoformat(str(hol_end))
+            ov_start = max(sch_date, hs)
+            ov_end = min(tgt, he)
+            if ov_end > ov_start:
+                days -= (ov_end - ov_start).days
+        if days <= 0:
+            continue
+        expected_pen = (overdue_principal * PENALTY_DAILY_RATE * Decimal(days)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if expected_pen > cur_pen:
+            diff = expected_pen - cur_pen
+            cur.execute("UPDATE loan_schedule SET penalty_amount=%s WHERE id=%s" % (float(expected_pen), sid))
+            total_added += diff
+    return total_added
+
 def recalc_loan_schedule_statuses(cur, lid):
+    cur.execute("SELECT MAX(payment_date) FROM loan_payments WHERE loan_id=%s" % lid)
+    last_pay_row = cur.fetchone()
+    if last_pay_row and last_pay_row[0]:
+        last_pd = last_pay_row[0] if hasattr(last_pay_row[0], 'isoformat') else date.fromisoformat(str(last_pay_row[0]))
+        today = date.today()
+        upto = max(last_pd, today)
+        accrue_loan_penalties_until(cur, lid, upto)
     cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
     cur.execute("SELECT id, payment_date, amount, manual_distribution, principal_part, interest_part, penalty_part FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
@@ -640,6 +705,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             pd = body['payment_date']
             amt = Decimal(str(safe_float(body['amount'], 'сумма')))
             overpay_strategy = body.get('overpay_strategy', '')
+
+            try:
+                accrue_loan_penalties_until(cur, lid, date.fromisoformat(pd) if isinstance(pd, str) else pd)
+            except Exception:
+                pass
 
             cur.execute("SELECT balance, rate, schedule_type, term_months, monthly_payment, start_date FROM loans WHERE id = %s" % lid)
             loan_row = cur.fetchone()

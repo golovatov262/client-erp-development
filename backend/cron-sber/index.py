@@ -5,7 +5,7 @@ import imaplib
 import email
 from email.header import decode_header
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import psycopg2
 import requests
 import urllib3
@@ -797,10 +797,66 @@ def refresh_loan_overdue_status(cur, lid):
         cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
 
 
+PENALTY_DAILY_RATE = Decimal('0.000547')
+
+def accrue_loan_penalties_until(cur, lid, target_date):
+    """Доначисляет пени по всем просроченным периодам займа до даты платежа.
+    Не уменьшает существующее penalty_amount. Учитывает кредитные каникулы."""
+    cur.execute("SELECT status, holiday_start, holiday_end FROM loans WHERE id=%s" % lid)
+    lrow = cur.fetchone()
+    if not lrow or lrow[0] == 'closed':
+        return Decimal('0')
+    hol_start = lrow[1]
+    hol_end = lrow[2]
+    tgt = target_date if hasattr(target_date, 'isoformat') else date.fromisoformat(str(target_date))
+    if hol_start and hol_end:
+        hs = hol_start if hasattr(hol_start, 'isoformat') else date.fromisoformat(str(hol_start))
+        he = hol_end if hasattr(hol_end, 'isoformat') else date.fromisoformat(str(hol_end))
+        if hs <= tgt < he:
+            return Decimal('0')
+    cur.execute("""
+        SELECT id, payment_date, principal_amount, COALESCE(paid_amount,0), COALESCE(penalty_amount,0)
+        FROM loan_schedule
+        WHERE loan_id=%s AND payment_date < '%s' AND status IN ('pending','partial','overdue')
+    """ % (lid, tgt.isoformat()))
+    rows = cur.fetchall()
+    total_added = Decimal('0')
+    for r in rows:
+        sid = r[0]
+        sch_date = r[1] if hasattr(r[1], 'isoformat') else date.fromisoformat(str(r[1]))
+        principal = Decimal(str(r[2]))
+        paid = Decimal(str(r[3]))
+        cur_pen = Decimal(str(r[4]))
+        overdue_principal = principal - min(paid, principal)
+        if overdue_principal <= 0:
+            continue
+        days = (tgt - sch_date).days
+        if hol_start and hol_end:
+            hs = hol_start if hasattr(hol_start, 'isoformat') else date.fromisoformat(str(hol_start))
+            he = hol_end if hasattr(hol_end, 'isoformat') else date.fromisoformat(str(hol_end))
+            ov_start = max(sch_date, hs)
+            ov_end = min(tgt, he)
+            if ov_end > ov_start:
+                days -= (ov_end - ov_start).days
+        if days <= 0:
+            continue
+        expected_pen = (overdue_principal * PENALTY_DAILY_RATE * Decimal(days)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if expected_pen > cur_pen:
+            diff = expected_pen - cur_pen
+            cur.execute("UPDATE loan_schedule SET penalty_amount=%s WHERE id=%s" % (float(expected_pen), sid))
+            total_added += diff
+    return total_added
+
+
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     """Разнесение платежа по займу.
     При досрочном погашении (сумма > текущего периода) проценты считаются
-    за фактические дни от предыдущего платежа, а не по графику."""
+    за фактические дни от предыдущего платежа, а не по графику.
+    Перед разнесением доначисляет пени по всем просроченным периодам до даты платежа."""
+    try:
+        accrue_loan_penalties_until(cur, loan_id, payment_date)
+    except Exception:
+        pass
     cur.execute("SELECT balance, rate, schedule_type, status FROM loans WHERE id=%s" % loan_id)
     loan = cur.fetchone()
     if not loan or loan[3] == 'closed':
