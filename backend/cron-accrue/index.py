@@ -207,7 +207,7 @@ PENALTY_DAILY_RATE = Decimal('0.000547')
 
 def accrue_penalties(cur, check_date):
     cur.execute("""
-        SELECT ls.id, ls.loan_id, ls.principal_amount, COALESCE(ls.paid_amount, 0), ls.penalty_amount
+        SELECT ls.id, ls.loan_id, ls.principal_amount, ls.interest_amount, COALESCE(ls.paid_amount, 0), ls.penalty_amount
         FROM loan_schedule ls
         JOIN loans l ON l.id = ls.loan_id
         WHERE ls.status = 'overdue'
@@ -222,12 +222,14 @@ def accrue_penalties(cur, check_date):
     updated = 0
 
     for row in rows:
-        ls_id, loan_id, principal, paid, current_penalty = row
+        ls_id, loan_id, principal, interest, paid, current_penalty = row
         principal = Decimal(str(principal))
+        interest = Decimal(str(interest))
         paid = Decimal(str(paid))
         current_penalty = Decimal(str(current_penalty)) if current_penalty else Decimal('0')
 
-        overdue_principal = principal - min(paid, principal)
+        paid_principal = max(Decimal('0'), paid - interest - current_penalty)
+        overdue_principal = principal - min(paid_principal, principal)
         if overdue_principal <= 0:
             continue
 

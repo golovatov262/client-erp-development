@@ -211,7 +211,7 @@ def accrue_loan_penalties_until(cur, lid, target_date):
             return Decimal('0')
 
     cur.execute("""
-        SELECT id, payment_date, principal_amount, COALESCE(paid_amount,0), COALESCE(penalty_amount,0), status
+        SELECT id, payment_date, principal_amount, interest_amount, COALESCE(paid_amount,0), COALESCE(penalty_amount,0), status
         FROM loan_schedule
         WHERE loan_id=%s
           AND payment_date < '%s'
@@ -223,9 +223,12 @@ def accrue_loan_penalties_until(cur, lid, target_date):
         sid = r[0]
         sch_date = r[1] if hasattr(r[1], 'isoformat') else date.fromisoformat(str(r[1]))
         principal = Decimal(str(r[2]))
-        paid = Decimal(str(r[3]))
-        cur_pen = Decimal(str(r[4]))
-        overdue_principal = principal - min(paid, principal)
+        interest = Decimal(str(r[3]))
+        paid = Decimal(str(r[4]))
+        cur_pen = Decimal(str(r[5]))
+        # paid гасит по лестнице: сначала interest, потом penalty, потом principal
+        paid_principal = max(Decimal('0'), paid - interest - cur_pen)
+        overdue_principal = principal - min(paid_principal, principal)
         if overdue_principal <= 0:
             continue
         days = (tgt - sch_date).days
