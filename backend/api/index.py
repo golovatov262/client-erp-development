@@ -249,14 +249,9 @@ def accrue_loan_penalties_until(cur, lid, target_date):
     return total_added
 
 def recalc_loan_schedule_statuses(cur, lid):
-    cur.execute("SELECT MAX(payment_date) FROM loan_payments WHERE loan_id=%s" % lid)
-    last_pay_row = cur.fetchone()
-    if last_pay_row and last_pay_row[0]:
-        last_pd = last_pay_row[0] if hasattr(last_pay_row[0], 'isoformat') else date.fromisoformat(str(last_pay_row[0]))
-        today = date.today()
-        upto = max(last_pd, today)
-        accrue_loan_penalties_until(cur, lid, upto)
-    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+    # Сбрасываем paid_amount у всех periodов + сбрасываем накопленные пени
+    # (будем доначислять их хронологически перед каждым платежом)
+    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL, penalty_amount=0 WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
     cur.execute("SELECT id, payment_date, amount, manual_distribution, principal_part, interest_part, penalty_part FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
     for pay in payments:
@@ -267,6 +262,12 @@ def recalc_loan_schedule_statuses(cur, lid):
         manual_pp = Decimal(str(pay[4]))
         manual_ip = Decimal(str(pay[5]))
         manual_pnp = Decimal(str(pay[6]))
+        # Доначисляем пени по всем просроченным периодам до даты этого платежа
+        try:
+            pd_dt = date.fromisoformat(pay_date) if isinstance(pay_date, str) else pay_date
+            accrue_loan_penalties_until(cur, lid, pd_dt)
+        except Exception:
+            pass
 
         if is_manual:
             pay_pp = manual_pp
@@ -387,6 +388,10 @@ def recalc_loan_schedule_statuses(cur, lid):
     cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(real_balance), lid))
 
     refresh_loan_overdue_status(cur, lid)
+    try:
+        accrue_loan_penalties_until(cur, lid, date.today())
+    except Exception:
+        pass
 
 def esc(val):
     return str(val).replace("'", "''") if val else ''
