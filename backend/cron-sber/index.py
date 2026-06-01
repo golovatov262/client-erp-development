@@ -878,18 +878,9 @@ def rebuild_schedule_after_early(cur, loan_id, new_balance, payment_date):
     paid_count = cur.fetchone()[0]
 
     fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
-    if old_monthly > 0 and st == 'annuity':
-        best_term = remaining_periods
-        for t in range(1, remaining_periods + 1):
-            _, m = fn(float(nb), r, t, date.fromisoformat(pd))
-            if m <= old_monthly * 1.1:
-                best_term = t
-                break
-        if best_term >= remaining_periods:
-            best_term = max(remaining_periods - 1, 1)
-        nt = max(best_term, 1)
-    else:
-        nt = max(remaining_periods, 1)
+    # Стратегия reduce_payment: число оставшихся периодов (срок) сохраняем,
+    # уменьшаем сумму ежемесячного платежа.
+    nt = max(remaining_periods, 1)
 
     ns, nm = fn(float(nb), r, nt, date.fromisoformat(pd))
     for item in ns:
