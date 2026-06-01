@@ -898,7 +898,13 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
         first_sch_date = str(first_row[5])
         first_need = first_sp + first_si + first_spn - first_spa
 
-        is_early_repayment = amt >= loan_bal
+        # Досрочное погашение в двух случаях:
+        # 1) платёж покрывает весь остаток долга (полное досрочное)
+        # 2) первый неоплаченный период графика — БУДУЩИЙ относительно даты платежа,
+        #    то есть текущий и все прошлые периоды уже закрыты (за этот месяц уже платили),
+        #    значит новый платёж — частичное досрочное погашение (всё в ОД)
+        first_is_future = first_sch_date > pd
+        is_early_repayment = (amt >= loan_bal) or first_is_future
 
         if is_early_repayment:
             if last_paid_row:
