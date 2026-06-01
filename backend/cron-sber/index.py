@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import calendar
 import imaplib
 import email
 from email.header import decode_header
@@ -773,6 +774,133 @@ def calc_daily_interest(balance, annual_rate, days):
     return (Decimal(str(balance)) * daily_rate * Decimal(str(days))).quantize(Decimal('0.01'))
 
 
+def last_day_of_month(d):
+    return d.replace(day=calendar.monthrange(d.year, d.month)[1])
+
+
+def add_months(d, months):
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def calc_payment_dates(start_date, term):
+    dates = []
+    for i in range(1, term + 1):
+        if i == term:
+            dates.append(add_months(start_date, term))
+        else:
+            dates.append(last_day_of_month(add_months(start_date, i)))
+    return dates
+
+
+def calc_annuity_schedule(amount, rate, term, start_date):
+    monthly_rate = Decimal(str(rate)) / Decimal('100') / Decimal('12')
+    amt = Decimal(str(amount))
+    if monthly_rate > 0:
+        annuity = amt * monthly_rate * (1 + monthly_rate) ** term / ((1 + monthly_rate) ** term - 1)
+    else:
+        annuity = amt / term
+    annuity = annuity.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    schedule = []
+    balance = amt
+    pay_dates = calc_payment_dates(start_date, term)
+    for i in range(1, term + 1):
+        payment_date = pay_dates[i - 1]
+        interest = (balance * monthly_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if i == term:
+            principal = balance
+            payment = principal + interest
+        else:
+            principal = annuity - interest
+            if principal < 0:
+                principal = Decimal('0')
+            payment = annuity
+        balance = balance - principal
+        if balance < 0:
+            balance = Decimal('0')
+        schedule.append({
+            'payment_no': i, 'payment_date': payment_date.isoformat(),
+            'payment_amount': float(payment), 'principal_amount': float(principal),
+            'interest_amount': float(interest), 'balance_after': float(balance),
+        })
+    return schedule, float(annuity)
+
+
+def calc_end_of_term_schedule(amount, rate, term, start_date):
+    amt = Decimal(str(amount))
+    schedule = []
+    balance = amt
+    pay_dates = calc_payment_dates(start_date, term)
+    for i in range(1, term + 1):
+        payment_date = pay_dates[i - 1]
+        prev_date = pay_dates[i - 2] if i > 1 else start_date
+        days_in_period = (payment_date - prev_date).days
+        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_period)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if i == term:
+            principal = balance
+            payment = principal + interest
+            balance = Decimal('0')
+        else:
+            principal = Decimal('0')
+            payment = interest
+        schedule.append({
+            'payment_no': i, 'payment_date': payment_date.isoformat(),
+            'payment_amount': float(payment), 'principal_amount': float(principal),
+            'interest_amount': float(interest), 'balance_after': float(balance),
+        })
+    return schedule, float(schedule[0]['payment_amount']) if schedule else 0
+
+
+def rebuild_schedule_after_early(cur, loan_id, new_balance, payment_date):
+    """Перестраивает график после частичного досрочного погашения (стратегия reduce_term:
+    сокращаем срок, сумму ежемесячного платежа держим близко к прежней).
+    Аналогично ручному действию early_repayment в api."""
+    cur.execute("SELECT rate, term_months, start_date, schedule_type, monthly_payment FROM loans WHERE id=%s" % loan_id)
+    lr = cur.fetchone()
+    if not lr:
+        return
+    r = float(lr[0])
+    st = lr[3]
+    old_monthly = float(lr[4]) if lr[4] else 0
+    nb = Decimal(str(new_balance))
+    if nb <= 0:
+        return
+    pd = payment_date if isinstance(payment_date, str) else payment_date.isoformat()
+    cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % loan_id)
+    remaining_periods = cur.fetchone()[0]
+    if remaining_periods <= 0:
+        return
+    cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % loan_id)
+    cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % loan_id)
+    paid_count = cur.fetchone()[0]
+
+    fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+    if old_monthly > 0 and st == 'annuity':
+        best_term = remaining_periods
+        for t in range(1, remaining_periods + 1):
+            _, m = fn(float(nb), r, t, date.fromisoformat(pd))
+            if m <= old_monthly * 1.1:
+                best_term = t
+                break
+        if best_term >= remaining_periods:
+            best_term = max(remaining_periods - 1, 1)
+        nt = max(best_term, 1)
+    else:
+        nt = max(remaining_periods, 1)
+
+    ns, nm = fn(float(nb), r, nt, date.fromisoformat(pd))
+    for item in ns:
+        cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after,status,paid_amount) VALUES (%s,%s,'%s',%s,%s,%s,%s,'pending',0)" % (
+            loan_id, paid_count + item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+    ne = date.fromisoformat(ns[-1]['payment_date'])
+    total_term = paid_count + len(ns)
+    cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (
+        nm, ne.isoformat(), total_term, loan_id))
+
+
 def refresh_loan_overdue_status(cur, lid):
     """Пересчитывает статус займа: снимает overdue если все просроченные платежи погашены."""
     cur.execute("SELECT status FROM loans WHERE id=%s" % lid)
@@ -888,6 +1016,7 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     remaining_amt = amt
     pd = str(payment_date)
     pd_date = date.fromisoformat(pd) if isinstance(payment_date, str) else payment_date
+    did_partial_early = False
 
     if unpaid_rows:
         first_row = unpaid_rows[0]
@@ -899,30 +1028,20 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
         first_need = first_sp + first_si + first_spn - first_spa
 
         # Досрочное погашение в двух случаях:
-        # 1) платёж покрывает весь остаток долга (полное досрочное)
-        # 2) первый неоплаченный период графика — БУДУЩИЙ относительно даты платежа,
-        #    то есть текущий и все прошлые периоды уже закрыты (за этот месяц уже платили),
-        #    значит новый платёж — частичное досрочное погашение (всё в ОД)
+        # 1) full_early — платёж покрывает весь остаток долга (полное досрочное)
+        # 2) partial_early — первый неоплаченный период графика БУДУЩИЙ относительно даты
+        #    платежа, т.е. текущий и все прошлые периоды уже закрыты (за этот месяц уже
+        #    платили и плановые проценты месяца удержаны). Тогда новый платёж — частичное
+        #    досрочное погашение: проценты ПОВТОРНО не начисляем, всё (кроме пеней) идёт в ОД,
+        #    после чего график пересчитывается (сокращение срока).
         first_is_future = first_sch_date > pd
-        is_early_repayment = (amt >= loan_bal) or first_is_future
+        is_full_early = amt >= loan_bal
+        is_partial_early = (not is_full_early) and first_is_future
+        is_early_repayment = is_full_early or is_partial_early
+        did_partial_early = False
 
         if is_early_repayment:
-            if last_paid_row:
-                prev_date = last_paid_row[0]
-                if isinstance(prev_date, str):
-                    prev_date = date.fromisoformat(prev_date)
-            else:
-                cur.execute("SELECT start_date FROM loans WHERE id=%s" % loan_id)
-                prev_date = cur.fetchone()[0]
-                if isinstance(prev_date, str):
-                    prev_date = date.fromisoformat(prev_date)
-
-            days_used = (pd_date - prev_date).days
-            if days_used < 0:
-                days_used = 0
-
-            actual_interest = calc_daily_interest(loan_bal, loan_rate, days_used)
-
+            # Пени гасим в первую очередь (если есть непогашенные)
             for row in unpaid_rows:
                 spn = Decimal(str(row[3]))
                 spa = Decimal(str(row[4]))
@@ -935,28 +1054,50 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                         remaining_amt -= take_pn
                 break
 
-            if remaining_amt > 0 and actual_interest > 0:
-                take_i = min(remaining_amt, actual_interest)
-                i_p += take_i
-                remaining_amt -= take_i
+            if is_full_early:
+                # Полное досрочное: проценты за фактические дни с последней оплаты
+                if last_paid_row:
+                    prev_date = last_paid_row[0]
+                    if isinstance(prev_date, str):
+                        prev_date = date.fromisoformat(prev_date)
+                else:
+                    cur.execute("SELECT start_date FROM loans WHERE id=%s" % loan_id)
+                    prev_date = cur.fetchone()[0]
+                    if isinstance(prev_date, str):
+                        prev_date = date.fromisoformat(prev_date)
+                days_used = (pd_date - prev_date).days
+                if days_used < 0:
+                    days_used = 0
+                actual_interest = calc_daily_interest(loan_bal, loan_rate, days_used)
+                if remaining_amt > 0 and actual_interest > 0:
+                    take_i = min(remaining_amt, actual_interest)
+                    i_p += take_i
+                    remaining_amt -= take_i
+            # Для частичного досрочного проценты НЕ начисляем — они уже оплачены за месяц
 
             if remaining_amt > Decimal('0.005'):
                 pp += min(remaining_amt, loan_bal)
                 remaining_amt = Decimal('0')
 
-            for row in unpaid_rows:
-                sid = row[0]
-                sp = Decimal(str(row[1]))
-                si = Decimal(str(row[2]))
-                spn = Decimal(str(row[3]))
-                spa = Decimal(str(row[4]))
-                total_item = sp + si + spn
-                allocated_to_row = min(pp + i_p + pnp, total_item)
-                new_paid = spa + allocated_to_row
-                ns = 'paid' if new_paid >= total_item or pp >= loan_bal else 'partial'
-                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
-                    float(new_paid), pd, ns, sid))
-                break
+            if is_partial_early:
+                # Частичное досрочное: весь ОД ушёл в погашение долга, периоды графика
+                # не трогаем (они будут перестроены ниже). Платёж не привязываем к периоду.
+                did_partial_early = True
+            else:
+                # Полное досрочное: помечаем первый период как оплаченный
+                for row in unpaid_rows:
+                    sid = row[0]
+                    sp = Decimal(str(row[1]))
+                    si = Decimal(str(row[2]))
+                    spn = Decimal(str(row[3]))
+                    spa = Decimal(str(row[4]))
+                    total_item = sp + si + spn
+                    allocated_to_row = min(pp + i_p + pnp, total_item)
+                    new_paid = spa + allocated_to_row
+                    ns = 'paid' if new_paid >= total_item or pp >= loan_bal else 'partial'
+                    cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (
+                        float(new_paid), pd, ns, sid))
+                    break
         else:
             covered_one_future = False
             for row in unpaid_rows:
@@ -1027,6 +1168,12 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
     cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), loan_id))
     if nb == 0:
         cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % loan_id)
+    elif did_partial_early and pp > Decimal('0.005'):
+        # Частичное досрочное погашение: пересчитываем оставшийся график
+        try:
+            rebuild_schedule_after_early(cur, loan_id, nb, pd)
+        except Exception:
+            pass
     return pay_id, None
 
 
