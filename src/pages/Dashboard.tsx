@@ -46,7 +46,7 @@ const Dashboard = () => {
   }
 
   const orgs = stats?.organizations || [];
-  const overdueList = stats?.overdue_loan_list || [];
+  const overdueList = [...(stats?.overdue_loan_list || [])].sort((a, b) => a.overdue_days - b.overdue_days);
   const expiringList = stats?.expiring_savings || [];
   const expiringTotal = stats?.expiring_savings_total || 0;
 
