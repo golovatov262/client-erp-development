@@ -34,6 +34,9 @@ const statusMap: Record<string, { label: string; variant: "default" | "secondary
   error: { label: "Ошибка", variant: "destructive" },
 };
 
+const formatOverdueAmount = (n: number) =>
+  new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
 const recipientName = (r: SmsRecipient) => {
   if (r.member_type === "UL") return r.company_name || "—";
   const fio = [r.last_name, r.first_name, r.middle_name].filter(Boolean).join(" ");
@@ -137,15 +140,26 @@ const AdminSmsTab = () => {
       return;
     }
     let memberIds: number[] | undefined;
+    let memberTexts: Record<number, string> | undefined;
     if (form.target === "selected") memberIds = selectedIds;
-    else if (form.target === "overdue") memberIds = overdueMatched.map(l => l.member_id);
+    else if (form.target === "overdue") {
+      memberIds = overdueMatched.map(l => l.member_id);
+      const base = form.title.trim() ? `${form.title.trim()}. ${form.body.trim()}` : form.body.trim();
+      memberTexts = {};
+      for (const l of overdueMatched) {
+        memberTexts[l.member_id] = base
+          .replace(/\{days\}/g, String(l.overdue_days))
+          .replace(/\{amount\}/g, formatOverdueAmount(l.overdue_amount + l.penalty_total));
+      }
+    }
     setSending(true);
     try {
       const res = await api.notifications.sendSms({
-        title: form.title.trim(),
+        title: form.target === "overdue" ? "" : form.title.trim(),
         body: form.body.trim(),
         target: memberIds ? "selected" : form.target,
         target_member_ids: memberIds,
+        member_texts: memberTexts,
       });
       toast({ title: `Отправлено: ${res.sent}, ошибок: ${res.failed}` });
       setForm({ title: "", body: "", target: "all" });
@@ -302,7 +316,7 @@ const AdminSmsTab = () => {
                     className="mt-2"
                     onClick={() => setForm(f => ({
                       ...f,
-                      body: "Уважаемый пайщик! По вашему договору есть просроченная задолженность. Просим погасить её в ближайшее время. По вопросам обращайтесь в офис.",
+                      body: "Уважаемый заемщик! Вы допустили просрочку по займу на {days} дн. Сумма {amount} руб. Необходимо срочно погасить её. Тел {org_phone} Ваш {org_name}",
                     }))}
                   >
                     <Icon name="FileText" size={14} className="mr-2" />
@@ -338,6 +352,9 @@ const AdminSmsTab = () => {
                   <div className="text-xs text-muted-foreground">
                     Подобрано должников с телефоном: <span className="font-medium text-foreground">{overdueMatched.length}</span>
                     {overdueWithoutPhone > 0 && <span> · без телефона (пропущены): {overdueWithoutPhone}</span>}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Плейсхолдеры подставятся автоматически для каждого должника: <span className="font-mono">{"{days}"}</span> — дней просрочки, <span className="font-mono">{"{amount}"}</span> — сумма долга с пенями, <span className="font-mono">{"{org_name}"}</span> — организация, <span className="font-mono">{"{org_phone}"}</span> — телефон.
                   </div>
                   {overdueMatched.length > 0 && (
                     <div className="border rounded-lg max-h-52 overflow-y-auto bg-background">

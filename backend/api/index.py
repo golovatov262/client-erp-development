@@ -6172,7 +6172,14 @@ def handle_notifications(method, params, body, staff, cur, conn):
         msg_body = body.get('body', '').strip()
         target = body.get('target', 'all')
         target_member_ids = body.get('target_member_ids', [])
-        if not msg_body:
+        member_texts_raw = body.get('member_texts') or {}
+        member_texts = {}
+        for k, v in member_texts_raw.items():
+            try:
+                member_texts[int(k)] = str(v)
+            except Exception:
+                pass
+        if not msg_body and not member_texts:
             return {'error': 'Введите текст сообщения'}
         if not os.environ.get('SMSAERO_EMAIL') or not os.environ.get('SMSAERO_API_KEY'):
             return {'error': 'SMSAero не настроен (нет SMSAERO_EMAIL / SMSAERO_API_KEY)'}
@@ -6202,10 +6209,11 @@ def handle_notifications(method, params, body, staff, cur, conn):
         failed = 0
         for member_id, phone in recipients:
             org = get_org_for_member(cur, member_id)
+            tpl = member_texts.get(int(member_id), base_text)
             try:
-                text = base_text.format(org_name=org['name'], org_phone=org['phone'])
+                text = tpl.format(org_name=org['name'], org_phone=org['phone'])
             except Exception:
-                text = base_text.replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
+                text = tpl.replace('{org_name}', org['name']).replace('{org_phone}', org['phone'])
             text = text[:480]
             ok, err = send_smsaero(phone, text)
             if ok:
