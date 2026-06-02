@@ -19,6 +19,7 @@ import api, {
   NotificationHistoryItem,
   NotificationLogEntry,
   NotificationStats,
+  OverdueLoanItem,
 } from "@/lib/api";
 
 const fmtDate = (d: string) => {
@@ -58,17 +59,20 @@ const AdminSmsTab = () => {
   const [testing, setTesting] = useState(false);
   const [autoSettings, setAutoSettings] = useState<Record<string, string>>({});
   const [savingAuto, setSavingAuto] = useState(false);
+  const [overdueLoans, setOverdueLoans] = useState<OverdueLoanItem[]>([]);
+  const [overdueMaxDays, setOverdueMaxDays] = useState("30");
   const { toast } = useToast();
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [channels, recs, st, hist, smsSettings] = await Promise.all([
+      const [channels, recs, st, hist, smsSettings, dash] = await Promise.all([
         api.notifications.channels(),
         api.notifications.smsRecipients(),
         api.notifications.stats(),
         api.notifications.history("sms", 50, 0),
         api.notifications.getSmsSettings(),
+        api.dashboard(),
       ]);
       const smsChannel = channels.find(c => c.channel === "sms");
       setChannel(smsChannel || null);
@@ -77,6 +81,7 @@ const AdminSmsTab = () => {
       setMessages(hist.items);
       setMessagesTotal(hist.total);
       setAutoSettings(smsSettings);
+      setOverdueLoans(dash.overdue_loan_list || []);
     } catch (e) {
       toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
     }
@@ -101,6 +106,23 @@ const AdminSmsTab = () => {
     return t ? `${t}. ${b}` : b;
   }, [form.title, form.body]);
 
+  const recipientIdSet = useMemo(() => new Set(recipients.map(r => r.id)), [recipients]);
+
+  const overdueMatched = useMemo(() => {
+    const maxN = parseInt(overdueMaxDays, 10);
+    return overdueLoans
+      .filter(l => l.overdue_days > 0 && (isNaN(maxN) || l.overdue_days <= maxN))
+      .filter(l => recipientIdSet.has(l.member_id))
+      .sort((a, b) => a.overdue_days - b.overdue_days);
+  }, [overdueLoans, overdueMaxDays, recipientIdSet]);
+
+  const overdueWithoutPhone = useMemo(() => {
+    const maxN = parseInt(overdueMaxDays, 10);
+    return overdueLoans.filter(
+      l => l.overdue_days > 0 && (isNaN(maxN) || l.overdue_days <= maxN) && !recipientIdSet.has(l.member_id),
+    ).length;
+  }, [overdueLoans, overdueMaxDays, recipientIdSet]);
+
   const handleSend = async () => {
     if (!form.body.trim()) {
       toast({ title: "Введите текст сообщения", variant: "destructive" });
@@ -110,13 +132,20 @@ const AdminSmsTab = () => {
       toast({ title: "Выберите получателей", variant: "destructive" });
       return;
     }
+    if (form.target === "overdue" && overdueMatched.length === 0) {
+      toast({ title: "Нет должников с телефоном по заданному условию", variant: "destructive" });
+      return;
+    }
+    let memberIds: number[] | undefined;
+    if (form.target === "selected") memberIds = selectedIds;
+    else if (form.target === "overdue") memberIds = overdueMatched.map(l => l.member_id);
     setSending(true);
     try {
       const res = await api.notifications.sendSms({
         title: form.title.trim(),
         body: form.body.trim(),
-        target: form.target,
-        target_member_ids: form.target === "selected" ? selectedIds : undefined,
+        target: memberIds ? "selected" : form.target,
+        target_member_ids: memberIds,
       });
       toast({ title: `Отправлено: ${res.sent}, ошибок: ${res.failed}` });
       setForm({ title: "", body: "", target: "all" });
@@ -266,6 +295,20 @@ const AdminSmsTab = () => {
                   <span>Будет отправлено как: <span className="text-foreground">{previewText || "—"}</span></span>
                   <span>{previewText.length} симв.</span>
                 </div>
+                {form.target === "overdue" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      body: "Уважаемый пайщик! По вашему договору есть просроченная задолженность. Просим погасить её в ближайшее время. По вопросам обращайтесь в офис.",
+                    }))}
+                  >
+                    <Icon name="FileText" size={14} className="mr-2" />
+                    Шаблон уведомления о просрочке
+                  </Button>
+                )}
               </div>
               <div>
                 <Label>Получатели</Label>
@@ -274,9 +317,41 @@ const AdminSmsTab = () => {
                   <SelectContent>
                     <SelectItem value="all">Все пайщики с телефоном ({recipients.length})</SelectItem>
                     <SelectItem value="selected">Выбранные ({selectedIds.length})</SelectItem>
+                    <SelectItem value="overdue">Должники по просрочке ({overdueMatched.length})</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {form.target === "overdue" && (
+                <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Icon name="AlertTriangle" size={16} className="text-amber-600" />
+                    <span className="text-sm">Просрочка до</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={overdueMaxDays}
+                      onChange={e => setOverdueMaxDays(e.target.value)}
+                      className="w-20 h-8"
+                    />
+                    <span className="text-sm">дней включительно</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Подобрано должников с телефоном: <span className="font-medium text-foreground">{overdueMatched.length}</span>
+                    {overdueWithoutPhone > 0 && <span> · без телефона (пропущены): {overdueWithoutPhone}</span>}
+                  </div>
+                  {overdueMatched.length > 0 && (
+                    <div className="border rounded-lg max-h-52 overflow-y-auto bg-background">
+                      {overdueMatched.map(l => (
+                        <div key={l.loan_id} className="flex items-center gap-2 px-3 py-2 border-b last:border-0">
+                          <span className="text-sm flex-1 truncate">{l.member_name}</span>
+                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">{l.contract_no}</span>
+                          <Badge variant="destructive" className="text-xs shrink-0">{l.overdue_days} дн.</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {form.target === "selected" && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
