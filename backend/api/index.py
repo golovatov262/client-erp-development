@@ -855,18 +855,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 """ % lid)
                 unpaid_rows = cur.fetchall()
 
-                # Дата предыдущего планового периода (для расчёта процентов по факт. дням)
-                cur.execute("""
-                    SELECT MAX(payment_date) FROM loan_schedule
-                    WHERE loan_id=%s AND payment_date < (
-                        SELECT MIN(payment_date) FROM loan_schedule
-                        WHERE loan_id=%s AND status IN ('pending','partial','overdue'))
-                """ % (lid, lid))
-                _prev_row = cur.fetchone()
-                prev_sched_date = _prev_row[0] if _prev_row and _prev_row[0] else (
-                    loan_start if isinstance(loan_start, date) else date.fromisoformat(str(loan_start)))
-                if isinstance(prev_sched_date, str):
-                    prev_sched_date = date.fromisoformat(prev_sched_date)
+                # Остаток ОД на момент разнесения (для расчёта процентов от факт. остатка)
                 running_bal = loan_bal
 
                 covered_one_future = False
@@ -888,13 +877,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     if is_future and covered_one_future:
                         break
 
-                    # Проценты периода считаем по фактическим дням от остатка ОД,
-                    # а не по плановому interest_amount графика (важно для недографиковых платежей)
+                    # Проценты периода считаем от ФАКТИЧЕСКОГО остатка ОД по месячной ставке
+                    # (ставка/12), как построен плановый график. Берём плановый interest_amount
+                    # только если остаток ОД совпадает с плановым (клиент платит по графику).
                     cur_sched_date = date.fromisoformat(sch_date) if isinstance(sch_date, str) else sch_date
-                    period_days = (cur_sched_date - prev_sched_date).days
-                    if period_days < 0:
-                        period_days = 0
-                    actual_period_interest = calc_daily_interest(running_bal, l_rate, period_days)
+                    actual_period_interest = (running_bal * Decimal(str(l_rate)) / Decimal('100') / Decimal('12')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
                     already_i = min(spa, actual_period_interest)
                     already_pn = min(spa - actual_period_interest, spn) if spa > actual_period_interest else Decimal('0')
@@ -926,11 +913,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     ns = 'paid' if new_paid >= total_item else 'partial'
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
 
-                    # Уменьшаем остаток ОД на фактически погашенную часть и сдвигаем дату периода
+                    # Уменьшаем остаток ОД на фактически погашенную в этом периоде часть
                     running_bal -= item_pp
                     if running_bal < 0:
                         running_bal = Decimal('0')
-                    prev_sched_date = cur_sched_date
 
                     if is_future:
                         covered_one_future = True
