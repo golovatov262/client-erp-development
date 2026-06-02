@@ -14,6 +14,37 @@ from html.parser import HTMLParser
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Перечень федеральных праздников РФ (год не важен, сравниваем (месяц, день))
+RU_PUBLIC_HOLIDAYS_MD = {
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8),  # Новый год + Рождество
+    (2, 23),   # День защитника Отечества
+    (3, 8),    # Международный женский день
+    (5, 1),    # Праздник Весны и Труда
+    (5, 9),    # День Победы
+    (6, 12),   # День России
+    (11, 4),   # День народного единства
+}
+
+def is_business_day(d: date) -> bool:
+    """Возвращает True, если d — рабочий день (не выходной и не праздник РФ)."""
+    if d.weekday() >= 5:  # суббота=5, воскресенье=6
+        return False
+    if (d.month, d.day) in RU_PUBLIC_HOLIDAYS_MD:
+        return False
+    return True
+
+def next_business_day(d: date) -> date:
+    """Возвращает ближайший рабочий день >= d (если d рабочий — возвращает d)."""
+    while not is_business_day(d):
+        d += timedelta(days=1)
+    return d
+
+def effective_due_date(payment_date) -> date:
+    """Эффективная дата платежа с учётом переноса на рабочий день.
+    Если плановый срок выпадает на выходной/праздник — переносим на следующий рабочий день."""
+    d = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
+    return next_business_day(d)
+
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -893,23 +924,34 @@ def rebuild_schedule_after_early(cur, loan_id, new_balance, payment_date):
 
 
 def refresh_loan_overdue_status(cur, lid):
-    """Пересчитывает статус займа: снимает overdue если все просроченные платежи погашены."""
+    """Пересчитывает статус займа: снимает overdue если все просроченные платежи погашены.
+    Учитывает перенос срока: если плановый срок выпадает на выходной/праздник,
+    просрочка считается только начиная со следующего рабочего дня."""
     cur.execute("SELECT status FROM loans WHERE id=%s" % lid)
     row = cur.fetchone()
     if not row or row[0] == 'closed':
         return
+    today = date.today()
+    # Получаем все неоплаченные периоды, которые по плановой дате уже прошли
     cur.execute("""
-        SELECT COUNT(*) FROM loan_schedule
+        SELECT id, payment_date FROM loan_schedule
         WHERE loan_id=%s AND status IN ('pending', 'overdue', 'partial')
           AND payment_date < CURRENT_DATE
     """ % lid)
-    has_overdue = cur.fetchone()[0] > 0
+    rows = cur.fetchall()
+    # Фильтруем: период считается просроченным только если его эффективный срок уже прошёл
+    truly_overdue_ids = []
+    for r in rows:
+        sid, pd = r[0], r[1]
+        eff = effective_due_date(pd)
+        if eff < today:
+            truly_overdue_ids.append((sid, pd, eff))
+    has_overdue = len(truly_overdue_ids) > 0
     if has_overdue:
         cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
-        cur.execute("""
-            UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
-            WHERE loan_id=%s AND status IN ('pending', 'partial') AND payment_date < CURRENT_DATE
-        """ % lid)
+        for sid, pd, eff in truly_overdue_ids:
+            overdue_days = (today - eff).days
+            cur.execute("UPDATE loan_schedule SET status='overdue', overdue_days=%s WHERE id=%s AND status IN ('pending','partial')" % (overdue_days, sid))
     else:
         cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)

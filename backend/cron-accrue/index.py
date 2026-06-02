@@ -6,6 +6,34 @@ import urllib.parse
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+# Перечень федеральных праздников РФ (год не важен, сравниваем (месяц, день))
+RU_PUBLIC_HOLIDAYS_MD = {
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8),  # Новый год + Рождество
+    (2, 23),   # День защитника Отечества
+    (3, 8),    # Международный женский день
+    (5, 1),    # Праздник Весны и Труда
+    (5, 9),    # День Победы
+    (6, 12),   # День России
+    (11, 4),   # День народного единства
+}
+
+def is_business_day(d: date) -> bool:
+    if d.weekday() >= 5:
+        return False
+    if (d.month, d.day) in RU_PUBLIC_HOLIDAYS_MD:
+        return False
+    return True
+
+def next_business_day(d: date) -> date:
+    while not is_business_day(d):
+        d += timedelta(days=1)
+    return d
+
+def effective_due_date(payment_date) -> date:
+    """Эффективная дата платежа с учётом переноса на рабочий день."""
+    d = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
+    return next_business_day(d)
+
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
@@ -123,31 +151,43 @@ def handler(event, context):
 
 
 def check_overdue_loans(cur, check_date):
+    today = check_date if isinstance(check_date, date) else date.fromisoformat(str(check_date))
+
+    # Выбираем все неоплаченные периоды с плановой датой в прошлом
     cur.execute("""
-        SELECT DISTINCT ls.loan_id
+        SELECT ls.id, ls.loan_id, ls.payment_date, l.status AS loan_status
         FROM loan_schedule ls
         JOIN loans l ON l.id = ls.loan_id
-        WHERE l.status = 'active'
-          AND ls.status = 'pending'
+        WHERE l.status IN ('active', 'overdue')
+          AND ls.status IN ('pending', 'partial')
           AND ls.payment_date < '%s'
           AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-    """ % check_date)
-    overdue_loan_ids = [r[0] for r in cur.fetchall()]
+    """ % today)
+    candidates = cur.fetchall()
+
+    # Фильтруем с учётом переноса: просрочка только если эффективная дата уже прошла
+    truly_overdue = []   # (sched_id, loan_id, eff_date)
+    for sid, lid, pd, lstatus in candidates:
+        eff = effective_due_date(pd)
+        if eff < today:
+            truly_overdue.append((sid, lid, eff))
+
+    truly_overdue_loan_ids = list({lid for _, lid, _ in truly_overdue})
 
     marked_overdue = 0
-    for loan_id in overdue_loan_ids:
+    for loan_id in truly_overdue_loan_ids:
         cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % loan_id)
         if cur.rowcount > 0:
             marked_overdue += 1
 
+    for sid, loan_id, eff in truly_overdue:
+        overdue_days = (today - eff).days
         cur.execute("""
-            UPDATE loan_schedule
-            SET status='overdue',
-                overdue_days = (DATE '%s' - payment_date)
-            WHERE loan_id=%s AND status='pending' AND payment_date < '%s'
-              AND COALESCE(paid_amount, 0) < payment_amount
-        """ % (check_date, loan_id, check_date))
+            UPDATE loan_schedule SET status='overdue', overdue_days=%s
+            WHERE id=%s AND status IN ('pending','partial')
+        """ % (overdue_days, sid))
 
+    # Восстанавливаем активный статус займов, у которых нет реально просроченных периодов
     cur.execute("""
         SELECT DISTINCT l.id
         FROM loans l
@@ -155,18 +195,28 @@ def check_overdue_loans(cur, check_date):
           AND NOT EXISTS (
               SELECT 1 FROM loan_schedule ls
               WHERE ls.loan_id = l.id
-                AND ls.status IN ('pending', 'overdue')
+                AND ls.status IN ('pending', 'overdue', 'partial')
                 AND ls.payment_date < '%s'
                 AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
           )
-    """ % check_date)
+    """ % today)
     restored_ids = [r[0] for r in cur.fetchall()]
     restored = 0
     for loan_id in restored_ids:
-        cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % loan_id)
-        if cur.rowcount > 0:
-            restored += 1
-        cur.execute("UPDATE loan_schedule SET status='pending', overdue_days=0 WHERE loan_id=%s AND status='overdue'" % loan_id)
+        # Дополнительно проверяем: нет ли периодов с эффективной датой в прошлом
+        cur.execute("""
+            SELECT id, payment_date FROM loan_schedule
+            WHERE loan_id=%s AND status IN ('pending','overdue','partial')
+              AND payment_date < '%s'
+              AND COALESCE(paid_amount, 0) < payment_amount
+        """ % (loan_id, today))
+        pending_past = cur.fetchall()
+        still_overdue = any(effective_due_date(r[1]) < today for r in pending_past)
+        if not still_overdue:
+            cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % loan_id)
+            if cur.rowcount > 0:
+                restored += 1
+            cur.execute("UPDATE loan_schedule SET status='pending', overdue_days=0 WHERE loan_id=%s AND status='overdue'" % loan_id)
 
     cur.execute("""
         UPDATE loan_schedule
@@ -196,18 +246,20 @@ def check_overdue_loans(cur, check_date):
     """ % check_date)
 
     return {
-        'checked_date': check_date,
+        'checked_date': str(today),
         'marked_overdue': marked_overdue,
         'restored_active': restored,
-        'total_overdue_loans': len(overdue_loan_ids)
+        'total_overdue_loans': len(truly_overdue_loan_ids)
     }
 
 
 PENALTY_DAILY_RATE = Decimal('0.000547')
 
 def accrue_penalties(cur, check_date):
+    today = check_date if isinstance(check_date, date) else date.fromisoformat(str(check_date))
     cur.execute("""
-        SELECT ls.id, ls.loan_id, ls.principal_amount, ls.interest_amount, COALESCE(ls.paid_amount, 0), ls.penalty_amount
+        SELECT ls.id, ls.loan_id, ls.principal_amount, ls.interest_amount,
+               COALESCE(ls.paid_amount, 0), ls.penalty_amount, ls.payment_date
         FROM loan_schedule ls
         JOIN loans l ON l.id = ls.loan_id
         WHERE ls.status = 'overdue'
@@ -215,14 +267,16 @@ def accrue_penalties(cur, check_date):
           AND l.status != 'holiday'
           AND (l.holiday_end IS NULL OR DATE '%s' >= l.holiday_end)
           AND ls.payment_date < '%s'
-    """ % (check_date, check_date))
-    rows = cur.fetchall()
+    """ % (today, today))
+    all_rows = cur.fetchall()
+    # Начисляем пени только по периодам, у которых эффективная дата уже прошла
+    rows = [r for r in all_rows if effective_due_date(r[6]) < today]
 
     total_penalty = Decimal('0')
     updated = 0
 
     for row in rows:
-        ls_id, loan_id, principal, interest, paid, current_penalty = row
+        ls_id, loan_id, principal, interest, paid, current_penalty, _pd = row
         principal = Decimal(str(principal))
         interest = Decimal(str(interest))
         paid = Decimal(str(paid))
