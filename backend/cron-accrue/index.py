@@ -153,6 +153,14 @@ def handler(event, context):
 def check_overdue_loans(cur, check_date):
     today = check_date if isinstance(check_date, date) else date.fromisoformat(str(check_date))
 
+    # Снимаем статус 'holiday' у займов, чьи кредитные каникулы уже закончились
+    # (делаем В НАЧАЛЕ, чтобы вышедшие из каникул займы сразу попали в проверку просрочки)
+    cur.execute("""
+        UPDATE loans SET status='active', updated_at=NOW()
+        WHERE status='holiday'
+          AND (holiday_end IS NULL OR DATE '%s' >= holiday_end)
+    """ % today)
+
     # Выбираем все неоплаченные периоды с плановой датой в прошлом
     cur.execute("""
         SELECT ls.id, ls.loan_id, ls.payment_date, l.status AS loan_status
