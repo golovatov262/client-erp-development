@@ -19,12 +19,13 @@ const getNextPaymentInfo = (loan: Loan & { next_payment_date?: string }): { date
   return { date: `${parts[2]}.${parts[1]}.${parts[0]}`, daysLeft: diff, isOverdue: diff < 0 };
 };
 
-const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
+const PaymentQR = ({ org, payerName, contractNo, sum, label, purpose }: {
   org: CabinetOrgInfo | undefined;
   payerName: string;
   contractNo: string;
   sum: number;
   label: string;
+  purpose?: string;
 }) => {
   const [showQR, setShowQR] = useState(false);
 
@@ -39,7 +40,7 @@ const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
     payeeINN: org.inn || "",
     kpp: org.kpp || "",
     lastName: payerName,
-    purpose: `${label} по договору ${contractNo}. ${payerName}`,
+    purpose: purpose ?? `${label} по договору ${contractNo}. ${payerName}`,
     sum,
   });
 
@@ -50,7 +51,7 @@ const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
         onClick={() => setShowQR(!showQR)}
       >
         <Icon name="QrCode" size={14} />
-        {showQR ? "Скрыть QR" : `QR для оплаты · ${fmt(sum)}`}
+        {showQR ? "Скрыть QR" : sum > 0 ? `QR для оплаты · ${fmt(sum)}` : "QR для пополнения"}
       </button>
       {showQR && (
         <div className="mt-2 p-3 bg-white rounded-lg border flex flex-col items-center gap-2">
@@ -58,7 +59,7 @@ const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
           <div className="text-xs text-muted-foreground text-center">
             Отсканируйте QR в мобильном банке
           </div>
-          <div className="text-xs text-center font-medium">{fmt(sum)}</div>
+          {sum > 0 && <div className="text-xs text-center font-medium">{fmt(sum)}</div>}
         </div>
       )}
     </div>
@@ -172,8 +173,9 @@ const CabinetDashboard = ({ data, userName, onOpenLoan, onOpenSaving }: CabinetD
               org={orgsMap[String(s.org_id)]}
               payerName={userName}
               contractNo={s.contract_no}
-              sum={10000}
+              sum={0}
               label="Пополнение сбережений"
+              purpose={`Пополнение лицевого счета № ${s.contract_no} ${userName}`}
             />
           )}
         </CardContent>
