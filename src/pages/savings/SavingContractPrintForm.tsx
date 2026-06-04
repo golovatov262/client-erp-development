@@ -172,6 +172,11 @@ function buildBody(detail: SavingDetail, member: MemberDetail | null, org: Organ
   const amountWords = detail.amount != null ? capitalize(numToWords(Number(detail.amount))) : "___________";
   const term = detail.term_months;
   const termWords = term != null ? termMonthsToWords(term) : "___________";
+  const payoutLabel = detail.payout_type === "monthly"
+    ? "ежемесячно"
+    : detail.payout_type === "end_of_term" || detail.payout_type === "end"
+      ? "в конце срока"
+      : "___________";
 
   return `
 <style>
@@ -203,7 +208,7 @@ function buildBody(detail: SavingDetail, member: MemberDetail | null, org: Organ
 <p class="justify">1.7. Паевой взнос принимается на срок ${term ?? "___"} ${term != null ? pluralizeMonth(term) : "месяцев"} (${termWords}) до ${endDate}.</p>
 <p class="justify">1.8. Доход на паевые взносы устанавливается в размере ${detail.rate != null ? detail.rate + '%' : '___________'} согласно действующих тарифов, Приложения № 1 к Положению о порядке формирования и использования имущества Организации.</p>
 <p class="justify">1.9. Удерживается налог на доходы с физических лиц, исчисленных по правилам, установленным Налоговым Кодексом РФ на дату расчета налога.</p>
-<p class="justify">1.10. Периодичность выплаты дохода по паевому счету определяется выбранным тарифным планом.</p>
+<p class="justify">1.10. Периодичность выплаты дохода по паевому счету - ${payoutLabel}.</p>
 
 <p class="bold center">2. Права и обязанности сторон</p>
 <p class="justify">2.1. Организация обязуется:</p>

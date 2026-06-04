@@ -192,9 +192,10 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Начислено %</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-green-600">{fmt(detail.accrued_interest)}</div></CardContent></Card>
         </div>
 
-        <div className="grid md:grid-cols-4 gap-2 text-sm">
+        <div className="grid md:grid-cols-5 gap-2 text-sm">
           <div><span className="text-muted-foreground">Ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
           <div><span className="text-muted-foreground">Срок:</span> <span className="font-medium">{detail.term_months} мес.</span></div>
+          <div><span className="text-muted-foreground">Выплата %:</span> <span className="font-medium">{detail.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</span></div>
           <div><span className="text-muted-foreground">Начало:</span> <span className="font-medium">{fmtDate(detail.start_date)}</span></div>
           <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
