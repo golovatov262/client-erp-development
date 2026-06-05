@@ -3946,6 +3946,106 @@ def generate_savings_list_xlsx(savings):
     wb.save(buf)
     return buf.getvalue()
 
+def generate_savings_registry_xlsx(savings, date_from, date_to):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Реестр сбережений'
+    title_font = Font(bold=True, size=13)
+    header_font = Font(bold=True, size=10)
+    header_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    header_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin = Side(style='thin')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def ru_date(s):
+        if not s:
+            return ''
+        parts = str(s).split('-')
+        return '%s.%s.%s' % (parts[2], parts[1], parts[0]) if len(parts) == 3 else str(s)
+
+    ws.merge_cells('A1:H1')
+    ws['A1'] = 'Реестр сбережений за период %s — %s' % (ru_date(date_from), ru_date(date_to))
+    ws['A1'].font = title_font
+    ws['A1'].alignment = Alignment(horizontal='center')
+
+    cols = [
+        ('ФИО', 'member_name', 32),
+        ('Номер договора', 'contract_no', 22),
+        ('Дата открытия', 'start_date', 15),
+        ('Дата окончания', 'end_date', 15),
+        ('Ставка, %', 'rate', 10),
+        ('Вариант выплаты процентов', 'payout_type_label', 22),
+        ('Сумма сбережений', 'amount', 18),
+        ('Сумма начисленных процентов', 'period_interest', 22),
+    ]
+    header_row = 3
+    for ci, (title, _, width) in enumerate(cols, 1):
+        cell = ws.cell(row=header_row, column=ci, value=title)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(ci)].width = width
+
+    payout_map = {'monthly': 'Ежемесячно', 'end_of_term': 'В конце срока'}
+    num_fmt = '#,##0.00'
+    total_amount = 0.0
+    total_interest = 0.0
+    ri = header_row + 1
+    for row in savings:
+        row['payout_type_label'] = payout_map.get(row.get('payout_type', ''), row.get('payout_type', ''))
+        row['start_date'] = ru_date(row.get('start_date'))
+        row['end_date'] = ru_date(row.get('end_date'))
+        for ci, (_, key, _) in enumerate(cols, 1):
+            val = row.get(key, '')
+            if val is None:
+                val = ''
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical='center')
+            if key in ('amount', 'period_interest') and val != '':
+                try:
+                    cell.value = float(val)
+                    cell.number_format = num_fmt
+                except (ValueError, TypeError):
+                    pass
+            if key == 'rate' and val != '':
+                try:
+                    cell.value = float(val)
+                except (ValueError, TypeError):
+                    pass
+        try:
+            total_amount += float(row.get('amount', 0) or 0)
+        except (ValueError, TypeError):
+            pass
+        try:
+            total_interest += float(row.get('period_interest', 0) or 0)
+        except (ValueError, TypeError):
+            pass
+        ri += 1
+
+    total_cell = ws.cell(row=ri, column=1, value='ИТОГО')
+    total_cell.font = header_font
+    for ci in range(1, len(cols) + 1):
+        ws.cell(row=ri, column=ci).border = thin_border
+        ws.cell(row=ri, column=ci).fill = header_fill
+    c_amount = ws.cell(row=ri, column=7, value=total_amount)
+    c_amount.number_format = num_fmt
+    c_amount.font = header_font
+    c_interest = ws.cell(row=ri, column=8, value=total_interest)
+    c_interest.number_format = num_fmt
+    c_interest.font = header_font
+
+    ws.freeze_panes = 'A%d' % (header_row + 1)
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def handle_export(params, cur):
     export_type = params.get('type', 'loan')
     format_ = params.get('format', 'xlsx')
@@ -3994,6 +4094,28 @@ def handle_export(params, cur):
         data = generate_savings_list_xlsx(rows)
         ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         fn = 'savings_%s.xlsx' % datetime.now().strftime('%Y%m%d')
+        return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
+    if export_type == 'savings_registry':
+        date_from = params.get('date_from', '')
+        date_to = params.get('date_to', '')
+        if not date_from or not date_to:
+            return {'error': 'Не указан период'}
+        rows = query_rows(cur, """
+            SELECT s.id, s.contract_no, s.amount, s.rate, s.payout_type,
+                   s.start_date, s.end_date,
+                   CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                        ELSE m.company_name END as member_name,
+                   COALESCE((SELECT SUM(a.daily_amount) FROM savings_daily_accruals a
+                             WHERE a.saving_id = s.id
+                               AND a.accrual_date >= '%s' AND a.accrual_date <= '%s'), 0) as period_interest
+            FROM savings s JOIN members m ON m.id=s.member_id
+            WHERE s.start_date <= '%s' AND s.end_date >= '%s'
+            ORDER BY m.last_name, m.first_name, s.contract_no
+        """ % (esc(date_from), esc(date_to), esc(date_to), esc(date_from)))
+        data = generate_savings_registry_xlsx(rows, date_from, date_to)
+        ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        fn = 'savings_registry_%s_%s.xlsx' % (date_from, date_to)
         return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
 
     if not item_id:

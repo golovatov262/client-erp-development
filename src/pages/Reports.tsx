@@ -1,9 +1,12 @@
+import { useState } from "react";
 import PageHeader from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
+import { useToast } from "@/hooks/use-toast";
+import { api } from "@/lib/api";
 
 const reportCards = [
   {
@@ -45,6 +48,29 @@ const reportCards = [
 ];
 
 const Reports = () => {
+  const { toast } = useToast();
+  const today = new Date().toISOString().slice(0, 10);
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const [dateFrom, setDateFrom] = useState(yearStart);
+  const [dateTo, setDateTo] = useState(today);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleSavingsRegistry = async () => {
+    if (!dateFrom || !dateTo) {
+      toast({ title: "Укажите период", variant: "destructive" });
+      return;
+    }
+    setDownloading(true);
+    try {
+      await api.export.download("savings_registry", undefined, "xlsx", { date_from: dateFrom, date_to: dateTo });
+      toast({ title: "Реестр сбережений выгружен в Excel" });
+    } catch (e) {
+      toast({ title: "Ошибка выгрузки", description: String(e), variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -53,20 +79,37 @@ const Reports = () => {
       />
 
       <Card className="p-5">
-        <div className="flex items-end gap-4">
-          <div className="space-y-1.5 flex-1 max-w-xs">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1.5 flex-1 min-w-[160px] max-w-xs">
             <Label className="text-xs">Период с</Label>
-            <Input type="date" defaultValue="2024-01-01" />
+            <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
           </div>
-          <div className="space-y-1.5 flex-1 max-w-xs">
+          <div className="space-y-1.5 flex-1 min-w-[160px] max-w-xs">
             <Label className="text-xs">Период по</Label>
-            <Input type="date" defaultValue="2025-02-13" />
+            <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
           </div>
-          <Button className="gap-2">
-            <Icon name="RefreshCw" size={16} />
-            Применить
-          </Button>
         </div>
+      </Card>
+
+      <Card className="border-emerald-200">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600">
+              <Icon name="FileSpreadsheet" size={20} />
+            </div>
+            <CardTitle className="text-sm">Реестр сбережений</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-4">
+            Договоры сбережений, действующие в выбранном периоде. Колонки: ФИО, номер договора, даты открытия и
+            окончания, ставка, вариант выплаты процентов, сумма сбережений и сумма начисленных процентов за период.
+          </p>
+          <Button size="sm" className="gap-1 text-xs" onClick={handleSavingsRegistry} disabled={downloading}>
+            <Icon name={downloading ? "Loader2" : "FileSpreadsheet"} size={14} className={downloading ? "animate-spin" : ""} />
+            Выгрузить .xlsx
+          </Button>
+        </CardContent>
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
