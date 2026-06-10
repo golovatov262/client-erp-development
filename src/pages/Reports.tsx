@@ -102,8 +102,9 @@ const Reports = () => {
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground mb-4">
-            Договоры сбережений, действующие в выбранном периоде. Колонки: ФИО, номер договора, даты открытия и
-            окончания, ставка, вариант выплаты процентов, сумма сбережений и сумма начисленных процентов за период.
+            Договоры сбережений, действующие в выбранном периоде. Колонки: ФИО, организация, номер договора, даты
+            открытия и окончания, ставка, вариант выплаты процентов, сумма сбережений, остаток основного долга к
+            возврату, начислено и выплачено процентов, остаток процентов к выплате.
           </p>
           <Button size="sm" className="gap-1 text-xs" onClick={handleSavingsRegistry} disabled={downloading}>
             <Icon name={downloading ? "Loader2" : "FileSpreadsheet"} size={14} className={downloading ? "animate-spin" : ""} />

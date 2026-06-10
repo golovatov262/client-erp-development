@@ -3966,21 +3966,28 @@ def generate_savings_registry_xlsx(savings, date_from, date_to):
         parts = str(s).split('-')
         return '%s.%s.%s' % (parts[2], parts[1], parts[0]) if len(parts) == 3 else str(s)
 
-    ws.merge_cells('A1:H1')
-    ws['A1'] = 'Реестр сбережений за период %s — %s' % (ru_date(date_from), ru_date(date_to))
-    ws['A1'].font = title_font
-    ws['A1'].alignment = Alignment(horizontal='center')
-
     cols = [
         ('ФИО', 'member_name', 32),
+        ('Организация', 'org_name', 24),
         ('Номер договора', 'contract_no', 22),
         ('Дата открытия', 'start_date', 15),
         ('Дата окончания', 'end_date', 15),
         ('Ставка, %', 'rate', 10),
         ('Вариант выплаты процентов', 'payout_type_label', 22),
         ('Сумма сбережений', 'amount', 18),
-        ('Сумма начисленных процентов', 'period_interest', 22),
+        ('Остаток ОД (к возврату)', 'principal_balance', 20),
+        ('Начислено процентов', 'accrued_interest', 18),
+        ('Выплачено процентов', 'paid_interest', 18),
+        ('Остаток процентов к выплате', 'interest_balance', 22),
     ]
+    money_keys = {'amount', 'principal_balance', 'accrued_interest', 'paid_interest', 'interest_balance'}
+
+    last_col = get_column_letter(len(cols))
+    ws.merge_cells('A1:%s1' % last_col)
+    ws['A1'] = 'Реестр сбережений за период %s — %s' % (ru_date(date_from), ru_date(date_to))
+    ws['A1'].font = title_font
+    ws['A1'].alignment = Alignment(horizontal='center')
+
     header_row = 3
     for ci, (title, _, width) in enumerate(cols, 1):
         cell = ws.cell(row=header_row, column=ci, value=title)
@@ -3992,13 +3999,17 @@ def generate_savings_registry_xlsx(savings, date_from, date_to):
 
     payout_map = {'monthly': 'Ежемесячно', 'end_of_term': 'В конце срока'}
     num_fmt = '#,##0.00'
-    total_amount = 0.0
-    total_interest = 0.0
+    totals = {k: 0.0 for k in money_keys}
     ri = header_row + 1
     for row in savings:
         row['payout_type_label'] = payout_map.get(row.get('payout_type', ''), row.get('payout_type', ''))
+        if not row.get('org_name'):
+            row['org_name'] = '—'
         row['start_date'] = ru_date(row.get('start_date'))
         row['end_date'] = ru_date(row.get('end_date'))
+        accrued = float(row.get('accrued_interest', 0) or 0)
+        paid = float(row.get('paid_interest', 0) or 0)
+        row['interest_balance'] = round(accrued - paid, 2)
         for ci, (_, key, _) in enumerate(cols, 1):
             val = row.get(key, '')
             if val is None:
@@ -4006,10 +4017,11 @@ def generate_savings_registry_xlsx(savings, date_from, date_to):
             cell = ws.cell(row=ri, column=ci, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(vertical='center')
-            if key in ('amount', 'period_interest') and val != '':
+            if key in money_keys and val != '':
                 try:
                     cell.value = float(val)
                     cell.number_format = num_fmt
+                    totals[key] += float(val)
                 except (ValueError, TypeError):
                     pass
             if key == 'rate' and val != '':
@@ -4017,27 +4029,17 @@ def generate_savings_registry_xlsx(savings, date_from, date_to):
                     cell.value = float(val)
                 except (ValueError, TypeError):
                     pass
-        try:
-            total_amount += float(row.get('amount', 0) or 0)
-        except (ValueError, TypeError):
-            pass
-        try:
-            total_interest += float(row.get('period_interest', 0) or 0)
-        except (ValueError, TypeError):
-            pass
         ri += 1
 
-    total_cell = ws.cell(row=ri, column=1, value='ИТОГО')
-    total_cell.font = header_font
-    for ci in range(1, len(cols) + 1):
-        ws.cell(row=ri, column=ci).border = thin_border
-        ws.cell(row=ri, column=ci).fill = header_fill
-    c_amount = ws.cell(row=ri, column=7, value=total_amount)
-    c_amount.number_format = num_fmt
-    c_amount.font = header_font
-    c_interest = ws.cell(row=ri, column=8, value=total_interest)
-    c_interest.number_format = num_fmt
-    c_interest.font = header_font
+    ws.cell(row=ri, column=1, value='ИТОГО').font = header_font
+    for ci, (_, key, _) in enumerate(cols, 1):
+        c = ws.cell(row=ri, column=ci)
+        c.border = thin_border
+        c.fill = header_fill
+        if key in money_keys:
+            c.value = round(totals[key], 2)
+            c.number_format = num_fmt
+            c.font = header_font
 
     ws.freeze_panes = 'A%d' % (header_row + 1)
     from io import BytesIO
@@ -4104,15 +4106,17 @@ def handle_export(params, cur):
         rows = query_rows(cur, """
             SELECT s.id, s.contract_no, s.amount, s.rate, s.payout_type,
                    s.start_date, s.end_date,
+                   s.current_balance as principal_balance,
+                   COALESCE(s.accrued_interest, 0) as accrued_interest,
+                   COALESCE(s.paid_interest, 0) as paid_interest,
                    CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                         ELSE m.company_name END as member_name,
-                   COALESCE((SELECT SUM(a.daily_amount) FROM savings_daily_accruals a
-                             WHERE a.saving_id = s.id
-                               AND a.accrual_date >= '%s' AND a.accrual_date <= '%s'), 0) as period_interest
+                   COALESCE(o.short_name, o.name) as org_name
             FROM savings s JOIN members m ON m.id=s.member_id
+            LEFT JOIN organizations o ON o.id=s.org_id
             WHERE s.start_date <= '%s' AND s.end_date >= '%s'
             ORDER BY m.last_name, m.first_name, s.contract_no
-        """ % (esc(date_from), esc(date_to), esc(date_to), esc(date_from)))
+        """ % (esc(date_to), esc(date_from)))
         data = generate_savings_registry_xlsx(rows, date_from, date_to)
         ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         fn = 'savings_registry_%s_%s.xlsx' % (date_from, date_to)
