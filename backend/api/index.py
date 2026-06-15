@@ -300,6 +300,10 @@ def recalc_loan_schedule_statuses(cur, lid):
                     if is_future:
                         covered_one_future = True
                     continue
+                # Будущий период закрываем только при полном покрытии, иначе остаток
+                # идёт на основной долг текущего периода, а не «зависает» как partial.
+                if is_future and dist_remaining < need_total_for_row - Decimal('0.005'):
+                    break
                 take_total = min(dist_remaining, need_total_for_row)
                 dist_remaining -= take_total
                 total_item = sp + si + spn
@@ -350,7 +354,14 @@ def recalc_loan_schedule_statuses(cur, lid):
                 need_total = need_i + need_pn + need_pp
 
                 if need_total <= Decimal('0.005'):
+                    if is_future:
+                        covered_one_future_recalc = True
                     continue
+
+                # Будущий период закрываем только при полном покрытии, иначе остаток
+                # идёт на основной долг текущего периода, а не «зависает» как partial.
+                if is_future and remaining < need_total - Decimal('0.005'):
+                    break
 
                 take_total = min(remaining, need_total)
                 item_i = min(take_total, need_i)
@@ -896,6 +907,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                         if is_future:
                             covered_one_future = True
                         continue
+
+                    # Будущий период (даже в текущем месяце) закрываем только если остатка
+                    # хватает покрыть его ПОЛНОСТЬЮ. Иначе мелкий остаток не «зависает» как
+                    # partial на следующем периоде, а уходит на уменьшение основного долга.
+                    if is_future and remaining_amt < need_total - Decimal('0.005'):
+                        break
 
                     take_total = min(remaining_amt, need_total)
                     item_i = min(take_total, need_i)
