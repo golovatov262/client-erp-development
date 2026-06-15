@@ -5240,7 +5240,7 @@ def handle_cabinet(method, params, body, headers, cur, conn=None):
             next_rows = query_rows(cur, """
                 SELECT loan_id, payment_date
                 FROM loan_schedule
-                WHERE loan_id IN (%s) AND status IN ('pending', 'overdue')
+                WHERE loan_id IN (%s) AND status IN ('pending', 'partial', 'overdue')
                 ORDER BY loan_id, payment_no
             """ % ids_str)
             next_map = {}
