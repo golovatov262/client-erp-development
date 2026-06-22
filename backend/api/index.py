@@ -3985,6 +3985,7 @@ def generate_savings_registry_xlsx(savings, date_from, date_to):
 
     cols = [
         ('ФИО', 'member_name', 32),
+        ('Телефон', 'phone', 16),
         ('Организация', 'org_name', 24),
         ('Номер договора', 'contract_no', 22),
         ('Дата открытия', 'start_date', 15),
@@ -4128,6 +4129,7 @@ def handle_export(params, cur):
                    COALESCE(s.paid_interest, 0) as paid_interest,
                    CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                         ELSE m.company_name END as member_name,
+                   COALESCE(m.phone, '') as phone,
                    COALESCE(o.short_name, o.name) as org_name
             FROM savings s JOIN members m ON m.id=s.member_id
             LEFT JOIN organizations o ON o.id=s.org_id
