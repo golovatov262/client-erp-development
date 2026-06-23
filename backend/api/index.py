@@ -1769,6 +1769,11 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             pt = params.get('payout_type', 'monthly')
             sd = date.fromisoformat(params.get('start_date', date.today().isoformat()))
             return {'schedule': calc_savings_schedule(a, r, t, sd, pt)}
+        elif action == 'accrual_settings':
+            cur.execute("SELECT value FROM system_settings WHERE key='savings_auto_accrual'")
+            row = cur.fetchone()
+            enabled = not (row and str(row[0]).lower() in ('off', 'false', '0', 'disabled'))
+            return {'auto_accrual_enabled': enabled}
         else:
             return query_rows(cur, """
                 SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type,
@@ -2453,6 +2458,21 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 'Выплата остатка %s руб. (баланс: %s + %% %s) (%s)' % (float(total), float(balance), float(accrued), payout_date), ip)
             conn.commit()
             return {'success': True, 'amount': float(total)}
+
+        elif action == 'set_auto_accrual':
+            """Включение/выключение автоматического начисления процентов по сбережениям"""
+            if staff and staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может менять настройку'}
+            enabled = bool(body.get('enabled'))
+            val = 'on' if enabled else 'off'
+            cur.execute("""
+                INSERT INTO system_settings (key, value) VALUES ('savings_auto_accrual', '%s')
+                ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()
+            """ % val)
+            audit_log(cur, staff, 'set_auto_accrual', 'saving', 0, '',
+                'Автоначисление процентов по сбережениям: %s' % ('включено' if enabled else 'выключено'), ip)
+            conn.commit()
+            return {'success': True, 'auto_accrual_enabled': enabled}
 
         elif action == 'delete_accruals_by_date':
             """Удаление начислений процентов по сбережениям за конкретную дату с откатом accrued_interest"""

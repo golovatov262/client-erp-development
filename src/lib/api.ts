@@ -190,6 +190,12 @@ export const api = {
       request<{ success: boolean; cleared_amount: number }>("POST", undefined, { entity: "savings", action: "clear_daily_accruals", saving_id: savingId }),
     recalcAllActive: () =>
       request<{ success: boolean; recalculated: number; total: number; errors: { contract_no: string; error: string }[] }>("POST", undefined, { entity: "savings", action: "recalc_all_active" }),
+    getAccrualSettings: () =>
+      request<{ auto_accrual_enabled: boolean }>("GET", { entity: "savings", action: "accrual_settings" }),
+    setAutoAccrual: (enabled: boolean) =>
+      request<{ success: boolean; auto_accrual_enabled: boolean }>("POST", undefined, { entity: "savings", action: "set_auto_accrual", enabled }),
+    deleteAccrualsByDate: (accrualDate: string) =>
+      request<{ success: boolean; deleted: number; total: number; date: string }>("POST", undefined, { entity: "savings", action: "delete_accruals_by_date", accrual_date: accrualDate }),
   },
 
   shares: {

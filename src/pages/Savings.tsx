@@ -8,6 +8,7 @@ import SavingsDetailDialog from "./savings/SavingsDetailDialog";
 import SavingsActionDialogs from "./savings/SavingsActionDialogs";
 import SavingsEditDialog from "./savings/SavingsEditDialog";
 import SavingsToolbar from "./savings/SavingsToolbar";
+import SavingsAccrualSettings from "./savings/SavingsAccrualSettings";
 import savingsColumns from "./savings/savingsColumns";
 import useSavingsHandlers from "./savings/useSavingsHandlers";
 
@@ -32,6 +33,7 @@ const Savings = () => {
         </TabsList>
 
         <TabsContent value="savings" className="space-y-4">
+          {h.isAdmin && <SavingsAccrualSettings />}
           <SavingsToolbar
             search={h.search}
             setSearch={h.setSearch}
