@@ -58,13 +58,24 @@ def handler(event, context):
         cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
         auto_closed = max(0, cur.rowcount)
 
+        # Проверяем глобальный флаг автоматического начисления процентов по сбережениям.
+        # Если 'off' — пропускаем начисление по вкладам (просрочки/пени по займам работают).
+        savings_accrual_enabled = True
+        try:
+            cur.execute("SELECT value FROM system_settings WHERE key='savings_auto_accrual'")
+            flag_row = cur.fetchone()
+            if flag_row and str(flag_row[0]).lower() in ('off', 'false', '0', 'disabled'):
+                savings_accrual_enabled = False
+        except Exception:
+            pass
+
         # Список дат для начисления: пропущенные дни за последние 7 дней + сегодня
         # Для каждого вклада индивидуально проверяем наличие начисления
         today_dt = date.fromisoformat(accrual_date)
         lookback_days = [(today_dt - timedelta(days=i)).isoformat() for i in range(7, 0, -1)]
 
         missed_dates = []
-        for check_date in lookback_days:
+        for check_date in (lookback_days if savings_accrual_enabled else []):
             cur.execute("""
                 SELECT COUNT(*) FROM savings s
                 WHERE s.status = 'active'
@@ -79,7 +90,7 @@ def handler(event, context):
             if missed_count > 0:
                 missed_dates.append(check_date)
 
-        dates_to_process = missed_dates + [accrual_date]
+        dates_to_process = (missed_dates + [accrual_date]) if savings_accrual_enabled else []
 
         count = 0
         total = Decimal('0')
@@ -134,6 +145,7 @@ def handler(event, context):
             'processed': count,
             'skipped': skipped,
             'total_accrued': float(total),
+            'savings_accrual_enabled': savings_accrual_enabled,
             'savings_auto_closed': auto_closed,
             'recovery_accruals': recovery_count,
             'overdue': overdue_result,

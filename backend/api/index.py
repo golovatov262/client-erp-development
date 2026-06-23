@@ -2454,6 +2454,32 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'amount': float(total)}
 
+        elif action == 'delete_accruals_by_date':
+            """Удаление начислений процентов по сбережениям за конкретную дату с откатом accrued_interest"""
+            if staff and staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может удалять начисления'}
+            acc_date = body.get('accrual_date', '')
+            if not acc_date:
+                return {'error': 'Не указана дата начисления'}
+            cur.execute("SELECT COUNT(*), COALESCE(SUM(daily_amount),0) FROM savings_daily_accruals WHERE accrual_date='%s'" % esc(acc_date))
+            cnt_row = cur.fetchone()
+            del_count = int(cnt_row[0])
+            del_total = float(cnt_row[1])
+            cur.execute("""
+                UPDATE savings s
+                SET accrued_interest = GREATEST(COALESCE(s.accrued_interest, 0) - sub.amt, 0), updated_at = NOW()
+                FROM (
+                    SELECT saving_id, SUM(daily_amount) AS amt
+                    FROM savings_daily_accruals WHERE accrual_date='%s' GROUP BY saving_id
+                ) sub
+                WHERE s.id = sub.saving_id
+            """ % esc(acc_date))
+            cur.execute("DELETE FROM savings_daily_accruals WHERE accrual_date='%s'" % esc(acc_date))
+            audit_log(cur, staff, 'delete_accruals', 'saving', 0, '',
+                'Удалены начисления за %s: %d записей на сумму %s руб.' % (acc_date, del_count, del_total), ip)
+            conn.commit()
+            return {'success': True, 'deleted': del_count, 'total': del_total, 'date': acc_date}
+
 def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
