@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Icon from "@/components/ui/icon";
-import api, { MemberOrg, Organization } from "@/lib/api";
+import api, { MemberOrg, Organization, humanizeError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 interface Props {
@@ -94,7 +94,7 @@ const MemberOrgsTab = ({ memberId }: Props) => {
       resetForm();
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -107,7 +107,7 @@ const MemberOrgsTab = ({ memberId }: Props) => {
       toast({ title: "Пайщик исключён из организации" });
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

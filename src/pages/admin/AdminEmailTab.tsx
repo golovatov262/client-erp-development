@@ -17,6 +17,7 @@ import api, {
   NotificationHistoryItem,
   NotificationLogEntry,
   NotificationStats,
+  humanizeError,
 } from "@/lib/api";
 
 const fmtDate = (d: string) => {
@@ -74,7 +75,7 @@ const AdminEmailTab = () => {
       setMessages(hist.items);
       setMessagesTotal(hist.total);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -97,7 +98,7 @@ const AdminEmailTab = () => {
       setForm({ title: "", body: "", target: "all" });
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка отправки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка отправки", description: humanizeError(e), variant: "destructive" });
     }
     setSending(false);
   };
@@ -109,7 +110,7 @@ const AdminEmailTab = () => {
       const entries = await api.notifications.historyLog(id);
       setLogEntries(entries);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setLogLoading(false);
   };
@@ -128,7 +129,7 @@ const AdminEmailTab = () => {
       toast({ title: "Настройки сохранены" });
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingSettings(false);
   };
@@ -138,7 +139,7 @@ const AdminEmailTab = () => {
       await api.notifications.saveChannel("email", !channel?.enabled);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -152,7 +153,7 @@ const AdminEmailTab = () => {
       await api.notifications.testEmail(testEmail.trim());
       toast({ title: "Тестовое письмо отправлено" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setTesting(false);
   };

@@ -20,6 +20,7 @@ import api, {
   NotificationLogEntry,
   NotificationStats,
   OverdueLoanItem,
+  humanizeError,
 } from "@/lib/api";
 
 const fmtDate = (d: string) => {
@@ -86,7 +87,7 @@ const AdminSmsTab = () => {
       setAutoSettings(smsSettings);
       setOverdueLoans(dash.overdue_loan_list || []);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -166,7 +167,7 @@ const AdminSmsTab = () => {
       setSelectedIds([]);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка отправки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка отправки", description: humanizeError(e), variant: "destructive" });
     }
     setSending(false);
   };
@@ -178,7 +179,7 @@ const AdminSmsTab = () => {
       const entries = await api.notifications.historyLog(id);
       setLogEntries(entries);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setLogLoading(false);
   };
@@ -188,7 +189,7 @@ const AdminSmsTab = () => {
       await api.notifications.saveChannel("sms", !channel?.enabled);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -202,7 +203,7 @@ const AdminSmsTab = () => {
       await api.notifications.testSms(testPhone.trim());
       toast({ title: "Тестовое SMS отправлено" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setTesting(false);
   };
@@ -224,7 +225,7 @@ const AdminSmsTab = () => {
       await api.notifications.saveSmsSettings(autoSettings);
       toast({ title: "Настройки автоуведомлений сохранены" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingAuto(false);
   };

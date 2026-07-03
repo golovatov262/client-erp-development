@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { LoanApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
+import api, { LoanApplication, Member, MemberDetail, Organization, StaffUser, toNum, humanizeError } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
 import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
@@ -110,7 +110,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
       }
       onSaved();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -185,7 +185,7 @@ const LoanApplicationDialog = ({ open, onOpenChange, item, members, orgs, canEdi
       toast({ title: "Заявка отклонена" });
       onSaved();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setRejecting(false);
     }

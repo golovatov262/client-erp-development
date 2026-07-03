@@ -19,6 +19,7 @@ import api, {
   NotificationHistoryItem,
   NotificationLogEntry,
   NotificationStats,
+  humanizeError,
 } from "@/lib/api";
 
 const fmtDate = (d: string) => {
@@ -73,7 +74,7 @@ const AdminMaxTab = () => {
       setMessagesTotal(hist.total);
       setAutoSettings(maxSettings);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -109,7 +110,7 @@ const AdminMaxTab = () => {
       setSelectedUsers([]);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка отправки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка отправки", description: humanizeError(e), variant: "destructive" });
     }
     setSending(false);
   };
@@ -121,7 +122,7 @@ const AdminMaxTab = () => {
       const entries = await api.notifications.historyLog(id);
       setLogEntries(entries);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setLogLoading(false);
   };
@@ -131,7 +132,7 @@ const AdminMaxTab = () => {
       await api.notifications.saveChannel("max", !channel?.enabled);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -145,7 +146,7 @@ const AdminMaxTab = () => {
       await api.notifications.testMax(testChatId.trim());
       toast({ title: "Тестовое сообщение отправлено" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setTesting(false);
   };
@@ -160,7 +161,7 @@ const AdminMaxTab = () => {
       await api.notifications.saveMaxSettings(autoSettings);
       toast({ title: "Настройки автоуведомлений сохранены" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingAuto(false);
   };
@@ -570,7 +571,7 @@ const AdminMaxTab = () => {
                       const res = await api.notifications.setMaxWebhook();
                       toast({ title: "Webhook установлен", description: res.webhook_url });
                       loadWebhookInfo();
-                    } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                    } catch (e) { toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" }); }
                     setWebhookLoading(false);
                   }} disabled={webhookLoading}>
                     {webhookLoading ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : <Icon name="Link" size={14} className="mr-1" />}
@@ -582,7 +583,7 @@ const AdminMaxTab = () => {
                         await api.notifications.deleteMaxWebhook();
                         setWebhookUrl("");
                         toast({ title: "Webhook удалён" });
-                      } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                      } catch (e) { toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" }); }
                     }}>
                       <Icon name="Unlink" size={14} className="mr-1" />
                       Удалить

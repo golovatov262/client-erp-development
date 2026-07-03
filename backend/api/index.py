@@ -20,6 +20,48 @@ import bcrypt
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
+def humanize_db_error(e):
+    """Переводит технические ошибки БД/кода в понятные пользователю сообщения."""
+    err = str(e)
+    low = err.lower()
+    # Ошибки, которые мы сами бросаем через ValueError с понятным текстом — оставляем как есть
+    if isinstance(e, (ValueError, KeyError)) and err and 'traceback' not in low:
+        txt = err.strip("'\"")
+        if 'not specified' not in low and len(txt) < 200 and '\n' not in txt:
+            if isinstance(e, KeyError):
+                return 'Не заполнено обязательное поле: %s' % txt
+            return txt
+    if 'value too long' in low:
+        return 'Слишком длинное значение в одном из полей. Сократите текст и попробуйте снова'
+    if 'unique' in low and 'constraint' in low:
+        return 'Запись с такими данными уже существует'
+    if 'duplicate key' in low:
+        return 'Запись с такими данными уже существует'
+    if 'check' in low and 'constraint' in low:
+        return 'Некорректные данные. Проверьте заполнение полей'
+    if 'foreign key' in low:
+        return 'Невозможно выполнить: связанные данные не найдены'
+    if 'not-null' in low or 'null value' in low:
+        return 'Не заполнены обязательные поля'
+    if ('numeric' in low or 'out of range' in low) and ('overflow' in low or 'out of range' in low):
+        return 'Слишком большое число. Проверьте суммы и ставки'
+    if 'invalid input syntax' in low or 'invalid input value' in low:
+        return 'Введены некорректные данные. Проверьте формат заполнения полей'
+    if 'division by zero' in low:
+        return 'Ошибка вычисления: деление на ноль. Проверьте параметры'
+    if 'date' in low and ('format' in low or 'invalid' in low or 'field value out of range' in low):
+        return 'Некорректная дата. Проверьте введённые даты'
+    if 'could not connect' in low or 'connection' in low and 'refused' in low:
+        return 'Временная проблема со связью с базой. Попробуйте ещё раз через минуту'
+    if 'timeout' in low or 'timed out' in low:
+        return 'Операция заняла слишком много времени. Попробуйте ещё раз'
+    if 'permission denied' in low or 'access denied' in low:
+        return 'Недостаточно прав для выполнения операции'
+    if 'deadlock' in low:
+        return 'Данные сейчас редактируются другим пользователем. Попробуйте ещё раз'
+    # Прочее — не показываем «сырой» технический текст
+    return 'Не удалось выполнить операцию. Проверьте данные и попробуйте ещё раз'
+
 def safe_float(v, field_name='значение'):
     if v is None:
         raise ValueError('Не указано: %s' % field_name)
@@ -9074,18 +9116,7 @@ def handler(event, context):
         return {'statusCode': code, 'headers': headers, 'body': json.dumps(result)}
     except Exception as e:
         conn.rollback()
-        err = str(e)
-        msg = err
-        if 'unique' in err.lower() and 'constraint' in err.lower():
-            msg = 'Запись с такими данными уже существует'
-        elif 'check' in err.lower() and 'constraint' in err.lower():
-            msg = 'Некорректные данные. Проверьте заполнение полей'
-        elif 'foreign key' in err.lower() or 'not-null' in err.lower():
-            msg = 'Невозможно выполнить: связанные данные не найдены или не заполнены обязательные поля'
-        elif 'numeric' in err.lower() and 'overflow' in err.lower():
-            msg = 'Слишком большое число. Проверьте суммы и ставки'
-        elif 'division by zero' in err.lower():
-            msg = 'Ошибка вычисления: деление на ноль. Проверьте параметры'
+        msg = humanize_db_error(e)
         return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': msg})}
     finally:
         cur.close()

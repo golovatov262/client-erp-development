@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { PushStats, PushSubscriber, PushMessage, PushSettings } from "@/lib/api";
+import api, { PushStats, PushSubscriber, PushMessage, PushSettings, humanizeError } from "@/lib/api";
 import PushSendTab from "./push/PushSendTab";
 import PushHistoryTab, { fmtDate } from "./push/PushHistoryTab";
 import PushSettingsTab from "./push/PushSettingsTab";
@@ -39,7 +39,7 @@ const AdminPushMessages = () => {
       setMessagesTotal(m.total);
       if (st && st.enabled !== undefined) setSettings(st);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -69,7 +69,7 @@ const AdminPushMessages = () => {
       setSelectedUsers([]);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка отправки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка отправки", description: humanizeError(e), variant: "destructive" });
     }
     setSending(false);
   };
@@ -84,7 +84,7 @@ const AdminPushMessages = () => {
       await api.push.saveSettings(settings);
       toast({ title: "Настройки сохранены" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingSettings(false);
   };

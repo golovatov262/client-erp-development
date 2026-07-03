@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
-import api, { RfmCheck, RfmCheckDetail, RfmFoundEntry } from "@/lib/api";
+import api, { RfmCheck, RfmCheckDetail, RfmFoundEntry, humanizeError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const fmtDate = (d: string | null) => {
@@ -65,7 +65,7 @@ const PodftTab = () => {
       }
       load();
     } catch (e) {
-      toast({ title: "Ошибка проверки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка проверки", description: humanizeError(e), variant: "destructive" });
     } finally {
       setRunning(false);
     }
@@ -78,7 +78,7 @@ const PodftTab = () => {
       const data = await api.podft.detail(id);
       setDetailData(data as RfmCheckDetail);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setDetailLoading(false);
     }

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
-import api, { toNum, LoanDetail, ScheduleItem, Member, Organization } from "@/lib/api";
+import api, { toNum, LoanDetail, ScheduleItem, Member, Organization, humanizeError } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
@@ -63,7 +63,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
       setPreview(res.schedule);
       setPreviewMonthly(res.monthly_payment);
     } catch (e) {
-      toast({ title: "Ошибка предпросмотра", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка предпросмотра", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -89,7 +89,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
       onOpenChange(false);
       onSaved();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }

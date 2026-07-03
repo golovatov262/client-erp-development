@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import DataTable, { Column } from "@/components/ui/data-table";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { LoanApplication, Member, Organization } from "@/lib/api";
+import api, { LoanApplication, Member, Organization, humanizeError } from "@/lib/api";
 import LoanApplicationDialog from "./LoanApplicationDialog";
 import LoanApplicationApproveDialog from "./LoanApplicationApproveDialog";
 
@@ -90,7 +90,7 @@ const LoanApplicationsTab = ({ members, orgs, canEdit, openCreate, onConsumeOpen
       toast({ title: "Заявка отклонена" });
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

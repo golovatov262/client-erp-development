@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { SavingApplication, Member, MemberDetail, Organization, StaffUser, toNum } from "@/lib/api";
+import api, { SavingApplication, Member, MemberDetail, Organization, StaffUser, toNum, humanizeError } from "@/lib/api";
 import MemberSearch from "@/components/ui/member-search";
 import DadataSuggest, { DadataSuggestProps } from "@/components/ui/dadata-suggest";
 import MaskedInput from "@/components/ui/masked-input";
@@ -97,7 +97,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
       }
       onSaved();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -114,7 +114,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
         onSavingCreated();
         onSaved();
       } catch (e) {
-        toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+        toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
       } finally {
         setSaving(false);
       }
@@ -127,7 +127,7 @@ const SavingApplicationDialog = ({ open, onOpenChange, item, members, orgs, canE
         toast({ title: "Заявка аннулирована" });
         onSaved();
       } catch (e) {
-        toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+        toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
       } finally {
         setSaving(false);
       }

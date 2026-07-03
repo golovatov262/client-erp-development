@@ -10,7 +10,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import api from "@/lib/api";
+import api, { humanizeError } from "@/lib/api";
 
 const SavingsAccrualSettings = () => {
   const { toast } = useToast();
@@ -27,7 +27,7 @@ const SavingsAccrualSettings = () => {
       const res = await api.savings.getAccrualSettings();
       setEnabled(res.auto_accrual_enabled);
     } catch (e) {
-      toast({ title: "Ошибка загрузки настроек", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки настроек", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -41,7 +41,7 @@ const SavingsAccrualSettings = () => {
       setEnabled(v);
       toast({ title: v ? "Автоначисление включено" : "Автоначисление выключено" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setToggling(false);
   };
@@ -54,7 +54,7 @@ const SavingsAccrualSettings = () => {
       toast({ title: `Удалено начислений: ${res.deleted}`, description: `На сумму ${res.total.toLocaleString("ru-RU")} ₽ за ${delDate}` });
       setDelDate("");
     } catch (e) {
-      toast({ title: "Ошибка удаления", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка удаления", description: humanizeError(e), variant: "destructive" });
     }
     setDeleting(false);
   };

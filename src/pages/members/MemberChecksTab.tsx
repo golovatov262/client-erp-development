@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import Icon from "@/components/ui/icon";
-import api, { MemberCheck, MemberDetail } from "@/lib/api";
+import api, { MemberCheck, MemberDetail, humanizeError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import CreditCheckPanel, { CreditCheckInput } from "@/components/credit-check/CreditCheckPanel";
 
@@ -146,7 +146,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       resetForm();
       loadChecks();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -159,7 +159,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       toast({ title: "Проверка удалена" });
       loadChecks();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -187,7 +187,7 @@ const MemberChecksTab = ({ memberId, isAdmin }: Props) => {
       }
       loadChecks();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setPassportChecking(false);
     }

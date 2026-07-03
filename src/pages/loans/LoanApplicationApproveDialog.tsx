@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import api, { LoanApplication, toNum } from "@/lib/api";
+import api, { LoanApplication, toNum, humanizeError } from "@/lib/api";
 
 type Props = {
   open: boolean;
@@ -46,7 +46,7 @@ const LoanApplicationApproveDialog = ({ open, onOpenChange, item, onApproved }: 
       toast({ title: "Заявка одобрена", description: `Создан договор ${res.contract_no}, платёж: ${res.monthly_payment.toFixed(2)} ₽` });
       onApproved();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }

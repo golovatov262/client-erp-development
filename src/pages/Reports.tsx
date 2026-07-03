@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import { api } from "@/lib/api";
+import { api, humanizeError } from "@/lib/api";
 
 const reportCards = [
   {
@@ -65,7 +65,7 @@ const Reports = () => {
       await api.export.download("savings_registry", undefined, "xlsx", { date_from: dateFrom, date_to: dateTo });
       toast({ title: "Реестр сбережений выгружен в Excel" });
     } catch (e) {
-      toast({ title: "Ошибка выгрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка выгрузки", description: humanizeError(e), variant: "destructive" });
     } finally {
       setDownloading(false);
     }

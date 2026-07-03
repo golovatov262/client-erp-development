@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { humanizeError } from "@/lib/api";
 
 const Login = () => {
   const [loginVal, setLoginVal] = useState("");
@@ -25,7 +26,7 @@ const Login = () => {
       await login(loginVal, password);
       navigate("/office");
     } catch (err) {
-      toast({ title: "Ошибка входа", description: String(err).replace("Error: ", ""), variant: "destructive" });
+      toast({ title: "Ошибка входа", description: humanizeError(err), variant: "destructive" });
     } finally {
       setLoading(false);
     }

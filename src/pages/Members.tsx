@@ -12,7 +12,7 @@ import Icon from "@/components/ui/icon";
 import CompanyInnSuggest from "@/components/ui/company-inn-suggest";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Member, MemberDetail } from "@/lib/api";
+import api, { Member, MemberDetail, humanizeError } from "@/lib/api";
 import MemberChecksTab from "@/pages/members/MemberChecksTab";
 import MemberOrgsTab from "@/pages/members/MemberOrgsTab";
 import PodftTab from "@/pages/members/PodftTab";
@@ -109,7 +109,7 @@ const Members = () => {
       setMainTab("data");
       setShowForm(true);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -137,7 +137,7 @@ const Members = () => {
       setEditingId(null);
       loadMembers();
     } catch (e: unknown) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -156,7 +156,7 @@ const Members = () => {
       setEditingId(null);
       loadMembers();
     } catch (e: unknown) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }

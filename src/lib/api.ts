@@ -10,6 +10,31 @@ function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
 
+export function humanizeError(raw: unknown): string {
+  const msg = String(raw ?? "").replace(/^Error:\s*/i, "").trim();
+  if (!msg) return "Что-то пошло не так. Попробуйте ещё раз";
+  const low = msg.toLowerCase();
+  const map: [RegExp, string][] = [
+    [/value too long/, "Слишком длинное значение в одном из полей. Сократите текст и попробуйте снова"],
+    [/(unique|duplicate).*(constraint|key)|duplicate key/, "Запись с такими данными уже существует"],
+    [/check.*constraint/, "Некорректные данные. Проверьте заполнение полей"],
+    [/foreign key/, "Невозможно выполнить: связанные данные не найдены"],
+    [/not-null|null value|not null/, "Не заполнены обязательные поля"],
+    [/(numeric|value).*(overflow|out of range)|out of range/, "Слишком большое число. Проверьте суммы и ставки"],
+    [/invalid input (syntax|value)/, "Введены некорректные данные. Проверьте формат заполнения полей"],
+    [/division by zero/, "Ошибка вычисления: деление на ноль. Проверьте параметры"],
+    [/failed to fetch|networkerror|network error/, "Нет связи с сервером. Проверьте интернет-соединение"],
+    [/timeout|timed out/, "Операция заняла слишком много времени. Попробуйте ещё раз"],
+    [/permission denied|access denied|forbidden/, "Недостаточно прав для выполнения операции"],
+    [/deadlock/, "Данные сейчас редактируются другим пользователем. Попробуйте ещё раз"],
+    [/(psycopg2|sql|syntax error at|relation .* does not exist|column .* does not exist|traceback)/, "Не удалось выполнить операцию. Проверьте данные и попробуйте ещё раз"],
+  ];
+  for (const [re, human] of map) {
+    if (re.test(low)) return human;
+  }
+  return msg;
+}
+
 async function requestAgent<T>(method: string, params?: Params, body?: unknown, agentToken?: string): Promise<T> {
   const url = new URL(API_URL);
   if (params) {
@@ -33,7 +58,7 @@ async function requestAgent<T>(method: string, params?: Params, body?: unknown, 
   } catch {
     throw new Error("Сервер вернул некорректный ответ");
   }
-  if (!res.ok || data.error) throw new Error(data.error || "Ошибка сервера");
+  if (!res.ok || data.error) throw new Error(humanizeError(data.error || "Ошибка сервера"));
   return data;
 }
 
@@ -65,7 +90,7 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
   } catch {
     throw new Error("Сервер вернул некорректный ответ");
   }
-  if (!res.ok || data.error) throw new Error(data.error || "Ошибка сервера");
+  if (!res.ok || data.error) throw new Error(humanizeError(data.error || "Ошибка сервера"));
   return data;
 }
 

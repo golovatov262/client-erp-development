@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import Icon from "@/components/ui/icon";
 import PageHeader from "@/components/ui/page-header";
 import { useToast } from "@/hooks/use-toast";
-import api, { bankApi, BankConnection, BankStatement, BankTransaction, BankImapStatus, BankSyncLogEntry, Organization } from "@/lib/api";
+import api, { bankApi, BankConnection, BankStatement, BankTransaction, BankImapStatus, BankSyncLogEntry, Organization, humanizeError } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -73,7 +73,7 @@ const BankStatements = () => {
       bankApi.status().then(setImapStatus).catch(() => {});
       bankApi.syncLog(20).then(setSyncLog).catch(() => {});
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -85,7 +85,7 @@ const BankStatements = () => {
       const txns = await bankApi.transactions(stmtId, filter || undefined);
       setTransactions(txns);
     } catch (e) {
-      toast({ title: "Ошибка загрузки транзакций", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки транзакций", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -112,7 +112,7 @@ const BankStatements = () => {
       }
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setFetching(false);
   };
@@ -126,7 +126,7 @@ const BankStatements = () => {
       setAddForm({ org_id: "", account_number: "" });
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -135,7 +135,7 @@ const BankStatements = () => {
       await bankApi.toggleConnection(connId, isActive);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

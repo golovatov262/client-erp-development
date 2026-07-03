@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api from "@/lib/api";
+import api, { humanizeError } from "@/lib/api";
 
 interface ApiKey {
   id: number;
@@ -69,7 +69,7 @@ const AdminApiKeys = () => {
       setName("");
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -78,7 +78,7 @@ const AdminApiKeys = () => {
       await api.apiKeys.toggle(id);
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -89,7 +89,7 @@ const AdminApiKeys = () => {
       toast({ title: "Ключ удалён" });
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

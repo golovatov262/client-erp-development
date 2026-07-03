@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api from "@/lib/api";
+import api, { humanizeError } from "@/lib/api";
 
 type Step = "choose" | "phone" | "sms" | "password_login" | "set_password" | "login_form";
 
@@ -66,7 +66,7 @@ const Login = () => {
       setStep("sms");
       toast({ title: "SMS-код отправлен" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -88,7 +88,7 @@ const Login = () => {
         setStep("set_password");
       }
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -112,7 +112,7 @@ const Login = () => {
       }
       if (res.token && res.user) saveAuth(res.token, res.user);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -129,7 +129,7 @@ const Login = () => {
       }
       if (res.token && res.user) saveAuth(res.token, res.user);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -146,7 +146,7 @@ const Login = () => {
       }
       if (res.token && res.user) saveAuth(res.token, res.user);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }

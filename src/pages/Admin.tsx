@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser, Member, Organization } from "@/lib/api";
+import api, { StaffUser, Member, Organization, humanizeError } from "@/lib/api";
 import AdminUserManagement from "./admin/AdminUserManagement";
 import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
@@ -92,7 +92,7 @@ const Admin = () => {
       setShowPwChange(false);
       setPwForm({ old_password: "", new_password: "" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

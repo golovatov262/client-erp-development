@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage, ChatConversation } from "@/lib/api";
+import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, PushClientMessage, ChatConversation, humanizeError } from "@/lib/api";
 import usePush from "@/hooks/use-push";
 import CabinetHeader from "./CabinetHeader";
 import CabinetDashboard from "./CabinetDashboard";
@@ -166,7 +166,7 @@ const Cabinet = () => {
         }).catch(() => {});
       }, 5000);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setTgLinking(false);
     }
@@ -179,7 +179,7 @@ const Cabinet = () => {
       setTgUsername("");
       toast({ title: "Telegram отвязан" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -196,7 +196,7 @@ const Cabinet = () => {
         }).catch(() => {});
       }, 5000);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setMaxLinking(false);
     }
@@ -209,7 +209,7 @@ const Cabinet = () => {
       setMaxUsername("");
       toast({ title: "MAX отвязан" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -264,7 +264,7 @@ const Cabinet = () => {
         setPwForm({ old: "", new_pw: "", confirm: "" });
       }
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSavingPw(false);
     }

@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import funcUrls from "../../../backend/func2url.json";
+import { humanizeError } from "@/lib/api";
 import { fmtLabel, fmtValue, isTechField } from "./formatters";
 
 const CREDIT_CHECK_URL = (funcUrls as Record<string, string>)["credit-check"];
@@ -247,7 +248,7 @@ const CreditCheckPanel = ({ buildInput, memberId }: Props) => {
       pollTimer.current = window.setTimeout(() => pollResult(checkId, attempt + 1), 5000);
     } catch (e) {
       stopPolling();
-      toast({ title: "Ошибка опроса статуса", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка опроса статуса", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -283,7 +284,7 @@ const CreditCheckPanel = ({ buildInput, memberId }: Props) => {
       setPolling(true);
       pollTimer.current = window.setTimeout(() => pollResult(data.check_id, 0), 3000);
     } catch (e) {
-      toast({ title: "Не удалось запустить проверку", description: String(e), variant: "destructive" });
+      toast({ title: "Не удалось запустить проверку", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -298,7 +299,7 @@ const CreditCheckPanel = ({ buildInput, memberId }: Props) => {
       const raw: CheckStatus = await resp.json();
       setCheck(normalizeStatus(raw));
     } catch (e) {
-      toast({ title: "Ошибка обновления", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка обновления", description: humanizeError(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }

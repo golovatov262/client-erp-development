@@ -19,6 +19,7 @@ import api, {
   NotificationHistoryItem,
   NotificationLogEntry,
   NotificationStats,
+  humanizeError,
 } from "@/lib/api";
 
 const fmtDate = (d: string) => {
@@ -83,7 +84,7 @@ const AdminTelegramTab = () => {
       setMessagesTotal(hist.total);
       setAutoSettings(tgSettings);
     } catch (e) {
-      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
   };
@@ -105,7 +106,7 @@ const AdminTelegramTab = () => {
       await api.notifications.saveTelegramSettings(autoSettings);
       toast({ title: "Настройки автоуведомлений сохранены" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingAuto(false);
   };
@@ -138,7 +139,7 @@ const AdminTelegramTab = () => {
       setSelectedUsers([]);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка отправки", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка отправки", description: humanizeError(e), variant: "destructive" });
     }
     setSending(false);
   };
@@ -150,7 +151,7 @@ const AdminTelegramTab = () => {
       const entries = await api.notifications.historyLog(id);
       setLogEntries(entries);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setLogLoading(false);
   };
@@ -165,7 +166,7 @@ const AdminTelegramTab = () => {
       toast({ title: "Настройки сохранены" });
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setSavingSettings(false);
   };
@@ -175,7 +176,7 @@ const AdminTelegramTab = () => {
       await api.notifications.saveChannel("telegram", !channel?.enabled);
       loadData();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -189,7 +190,7 @@ const AdminTelegramTab = () => {
       await api.notifications.testTelegram(testChatId.trim());
       toast({ title: "Тестовое сообщение отправлено" });
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setTesting(false);
   };
@@ -611,7 +612,7 @@ const AdminTelegramTab = () => {
                       const res = await api.notifications.setWebhook();
                       toast({ title: "Webhook установлен", description: res.webhook_url });
                       loadWebhookInfo();
-                    } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                    } catch (e) { toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" }); }
                     setWebhookLoading(false);
                   }} disabled={webhookLoading}>
                     {webhookLoading ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : <Icon name="Link" size={14} className="mr-1" />}
@@ -623,7 +624,7 @@ const AdminTelegramTab = () => {
                         await api.notifications.deleteWebhook();
                         setWebhookUrl("");
                         toast({ title: "Webhook удалён" });
-                      } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                      } catch (e) { toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" }); }
                     }}>
                       <Icon name="Unlink" size={14} className="mr-1" />
                       Удалить

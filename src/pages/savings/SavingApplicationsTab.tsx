@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import DataTable, { Column } from "@/components/ui/data-table";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { SavingApplication, Member, Organization } from "@/lib/api";
+import api, { SavingApplication, Member, Organization, humanizeError } from "@/lib/api";
 import SavingApplicationDialog from "./SavingApplicationDialog";
 
 const fmt = (n?: number | null) =>
@@ -74,7 +74,7 @@ const SavingApplicationsTab = ({ members, orgs, canEdit, openCreate, onConsumeOp
       toast({ title: "Заявка аннулирована" });
       load();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 
@@ -86,7 +86,7 @@ const SavingApplicationsTab = ({ members, orgs, canEdit, openCreate, onConsumeOp
       load();
       onSavingCreated();
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
   };
 

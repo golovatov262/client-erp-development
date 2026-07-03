@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { PushMessage, PushMessageLogEntry, PushSubscriber } from "@/lib/api";
+import api, { PushMessage, PushMessageLogEntry, PushSubscriber, humanizeError } from "@/lib/api";
 
 const fmtDate = (d: string) => {
   if (!d) return "—";
@@ -39,7 +39,7 @@ const PushHistoryTab = ({ messages, subscribers }: PushHistoryTabProps) => {
       const entries = await api.push.messageLog(msgId);
       setLogEntries(entries);
     } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
     setLogLoading(false);
   };
