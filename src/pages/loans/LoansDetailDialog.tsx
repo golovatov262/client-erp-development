@@ -12,6 +12,7 @@ import api, { LoanDetail, LoanPayment, ScheduleItem, Organization } from "@/lib/
 import { useToast } from "@/hooks/use-toast";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
+import LoanCollateralTab from "./LoanCollateralTab";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -276,6 +277,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <TabsList>
             <TabsTrigger value="schedule">График</TabsTrigger>
             <TabsTrigger value="payments">Платежи</TabsTrigger>
+            <TabsTrigger value="collateral">Обеспечение</TabsTrigger>
             {(isAdmin || isManager) && <TabsTrigger value="docs">Справки</TabsTrigger>}
           </TabsList>
 
@@ -285,6 +287,10 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
           <TabsContent value="payments">
             <DataTable columns={paymentCols} data={detail.payments || []} />
+          </TabsContent>
+
+          <TabsContent value="collateral">
+            <LoanCollateralTab loanId={detail.id} />
           </TabsContent>
 
           {(isAdmin || isManager) && (

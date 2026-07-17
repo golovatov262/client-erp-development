@@ -173,6 +173,16 @@ export const api = {
       request<{ success: boolean; message: string; used_months: number; holiday_end?: string; new_end_date?: string }>("POST", undefined, { entity: "loans", action: "end_holiday_early", loan_id: loanId }),
   },
 
+  loanCollateral: {
+    list: (loanId: number) => request<LoanCollateral[]>("GET", { entity: "loan_collateral", loan_id: loanId }),
+    create: (data: { loan_id: number; collateral_type: string; pledger_name?: string; description?: string; collateral_value?: number; identifier?: string }) =>
+      request<{ id: number }>("POST", undefined, { entity: "loan_collateral", ...data }),
+    update: (data: { loan_id: number; id: number; collateral_type?: string; pledger_name?: string; description?: string; collateral_value?: number | null; identifier?: string }) =>
+      request<{ success: boolean }>("PUT", { entity: "loan_collateral" }, { entity: "loan_collateral", ...data }),
+    remove: (loanId: number, id: number) =>
+      request<{ success: boolean }>("DELETE", { entity: "loan_collateral", loan_id: loanId, id }),
+  },
+
   savings: {
     list: () => request<Saving[]>("GET", { entity: "savings" }),
     get: (id: number) => request<SavingDetail>("GET", { entity: "savings", action: "detail", id }),
@@ -731,6 +741,18 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+}
+
+export interface LoanCollateral {
+  id: number;
+  loan_id: number;
+  collateral_type: string;
+  pledger_name?: string;
+  description?: string;
+  collateral_value?: number;
+  identifier?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface LoanApplication {
