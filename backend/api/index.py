@@ -1930,6 +1930,12 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             return {'success': True, 'amount': float(interest), 'max_payout': float(max_payout)}
 
         elif action == 'daily_accrue':
+            if not staff or staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может запускать начисление процентов'}
+            cur.execute("SELECT value FROM system_settings WHERE key='savings_auto_accrual'")
+            flag_row = cur.fetchone()
+            if flag_row and str(flag_row[0]).lower() in ('off', 'false', '0', 'disabled'):
+                return {'error': 'Автоматическое начисление процентов по сбережениям отключено'}
             today = date.today()
             accrual_date = body.get('date', today.isoformat())
             cur.execute("SELECT id, current_balance, rate, start_date FROM savings WHERE status='active'")
@@ -9159,12 +9165,6 @@ def handler(event, context):
             result = handle_chat(method, params, body, ev_headers, cur, conn)
         elif entity == 'dadata':
             result = handle_dadata(body)
-        elif entity == 'cron':
-            cron_action = body.get('action') or params.get('action', '')
-            if cron_action == 'daily_accrue':
-                result = handle_savings('POST', params, {'action': 'daily_accrue', 'date': body.get('date', date.today().isoformat())}, cur, conn, None, src_ip)
-            else:
-                result = {'error': 'Неизвестное cron действие'}
         elif entity == 'sber_test':
             result = handle_sber_test(params, body)
         elif entity == 'api_keys':
