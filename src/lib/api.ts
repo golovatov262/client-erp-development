@@ -724,6 +724,12 @@ export interface Loan {
   holiday_start?: string;
   holiday_months?: number;
   holiday_end?: string;
+  collateral_types?: string;
+  pledger_names?: string;
+  descriptions?: string;
+  identifiers?: string;
+  collateral_value_total?: number;
+  collateral_count?: number;
 }
 
 export interface ScheduleItem {

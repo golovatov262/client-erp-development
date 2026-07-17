@@ -2,6 +2,7 @@
   {"name": "Dashboard requires auth", "method": "GET", "path": "/?entity=dashboard", "expectedStatus": 401},
   {"name": "Members requires auth", "method": "GET", "path": "/?entity=members", "expectedStatus": 401},
   {"name": "Loans requires auth", "method": "GET", "path": "/?entity=loans", "expectedStatus": 401},
+  {"name": "Loan collateral requires auth", "method": "GET", "path": "/?entity=loan_collateral&loan_id=1", "expectedStatus": 401},
   {"name": "Audit requires auth", "method": "GET", "path": "/?entity=audit", "expectedStatus": 401},
   {"name": "Staff login empty creds", "method": "POST", "path": "/", "body": {"entity": "staff_auth", "action": "login", "login": "", "password": ""}, "expectedStatus": 400},
   {"name": "Staff login wrong password", "method": "POST", "path": "/", "body": {"entity": "staff_auth", "action": "login", "login": "admin", "password": "wrong"}, "expectedStatus": 400},

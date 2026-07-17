@@ -725,9 +725,22 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                        l.org_id, l.holiday_start, l.holiday_months, l.holiday_end,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                             ELSE m.company_name END as member_name, m.id as member_id,
-                       o.name as org_name, o.short_name as org_short_name
+                       o.name as org_name, o.short_name as org_short_name,
+                       lc.collateral_types, lc.pledger_names, lc.descriptions, lc.identifiers,
+                       lc.collateral_value_total, lc.collateral_count
                 FROM loans l JOIN members m ON m.id=l.member_id
                 LEFT JOIN organizations o ON o.id=l.org_id
+                LEFT JOIN (
+                    SELECT loan_id,
+                           STRING_AGG(DISTINCT collateral_type, ', ') as collateral_types,
+                           STRING_AGG(pledger_name, '; ') FILTER (WHERE pledger_name IS NOT NULL AND pledger_name != '') as pledger_names,
+                           STRING_AGG(description, '; ') FILTER (WHERE description IS NOT NULL AND description != '') as descriptions,
+                           STRING_AGG(identifier, ', ') FILTER (WHERE identifier IS NOT NULL AND identifier != '') as identifiers,
+                           SUM(collateral_value) as collateral_value_total,
+                           COUNT(*) as collateral_count
+                    FROM loan_collateral
+                    GROUP BY loan_id
+                ) lc ON lc.loan_id = l.id
                 ORDER BY l.created_at DESC
             """)
 
@@ -7481,6 +7494,73 @@ def handle_member_orgs(method, params, body, cur, conn, staff=None, ip=''):
         conn.commit()
         return {'success': True}
 
+def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
+    """CRUD для обеспечения по договору займа (залоги/поручительства)"""
+    loan_id = params.get('loan_id') or (body.get('loan_id') if body else None)
+    if not loan_id:
+        return {'error': 'loan_id обязателен'}
+
+    if method == 'GET':
+        return query_rows(cur, """
+            SELECT id, loan_id, collateral_type, pledger_name, description, collateral_value, identifier,
+                   created_at, updated_at
+            FROM loan_collateral
+            WHERE loan_id=%s
+            ORDER BY id
+        """ % loan_id)
+
+    elif method == 'POST':
+        ctype = body.get('collateral_type')
+        if not ctype:
+            return {'error': 'Вид обеспечения обязателен'}
+        pledger = "'%s'" % esc(body.get('pledger_name')) if body.get('pledger_name') else 'NULL'
+        desc = "'%s'" % esc(body.get('description')) if body.get('description') else 'NULL'
+        val = safe_float(body['collateral_value'], 'сумма залога') if body.get('collateral_value') not in (None, '') else None
+        val_sql = str(val) if val is not None else 'NULL'
+        ident = "'%s'" % esc(body.get('identifier')) if body.get('identifier') else 'NULL'
+        cur.execute("""
+            INSERT INTO loan_collateral (loan_id, collateral_type, pledger_name, description, collateral_value, identifier)
+            VALUES (%s, '%s', %s, %s, %s, %s) RETURNING id
+        """ % (loan_id, esc(ctype), pledger, desc, val_sql, ident))
+        row_id = cur.fetchone()[0]
+        audit_log(cur, staff, 'create', 'loan_collateral', row_id, esc(ctype), '', ip)
+        conn.commit()
+        return {'id': row_id}
+
+    elif method == 'PUT':
+        row_id = body.get('id')
+        if not row_id:
+            return {'error': 'id обязателен'}
+        updates = []
+        if 'collateral_type' in body and body['collateral_type']:
+            updates.append("collateral_type='%s'" % esc(body['collateral_type']))
+        if 'pledger_name' in body:
+            updates.append("pledger_name='%s'" % esc(body['pledger_name']) if body['pledger_name'] else "pledger_name=NULL")
+        if 'description' in body:
+            updates.append("description='%s'" % esc(body['description']) if body['description'] else "description=NULL")
+        if 'collateral_value' in body:
+            if body['collateral_value'] not in (None, ''):
+                updates.append("collateral_value=%s" % safe_float(body['collateral_value'], 'сумма залога'))
+            else:
+                updates.append("collateral_value=NULL")
+        if 'identifier' in body:
+            updates.append("identifier='%s'" % esc(body['identifier']) if body['identifier'] else "identifier=NULL")
+        if updates:
+            updates.append("updated_at=NOW()")
+            cur.execute("UPDATE loan_collateral SET %s WHERE id=%s AND loan_id=%s" % (', '.join(updates), row_id, loan_id))
+            audit_log(cur, staff, 'update', 'loan_collateral', row_id, '', '', ip)
+            conn.commit()
+        return {'success': True}
+
+    elif method == 'DELETE':
+        row_id = params.get('id') or (body.get('id') if body else None)
+        if not row_id:
+            return {'error': 'id обязателен'}
+        cur.execute("DELETE FROM loan_collateral WHERE id=%s AND loan_id=%s" % (row_id, loan_id))
+        audit_log(cur, staff, 'delete', 'loan_collateral', row_id, '', '', ip)
+        conn.commit()
+        return {'success': True}
+
 def handle_chat(method, params, body, headers, cur, conn):
     """Онлайн-чат: пайщик ↔ менеджер, с опциональным ИИ-агентом"""
     action = params.get('action') or body.get('action', 'list')
@@ -7921,7 +8001,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -9039,6 +9119,8 @@ def handler(event, context):
             result = handle_member_orgs(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
             result = handle_loans(method, params, body, cur, conn, staff, src_ip)
+        elif entity == 'loan_collateral':
+            result = handle_loan_collateral(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'savings':
             result = handle_savings(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'shares':

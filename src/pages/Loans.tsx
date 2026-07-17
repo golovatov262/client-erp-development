@@ -41,6 +41,13 @@ const columns: Column<Loan>[] = [
   { key: "balance", label: "Остаток", render: (i: Loan) => fmt(i.balance) },
   { key: "schedule_type", label: "График", render: (i: Loan) => <span className="text-xs">{i.schedule_type === "annuity" ? "Аннуитет" : "В конце срока"}</span> },
   { key: "status", label: "Статус", render: (i: Loan) => <Badge variant={statusVariant(i.status) as "default"|"destructive"|"secondary"|"warning"} className="text-xs">{statusLabel[i.status] || i.status}</Badge> },
+  { key: "collateral_types", label: "Вид обеспечения", render: (i: Loan) => i.collateral_types
+    ? <span className="text-xs">{i.collateral_types}</span>
+    : <span className="text-xs text-muted-foreground">—</span> },
+  { key: "pledger_names", label: "Залогодатель / Поручитель", render: (i: Loan) => <span className="text-xs text-muted-foreground max-w-[200px] truncate block">{i.pledger_names || "—"}</span> },
+  { key: "descriptions", label: "Характеристики залога", render: (i: Loan) => <span className="text-xs text-muted-foreground max-w-[220px] truncate block">{i.descriptions || "—"}</span> },
+  { key: "collateral_value_total", label: "Сумма залога", render: (i: Loan) => i.collateral_value_total ? fmt(i.collateral_value_total) : "—" },
+  { key: "identifiers", label: "Идентификатор (КН/VIN)", render: (i: Loan) => <span className="text-xs text-muted-foreground max-w-[180px] truncate block">{i.identifiers || "—"}</span> },
   { key: "id", label: "", render: (i: Loan) => (
     <div className="flex gap-1" onClick={e => e.stopPropagation()}>
       <button className="p-1 rounded hover:bg-muted" title="Excel" onClick={() => api.export.download("loan", i.id, "xlsx")}><Icon name="FileSpreadsheet" size={14} className="text-green-600" /></button>
