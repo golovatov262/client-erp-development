@@ -989,7 +989,9 @@ def accrue_loan_penalties_until(cur, lid, target_date):
         interest = Decimal(str(r[3]))
         paid = Decimal(str(r[4]))
         cur_pen = Decimal(str(r[5]))
-        paid_principal = max(Decimal('0'), paid - interest - cur_pen)
+        # Пеня не входит в состав "оплаченного" по промежуточным периодам (требуется
+        # к уплате только вместе с последним платежом графика).
+        paid_principal = max(Decimal('0'), paid - interest)
         overdue_principal = principal - min(paid_principal, principal)
         if overdue_principal <= 0:
             continue
@@ -1135,14 +1137,22 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                         float(new_paid), pd, ns, sid))
                     break
         else:
+            # Пеня требуется к оплате только вместе с последним платежом по графику
+            # (после окончания срока займа), а не блокирует закрытие промежуточных периодов.
+            cur.execute("SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % loan_id)
+            last_no_row = cur.fetchone()
+            last_period_no = last_no_row[0] if last_no_row and last_no_row[0] is not None else None
+            cur.execute("SELECT COALESCE(SUM(penalty_amount),0) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % loan_id)
+            loan_total_penalty = Decimal(str(cur.fetchone()[0]))
+
             covered_one_future = False
             for row in unpaid_rows:
                 if remaining_amt <= Decimal('0.005'):
                     break
                 sid = row[0]
+                row_no = row[6]
                 sp = Decimal(str(row[1]))
                 si = Decimal(str(row[2]))
-                spn = Decimal(str(row[3]))
                 spa = Decimal(str(row[4]))
                 sch_date = str(row[5])
 
@@ -1154,11 +1164,14 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                 if is_future and covered_one_future:
                     break
 
+                is_last_period = (last_period_no is not None and row_no == last_period_no)
+                eff_penalty = loan_total_penalty if is_last_period else Decimal('0')
+
                 already_i = min(spa, si)
-                already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+                already_pn = min(spa - si, eff_penalty) if spa > si else Decimal('0')
 
                 need_i = si - already_i
-                need_pn = spn - (min(spa - si, spn) if spa > si else Decimal('0'))
+                need_pn = eff_penalty - (min(spa - si, eff_penalty) if spa > si else Decimal('0'))
                 need_pp = sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0'))
                 need_total = need_i + need_pn + need_pp
 
@@ -1181,7 +1194,7 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                 pnp += item_pn
                 pp += item_pp
 
-                total_item = sp + si + spn
+                total_item = sp + si + eff_penalty
                 new_paid = spa + item_i + item_pn + item_pp
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (

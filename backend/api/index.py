@@ -268,8 +268,10 @@ def accrue_loan_penalties_until(cur, lid, target_date):
         interest = Decimal(str(r[3]))
         paid = Decimal(str(r[4]))
         cur_pen = Decimal(str(r[5]))
-        # paid гасит по лестнице: сначала interest, потом penalty, потом principal
-        paid_principal = max(Decimal('0'), paid - interest - cur_pen)
+        # Пеня не входит в состав "оплаченного" по промежуточным периодам (требуется
+        # к уплате только вместе с последним платежом графика) — считаем реально
+        # погашенный ОД как paid минус проценты, без учёта cur_pen.
+        paid_principal = max(Decimal('0'), paid - interest)
         overdue_principal = principal - min(paid_principal, principal)
         if overdue_principal <= 0:
             continue
@@ -294,6 +296,9 @@ def recalc_loan_schedule_statuses(cur, lid):
     # Сбрасываем paid_amount у всех periodов + сбрасываем накопленные пени
     # (будем доначислять их хронологически перед каждым платежом)
     cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL, penalty_amount=0 WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+    cur.execute("SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+    last_no_row = cur.fetchone()
+    last_period_no = last_no_row[0] if last_no_row and last_no_row[0] is not None else None
     cur.execute("SELECT id, payment_date, amount, manual_distribution, principal_part, interest_part, penalty_part FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
     for pay in payments:
@@ -311,13 +316,19 @@ def recalc_loan_schedule_statuses(cur, lid):
         except Exception:
             pass
 
+        # Пеня требуется к оплате ТОЛЬКО в составе последнего платежа по графику
+        # (после окончания срока займа). Промежуточные периоды закрываются статусом
+        # 'paid' по факту погашения тела долга и процентов, без учёта пени.
+        cur.execute("SELECT COALESCE(SUM(penalty_amount),0) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+        loan_total_penalty = Decimal(str(cur.fetchone()[0]))
+
         if is_manual:
             pay_pp = manual_pp
             pay_ip = manual_ip
             pay_pnp = manual_pnp
             total_manual = pay_pp + pay_ip + pay_pnp
             cur.execute("""
-                SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
+                SELECT id, payment_no, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
                 AND status NOT IN ('holiday', 'holiday_pending')
                 ORDER BY payment_no, id
@@ -329,15 +340,17 @@ def recalc_loan_schedule_statuses(cur, lid):
                 if dist_remaining <= Decimal('0.005'):
                     break
                 sid = row[0]
-                sp = Decimal(str(row[1]))
-                si = Decimal(str(row[2]))
-                spn = Decimal(str(row[3]))
-                spa = Decimal(str(row[4]))
-                sch_date = str(row[5])
+                row_no = row[1]
+                sp = Decimal(str(row[2]))
+                si = Decimal(str(row[3]))
+                spa = Decimal(str(row[5]))
+                sch_date = str(row[6])
                 is_future = sch_date > pay_date
                 if is_future and covered_one_future:
                     break
-                need_total_for_row = sp + si + spn - spa
+                is_last_period = (last_period_no is not None and row_no == last_period_no)
+                eff_penalty = loan_total_penalty if is_last_period else Decimal('0')
+                need_total_for_row = sp + si + eff_penalty - spa
                 if need_total_for_row <= Decimal('0.005'):
                     if is_future:
                         covered_one_future = True
@@ -348,7 +361,7 @@ def recalc_loan_schedule_statuses(cur, lid):
                     break
                 take_total = min(dist_remaining, need_total_for_row)
                 dist_remaining -= take_total
-                total_item = sp + si + spn
+                total_item = sp + si + eff_penalty
                 new_paid = spa + take_total
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
@@ -359,7 +372,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             pay_ip = Decimal('0')
             pay_pnp = Decimal('0')
             cur.execute("""
-                SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
+                SELECT id, payment_no, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
                 AND status NOT IN ('holiday', 'holiday_pending')
                 ORDER BY payment_no, id
@@ -373,11 +386,11 @@ def recalc_loan_schedule_statuses(cur, lid):
                 if remaining <= Decimal('0.005'):
                     break
                 sid = row[0]
-                sp = Decimal(str(row[1]))
-                si = Decimal(str(row[2]))
-                spn = Decimal(str(row[3]))
-                spa = Decimal(str(row[4]))
-                sch_date = str(row[5])
+                row_no = row[1]
+                sp = Decimal(str(row[2]))
+                si = Decimal(str(row[3]))
+                spa = Decimal(str(row[5]))
+                sch_date = str(row[6])
 
                 is_future = sch_date > pay_date_str
                 is_current_month = sch_date[:7] == pay_ym
@@ -386,12 +399,15 @@ def recalc_loan_schedule_statuses(cur, lid):
                 if is_future and covered_one_future_recalc:
                     break
 
+                is_last_period = (last_period_no is not None and row_no == last_period_no)
+                eff_penalty = loan_total_penalty if is_last_period else Decimal('0')
+
                 already_i = min(spa, si)
-                already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+                already_pn = min(spa - si, eff_penalty) if spa > si else Decimal('0')
                 already_pp = spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0')
 
                 need_i = si - already_i
-                need_pn = spn - already_pn
+                need_pn = eff_penalty - already_pn
                 need_pp = sp - already_pp
                 need_total = need_i + need_pn + need_pp
 
@@ -416,7 +432,7 @@ def recalc_loan_schedule_statuses(cur, lid):
                 pay_pnp += item_pn
                 pay_pp += item_pp
 
-                total_item = sp + si + spn
+                total_item = sp + si + eff_penalty
                 new_paid = spa + item_i + item_pn + item_pp
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
@@ -914,8 +930,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     float(new_paid), pd, ns, sid_first))
 
             elif first_row:
+                cur.execute("SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+                last_no_row = cur.fetchone()
+                last_period_no = last_no_row[0] if last_no_row and last_no_row[0] is not None else None
+                cur.execute("SELECT COALESCE(SUM(penalty_amount),0) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % lid)
+                loan_total_penalty = Decimal(str(cur.fetchone()[0]))
+
                 cur.execute("""
-                    SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
+                    SELECT id, payment_no, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                     FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
                     ORDER BY payment_no, id
                 """ % lid)
@@ -930,11 +952,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     if remaining_amt <= Decimal('0.005'):
                         break
                     sid = row[0]
-                    sp = Decimal(str(row[1]))
-                    si = Decimal(str(row[2]))
-                    spn = Decimal(str(row[3]))
-                    spa = Decimal(str(row[4]))
-                    sch_date = str(row[5])
+                    row_no = row[1]
+                    sp = Decimal(str(row[2]))
+                    si = Decimal(str(row[3]))
+                    spa = Decimal(str(row[5]))
+                    sch_date = str(row[6])
 
                     is_future = sch_date > pd
                     is_current_month = sch_date[:7] == pd_ym
@@ -943,6 +965,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     if is_future and covered_one_future:
                         break
 
+                    # Пеня требуется к оплате только вместе с последним платежом по графику
+                    is_last_period = (last_period_no is not None and row_no == last_period_no)
+                    eff_penalty = loan_total_penalty if is_last_period else Decimal('0')
+
                     # Проценты периода считаем от ФАКТИЧЕСКОГО остатка ОД по месячной ставке
                     # (ставка/12), как построен плановый график. Берём плановый interest_amount
                     # только если остаток ОД совпадает с плановым (клиент платит по графику).
@@ -950,11 +976,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     actual_period_interest = (running_bal * Decimal(str(l_rate)) / Decimal('100') / Decimal('12')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
                     already_i = min(spa, actual_period_interest)
-                    already_pn = min(spa - actual_period_interest, spn) if spa > actual_period_interest else Decimal('0')
+                    already_pn = min(spa - actual_period_interest, eff_penalty) if spa > actual_period_interest else Decimal('0')
                     already_pp = spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0')
 
                     need_i = actual_period_interest - already_i
-                    need_pn = spn - already_pn
+                    need_pn = eff_penalty - already_pn
                     need_pp = sp - already_pp
                     need_total = need_i + need_pn + need_pp
 
@@ -980,7 +1006,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     pnp += item_pn
                     pp += item_pp
                     
-                    total_item = sp + actual_period_interest + spn
+                    total_item = sp + actual_period_interest + eff_penalty
                     new_paid = spa + item_i + item_pn + item_pp
                     ns = 'paid' if new_paid >= total_item else 'partial'
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))

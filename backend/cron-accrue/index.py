@@ -302,7 +302,9 @@ def accrue_penalties(cur, check_date):
         paid = Decimal(str(paid))
         current_penalty = Decimal(str(current_penalty)) if current_penalty else Decimal('0')
 
-        paid_principal = max(Decimal('0'), paid - interest - current_penalty)
+        # Пеня не входит в состав "оплаченного" по промежуточным периодам (требуется
+        # к уплате только вместе с последним платежом графика).
+        paid_principal = max(Decimal('0'), paid - interest)
         overdue_principal = principal - min(paid_principal, principal)
         if overdue_principal <= 0:
             continue
