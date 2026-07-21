@@ -1145,6 +1145,11 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
             cur.execute("SELECT COALESCE(SUM(penalty_amount),0) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('holiday', 'holiday_pending')" % loan_id)
             loan_total_penalty = Decimal(str(cur.fetchone()[0]))
 
+            # Пока по займу есть просроченный (уже наступивший, но незакрытый) период —
+            # весь автоматически разносимый платёж уходит ТОЛЬКО на проценты, ОД не
+            # уменьшается, пока клиент не наверстает отставание по графику.
+            has_overdue_now = any(str(r[5]) < pd for r in unpaid_rows)
+
             covered_one_future = False
             for row in unpaid_rows:
                 if remaining_amt <= Decimal('0.005'):
@@ -1172,7 +1177,7 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
 
                 need_i = si - already_i
                 need_pn = eff_penalty - (min(spa - si, eff_penalty) if spa > si else Decimal('0'))
-                need_pp = sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0'))
+                need_pp = Decimal('0') if has_overdue_now else (sp - (spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0')))
                 need_total = need_i + need_pn + need_pp
 
                 if need_total <= Decimal('0.005'):
@@ -1204,7 +1209,10 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                     covered_one_future = True
 
             if remaining_amt > Decimal('0.005'):
-                pp += remaining_amt
+                if has_overdue_now:
+                    i_p += remaining_amt
+                else:
+                    pp += remaining_amt
                 remaining_amt = Decimal('0')
     else:
         pp = min(amt, loan_bal)

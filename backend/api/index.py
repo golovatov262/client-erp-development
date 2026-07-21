@@ -381,6 +381,12 @@ def recalc_loan_schedule_statuses(cur, lid):
 
             pay_date_str = str(pay_date)
             pay_ym = pay_date_str[:7]
+
+            # Пока по займу есть просроченный (незакрытый на дату этого платежа) период,
+            # весь автоматически разносимый платёж уходит ТОЛЬКО на проценты — основной
+            # долг не уменьшается, пока клиент не наверстает отставание по графику.
+            has_overdue_now = any(str(r[6]) < pay_date_str for r in unpaid_rows)
+
             covered_one_future_recalc = False
             for row in unpaid_rows:
                 if remaining <= Decimal('0.005'):
@@ -408,7 +414,7 @@ def recalc_loan_schedule_statuses(cur, lid):
 
                 need_i = si - already_i
                 need_pn = eff_penalty - already_pn
-                need_pp = sp - already_pp
+                need_pp = Decimal('0') if has_overdue_now else (sp - already_pp)
                 need_total = need_i + need_pn + need_pp
 
                 if need_total <= Decimal('0.005'):
@@ -441,7 +447,12 @@ def recalc_loan_schedule_statuses(cur, lid):
                     covered_one_future_recalc = True
 
             if remaining > Decimal('0.005'):
-                pay_pp += remaining
+                if has_overdue_now:
+                    # Пока есть просрочка — остаток НЕ уходит в ОД, копится как излишек
+                    # процентов (будет учтён в следующем платеже через пересчёт статусов).
+                    pay_ip += remaining
+                else:
+                    pay_pp += remaining
                 remaining = Decimal('0')
 
             cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
@@ -946,6 +957,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 # Остаток ОД на момент разнесения (для расчёта процентов от факт. остатка)
                 running_bal = loan_bal
 
+                # Пока по займу есть просроченный период — весь автоматически разносимый
+                # платёж уходит ТОЛЬКО на проценты, ОД не уменьшается до наверстания графика.
+                has_overdue_now = any(str(r[6]) < pd for r in unpaid_rows)
+
                 covered_one_future = False
                 pd_ym = pd[:7]
                 for row in unpaid_rows:
@@ -981,7 +996,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
                     need_i = actual_period_interest - already_i
                     need_pn = eff_penalty - already_pn
-                    need_pp = sp - already_pp
+                    need_pp = Decimal('0') if has_overdue_now else (sp - already_pp)
                     need_total = need_i + need_pn + need_pp
 
                     if need_total <= Decimal('0.005'):
@@ -1020,7 +1035,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                         covered_one_future = True
 
                 if remaining_amt > Decimal('0.005'):
-                    pp += remaining_amt
+                    if has_overdue_now:
+                        i_p += remaining_amt
+                    else:
+                        pp += remaining_amt
                     remaining_amt = Decimal('0')
             else:
                 pp = min(amt, loan_bal)
