@@ -4002,6 +4002,12 @@ def generate_loans_list_xlsx(loans):
         ('Ежемес. платёж', 'monthly_payment', 16),
         ('Остаток долга', 'balance', 16),
         ('Статус', 'status_label', 14),
+        ('Наличие залога', 'has_collateral_label', 14),
+        ('Вид обеспечения', 'collateral_types', 24),
+        ('Залогодатель / Поручитель', 'pledger_names', 30),
+        ('Характеристики залога', 'descriptions', 34),
+        ('Сумма залога', 'collateral_value_total', 16),
+        ('Идентификатор (КН/VIN)', 'identifiers', 24),
     ]
     for ci, (title, _, width) in enumerate(cols, 1):
         cell = ws.cell(row=1, column=ci, value=title)
@@ -4016,6 +4022,7 @@ def generate_loans_list_xlsx(loans):
     for ri, row in enumerate(loans, 2):
         row['status_label'] = status_map.get(row.get('status', ''), row.get('status', ''))
         row['schedule_type_label'] = schedule_map.get(row.get('schedule_type', ''), row.get('schedule_type', ''))
+        row['has_collateral_label'] = 'Залог' if row.get('collateral_count') else 'Без залога'
         if not row.get('org_short_name'):
             row['org_short_name'] = row.get('org_name', '')
         for df in ('start_date', 'end_date'):
@@ -4031,7 +4038,7 @@ def generate_loans_list_xlsx(loans):
             cell = ws.cell(row=ri, column=ci, value=val)
             cell.border = thin_border
             cell.alignment = Alignment(vertical='center')
-            if key in ('amount', 'monthly_payment', 'balance') and val != '':
+            if key in ('amount', 'monthly_payment', 'balance', 'collateral_value_total') and val != '':
                 try:
                     cell.value = float(val)
                     cell.number_format = num_fmt
@@ -4253,9 +4260,22 @@ def handle_export(params, cur):
                    l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
                    CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                         ELSE m.company_name END as member_name,
-                   o.name as org_name, o.short_name as org_short_name
+                   o.name as org_name, o.short_name as org_short_name,
+                   lc.collateral_types, lc.pledger_names, lc.descriptions, lc.identifiers,
+                   lc.collateral_value_total, lc.collateral_count
             FROM loans l JOIN members m ON m.id=l.member_id
             LEFT JOIN organizations o ON o.id=l.org_id
+            LEFT JOIN (
+                SELECT loan_id,
+                       STRING_AGG(DISTINCT collateral_type, ', ') as collateral_types,
+                       STRING_AGG(pledger_name, '; ') FILTER (WHERE pledger_name IS NOT NULL AND pledger_name != '') as pledger_names,
+                       STRING_AGG(description, '; ') FILTER (WHERE description IS NOT NULL AND description != '') as descriptions,
+                       STRING_AGG(identifier, ', ') FILTER (WHERE identifier IS NOT NULL AND identifier != '') as identifiers,
+                       SUM(collateral_value) as collateral_value_total,
+                       COUNT(*) as collateral_count
+                FROM loan_collateral
+                GROUP BY loan_id
+            ) lc ON lc.loan_id = l.id
             ORDER BY l.created_at DESC
         """)
         data = generate_loans_list_xlsx(rows)
