@@ -1062,7 +1062,19 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             # Пересчёт нужен если была значимая переплата (больше 1 рубля — порог погрешности округления)
             # Мелкие округления (копейки) не должны вызывать пересчёт графика
-            actual_overpay = pp - (f_sp - f_spa if first_row else Decimal('0')) if first_row else Decimal('0')
+            # ВАЖНО: f_spa — это ВСЯ сумма, оплаченная по первому периоду (проценты+пеня+ОД),
+            # а f_sp — только его основной долг. Нельзя вычитать их напрямую (разные категории),
+            # иначе при частично оплаченном периоде (обычная ситуация — проценты обычно больше
+            # ОД) результат уходит в минус и любая, даже маленькая, доплата ошибочно
+            # распознаётся как крупная переплата. Считаем остаток ОД по периоду корректно:
+            # сначала вычитаем из уплаченного проценты и пеню периода, остаток — это уже
+            # погашенная часть ОД.
+            if first_row:
+                f_principal_paid = max(Decimal('0'), f_spa - f_si - f_spn)
+                f_principal_owed = f_sp - f_principal_paid
+                actual_overpay = pp - f_principal_owed
+            else:
+                actual_overpay = Decimal('0')
             if actual_overpay < 0:
                 actual_overpay = Decimal('0')
             should_recalc = nb > 0 and (overpay_amount > Decimal('1.00') or actual_overpay > Decimal('1.00'))  # fix: порог 1 руб.
