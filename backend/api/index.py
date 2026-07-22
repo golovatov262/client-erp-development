@@ -1239,6 +1239,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 return {'error': 'Договор не найден'}
             cur.execute("DELETE FROM loan_payments WHERE loan_id=%s" % lid)
             cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
+            cur.execute("DELETE FROM loan_collateral WHERE loan_id=%s" % lid)
             cur.execute("DELETE FROM loans WHERE id=%s" % lid)
             audit_log(cur, staff, 'delete_contract', 'loan', lid, lr[0], '', ip)
             conn.commit()
