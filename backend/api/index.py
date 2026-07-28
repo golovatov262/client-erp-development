@@ -383,9 +383,10 @@ def recalc_loan_schedule_statuses(cur, lid):
             pay_ym = pay_date_str[:7]
 
             # Пока по займу есть просроченный (незакрытый на дату этого платежа) период,
-            # весь автоматически разносимый платёж уходит ТОЛЬКО на проценты — основной
-            # долг не уменьшается, пока клиент не наверстает отставание по графику.
-            has_overdue_now = any(str(r[6]) < pay_date_str for r in unpaid_rows)
+            # платёж по БУДУЩИМ периодам уходит ТОЛЬКО на проценты. Считаем ДИНАМИЧЕСКИ:
+            # если просроченные периоды закрываются в рамках этого же платежа, блокировка
+            # снимается для последующих периодов того же платежа.
+            unresolved_overdue_count = sum(1 for r in unpaid_rows if str(r[6]) < pay_date_str)
 
             covered_one_future_recalc = False
             for row in unpaid_rows:
@@ -414,12 +415,18 @@ def recalc_loan_schedule_statuses(cur, lid):
 
                 need_i = si - already_i
                 need_pn = eff_penalty - already_pn
-                need_pp = Decimal('0') if has_overdue_now else (sp - already_pp)
+                # Блокируем погашение ОД только для БУДУЩИХ периодов, пока остаются
+                # непогашенные просроченные периоды. Сам просроченный/текущий период,
+                # который сейчас закрываем, должен гасить ОД как обычно.
+                is_overdue_period = sch_date < pay_date_str
+                need_pp = Decimal('0') if (is_future and unresolved_overdue_count > 0) else (sp - already_pp)
                 need_total = need_i + need_pn + need_pp
 
                 if need_total <= Decimal('0.005'):
                     if is_future:
                         covered_one_future_recalc = True
+                    if is_overdue_period:
+                        unresolved_overdue_count -= 1
                     continue
 
                 # Будущий период закрываем только при полном покрытии, иначе остаток
@@ -443,13 +450,18 @@ def recalc_loan_schedule_statuses(cur, lid):
                 ns = 'paid' if new_paid >= total_item else 'partial'
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
 
+                if is_overdue_period and ns == 'paid':
+                    unresolved_overdue_count -= 1
+
                 if is_future:
                     covered_one_future_recalc = True
 
             if remaining > Decimal('0.005'):
-                if has_overdue_now:
-                    # Пока есть просрочка — остаток НЕ уходит в ОД, копится как излишек
-                    # процентов (будет учтён в следующем платеже через пересчёт статусов).
+                # Проверяем АКТУАЛЬНОЕ наличие просрочки после разнесения по периодам
+                # (просрочка могла быть закрыта в цикле выше), а не по флагу ДО платежа.
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_date < '%s' AND status NOT IN ('paid', 'holiday', 'holiday_pending')" % (lid, pay_date_str))
+                still_has_overdue = cur.fetchone()[0] > 0
+                if still_has_overdue:
                     pay_ip += remaining
                 else:
                     pay_pp += remaining
@@ -957,9 +969,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 # Остаток ОД на момент разнесения (для расчёта процентов от факт. остатка)
                 running_bal = loan_bal
 
-                # Пока по займу есть просроченный период — весь автоматически разносимый
-                # платёж уходит ТОЛЬКО на проценты, ОД не уменьшается до наверстания графика.
-                has_overdue_now = any(str(r[6]) < pd for r in unpaid_rows)
+                # Пока по займу есть просроченный период — платёж по БУДУЩИМ периодам уходит
+                # ТОЛЬКО на проценты, ОД не уменьшается до наверстания графика. Считаем
+                # ДИНАМИЧЕСКИ: если все просроченные периоды уже закрыты в рамках ЭТОГО ЖЕ
+                # платежа (обрабатываются раньше по порядку), блокировка снимается и для
+                # последующих периодов того же платежа.
+                unresolved_overdue_count = sum(1 for r in unpaid_rows if str(r[6]) < pd)
 
                 covered_one_future = False
                 pd_ym = pd[:7]
@@ -996,12 +1011,21 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
                     need_i = actual_period_interest - already_i
                     need_pn = eff_penalty - already_pn
-                    need_pp = Decimal('0') if has_overdue_now else (sp - already_pp)
+                    # Блокируем погашение ОД только для БУДУЩИХ периодов, пока остаются
+                    # непогашенные просроченные периоды (чтобы платёж не «убегал» вперёд по
+                    # графику). Сам просроченный/текущий период, который сейчас закрываем,
+                    # должен гасить ОД как обычно — иначе просрочка никогда не сможет
+                    # закрыться, даже при полной оплате. Счётчик unresolved_overdue_count
+                    # уменьшается по ходу цикла, как только просроченный период закрывается.
+                    is_overdue_period = sch_date < pd
+                    need_pp = Decimal('0') if (is_future and unresolved_overdue_count > 0) else (sp - already_pp)
                     need_total = need_i + need_pn + need_pp
 
                     if need_total <= Decimal('0.005'):
                         if is_future:
                             covered_one_future = True
+                        if is_overdue_period:
+                            unresolved_overdue_count -= 1
                         continue
 
                     # Будущий период (даже в текущем месяце) закрываем только если остатка
@@ -1031,11 +1055,18 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     if running_bal < 0:
                         running_bal = Decimal('0')
 
+                    if is_overdue_period and ns == 'paid':
+                        unresolved_overdue_count -= 1
+
                     if is_future:
                         covered_one_future = True
 
                 if remaining_amt > Decimal('0.005'):
-                    if has_overdue_now:
+                    # Проверяем АКТУАЛЬНОЕ наличие просрочки после разнесения по периодам
+                    # (просрочка могла быть закрыта в цикле выше), а не по флагу ДО платежа.
+                    cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_date < '%s' AND status NOT IN ('paid', 'holiday', 'holiday_pending')" % (lid, pd))
+                    still_has_overdue = cur.fetchone()[0] > 0
+                    if still_has_overdue:
                         i_p += remaining_amt
                     else:
                         pp += remaining_amt
