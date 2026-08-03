@@ -1556,9 +1556,16 @@ def handle_statements(params):
     cid = params.get('connection_id')
     limit = int(params.get('limit', '30'))
     offset = int(params.get('offset', '0'))
-    where = ''
+    date_from = params.get('date_from')
+    date_to = params.get('date_to')
+    conditions = []
     if cid:
-        where = 'WHERE bs.connection_id=%s' % int(cid)
+        conditions.append('bs.connection_id=%s' % int(cid))
+    if date_from and re.match(r'^\d{4}-\d{2}-\d{2}$', date_from):
+        conditions.append("bs.statement_date >= '%s'" % date_from)
+    if date_to and re.match(r'^\d{4}-\d{2}-\d{2}$', date_to):
+        conditions.append("bs.statement_date <= '%s'" % date_to)
+    where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
     cur.execute("""
         SELECT bs.id, bs.connection_id, o.short_name,
                bs.statement_date, bs.opening_balance, bs.closing_balance,

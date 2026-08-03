@@ -1484,8 +1484,8 @@ export const bankApi = {
     sberRequest<BankFetchEmailResult>("POST", undefined, { action: "fetch", date }),
   status: () =>
     sberRequest<BankImapStatus>("GET", { action: "status" }),
-  statements: (connectionId?: number, limit?: number, offset?: number) =>
-    sberRequest<{ items: BankStatement[]; total: number }>("GET", { action: "statements", connection_id: connectionId, limit, offset }),
+  statements: (connectionId?: number, limit?: number, offset?: number, dateFrom?: string, dateTo?: string) =>
+    sberRequest<{ items: BankStatement[]; total: number }>("GET", { action: "statements", connection_id: connectionId, limit, offset, date_from: dateFrom, date_to: dateTo }),
   transactions: (statementId?: number, matchStatus?: string) =>
     sberRequest<BankTransaction[]>("GET", { action: "transactions", statement_id: statementId, match_status: matchStatus }),
   syncLog: (limit?: number) =>

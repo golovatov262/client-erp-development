@@ -56,16 +56,18 @@ const BankStatements = () => {
   const [addForm, setAddForm] = useState({ org_id: "", account_number: "" });
   const [selectedStmt, setSelectedStmt] = useState<number | undefined>();
   const [matchFilter, setMatchFilter] = useState<string>("");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [imapStatus, setImapStatus] = useState<BankImapStatus | null>(null);
   const [syncLog, setSyncLog] = useState<BankSyncLogEntry[]>([]);
   const { toast } = useToast();
 
-  const loadData = async () => {
+  const loadData = async (from?: string, to?: string) => {
     setLoading(true);
     try {
       const [conns, stmts] = await Promise.all([
         bankApi.connections(),
-        bankApi.statements(undefined, 30, 0),
+        bankApi.statements(undefined, 30, 0, from, to),
       ]);
       setConnections(conns);
       setStatements(stmts.items);
@@ -76,6 +78,32 @@ const BankStatements = () => {
       toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
     }
     setLoading(false);
+  };
+
+  const loadStatements = async (from?: string, to?: string) => {
+    try {
+      const stmts = await bankApi.statements(undefined, 30, 0, from, to);
+      setStatements(stmts.items);
+      setStatementsTotal(stmts.total);
+    } catch (e) {
+      toast({ title: "Ошибка загрузки", description: humanizeError(e), variant: "destructive" });
+    }
+  };
+
+  const handleDateFromChange = (val: string) => {
+    setDateFrom(val);
+    loadStatements(val || undefined, dateTo || undefined);
+  };
+
+  const handleDateToChange = (val: string) => {
+    setDateTo(val);
+    loadStatements(dateFrom || undefined, val || undefined);
+  };
+
+  const handleResetPeriod = () => {
+    setDateFrom("");
+    setDateTo("");
+    loadStatements();
   };
 
   useEffect(() => { loadData(); }, []);
@@ -110,7 +138,7 @@ const BankStatements = () => {
           toast({ title: `Обработано ${result.emails_found} писем`, description: desc });
         }
       }
-      loadData();
+      loadData(dateFrom || undefined, dateTo || undefined);
     } catch (e) {
       toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     }
@@ -327,12 +355,27 @@ const BankStatements = () => {
         <TabsContent value="statements" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <CardTitle className="text-lg">Загруженные выписки</CardTitle>
-                <Button size="sm" onClick={handleFetchFromEmail} disabled={fetching}>
-                  {fetching ? <Icon name="Loader2" size={16} className="mr-1 animate-spin" /> : <Icon name="Mail" size={16} className="mr-1" />}
-                  Загрузить из почты
-                </Button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="stmt-date-from" className="text-xs text-muted-foreground whitespace-nowrap">с</Label>
+                    <Input id="stmt-date-from" type="date" className="w-[150px]" value={dateFrom} onChange={e => handleDateFromChange(e.target.value)} />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="stmt-date-to" className="text-xs text-muted-foreground whitespace-nowrap">по</Label>
+                    <Input id="stmt-date-to" type="date" className="w-[150px]" value={dateTo} onChange={e => handleDateToChange(e.target.value)} />
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <Button variant="ghost" size="sm" onClick={handleResetPeriod}>
+                      <Icon name="X" size={14} className="mr-1" />Сбросить
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={handleFetchFromEmail} disabled={fetching}>
+                    {fetching ? <Icon name="Loader2" size={16} className="mr-1 animate-spin" /> : <Icon name="Mail" size={16} className="mr-1" />}
+                    Загрузить из почты
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
