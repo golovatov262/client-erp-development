@@ -336,6 +336,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             unpaid_rows = cur.fetchall()
             dist_remaining = total_manual
             covered_one_future = False
+            pay_ym_manual = pay_date[:7]
             for row in unpaid_rows:
                 if dist_remaining <= Decimal('0.005'):
                     break
@@ -346,7 +347,15 @@ def recalc_loan_schedule_statuses(cur, lid):
                 spa = Decimal(str(row[5]))
                 sch_date = str(row[6])
                 is_future = sch_date > pay_date
-                if is_future and covered_one_future:
+                # Период того же календарного месяца, что и платёж (даже если формальный
+                # срок периода ещё не наступил — напр. срок 31.12, а платёж 26.12) — это
+                # обычный текущий период, а не «будущий», иначе платёж, чуть-чуть не
+                # дотянувший до полной суммы периода (напр. из-за банковской комиссии),
+                # полностью отбрасывается вместо частичного зачёта.
+                is_current_month_manual = sch_date[:7] == pay_ym_manual
+                if is_future and not is_current_month_manual:
+                    break
+                if is_future and is_current_month_manual and covered_one_future:
                     break
                 is_last_period = (last_period_no is not None and row_no == last_period_no)
                 eff_penalty = loan_total_penalty if is_last_period else Decimal('0')
@@ -355,9 +364,10 @@ def recalc_loan_schedule_statuses(cur, lid):
                     if is_future:
                         covered_one_future = True
                     continue
-                # Будущий период закрываем только при полном покрытии, иначе остаток
-                # идёт на основной долг текущего периода, а не «зависает» как partial.
-                if is_future and dist_remaining < need_total_for_row - Decimal('0.005'):
+                # Будущий период (другого месяца) закрываем только при полном покрытии,
+                # иначе остаток идёт на основной долг текущего периода, а не «зависает».
+                # Период ТЕКУЩЕГО месяца принимаем частично, даже если денег не хватает.
+                if is_future and not is_current_month_manual and dist_remaining < need_total_for_row - Decimal('0.005'):
                     break
                 take_total = min(dist_remaining, need_total_for_row)
                 dist_remaining -= take_total
@@ -367,6 +377,13 @@ def recalc_loan_schedule_statuses(cur, lid):
                 cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
                 if is_future:
                     covered_one_future = True
+
+            # Если после разнесения по периодам остались неразнесённые деньги (например,
+            # ручной платёж перекрыл все текущие/просроченные периоды с запасом) — остаток
+            # уходит в счёт основного долга, а не «теряется» безучётно.
+            if dist_remaining > Decimal('0.005'):
+                pay_pp += dist_remaining
+                dist_remaining = Decimal('0')
         else:
             pay_pp = Decimal('0')
             pay_ip = Decimal('0')
