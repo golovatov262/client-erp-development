@@ -401,7 +401,10 @@ def recalc_loan_schedule_statuses(cur, lid):
 
                 is_future = sch_date > pay_date_str
                 is_current_month = sch_date[:7] == pay_ym
-                if is_future and not is_current_month:
+                # Период того же месяца доступен для закрытия переплатой только если на
+                # данный момент (после уже обработанных в этом цикле периодов) НЕТ
+                # непогашенной просрочки — проверяем ДИНАМИЧЕСКИ.
+                if is_future and (not is_current_month or unresolved_overdue_count > 0):
                     break
                 if is_future and covered_one_future_recalc:
                     break
@@ -990,7 +993,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
                     is_future = sch_date > pd
                     is_current_month = sch_date[:7] == pd_ym
-                    if is_future and not is_current_month:
+                    # Период того же месяца доступен для закрытия ПЕРЕПЛАТОЙ только если на
+                    # данный момент (после уже обработанных в этом цикле периодов) НЕТ
+                    # непогашенной просрочки. Проверяем ДИНАМИЧЕСКИ (unresolved_overdue_count
+                    # мог уменьшиться до нуля внутри этого же цикла, например если этим же
+                    # платежом только что закрылся просроченный период) — иначе платёж,
+                    # полностью гасящий и просрочку, и следующий период, ошибочно уходил бы
+                    # весь в досрочное погашение ОД, минуя оплату процентов за период.
+                    if is_future and (not is_current_month or unresolved_overdue_count > 0):
                         break
                     if is_future and covered_one_future:
                         break
