@@ -1197,7 +1197,21 @@ def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
                         unresolved_overdue_count -= 1
                     continue
 
+                # Будущий период, который платёж не может покрыть ПОЛНОСТЬЮ: по ст. 319
+                # ГК РФ деньги должны в первую очередь гасить начисленные проценты (и
+                # пеню), а не сразу основной долг. Засчитываем частично — проценты, затем
+                # пеня, ОД не трогаем — и на этом периоде останавливаемся.
                 if is_future and remaining_amt < need_total:
+                    take_partial = remaining_amt
+                    item_i_partial = min(take_partial, need_i)
+                    after_i_partial = take_partial - item_i_partial
+                    item_pn_partial = min(after_i_partial, need_pn)
+                    remaining_amt -= (item_i_partial + item_pn_partial)
+                    i_p += item_i_partial
+                    pnp += item_pn_partial
+                    if item_i_partial + item_pn_partial > Decimal('0.005'):
+                        new_paid_partial = spa + item_i_partial + item_pn_partial
+                        cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='partial' WHERE id=%s" % (float(new_paid_partial), pd, sid))
                     break
 
                 take_total = min(remaining_amt, need_total)
