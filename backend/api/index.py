@@ -1164,6 +1164,18 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             if should_recalc:
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                 remaining_periods = cur.fetchone()[0]
+                # Защита от «усыхания» графика: количество оставшихся периодов не может
+                # быть меньше (исходный срок минус фактически оплаченные периоды). Иначе
+                # при пересчёте график незаметно теряет периоды (напр. если статусы разошлись
+                # с реальностью), срок сокращается, а платёж резко вырастает без причины.
+                cur.execute("SELECT term_months FROM loans WHERE id=%s" % lid)
+                orig_term_row = cur.fetchone()
+                orig_term = orig_term_row[0] if orig_term_row and orig_term_row[0] else 0
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
+                paid_count_check = cur.fetchone()[0]
+                min_remaining = max(orig_term - paid_count_check, 0)
+                if min_remaining > remaining_periods:
+                    remaining_periods = min_remaining
                 if remaining_periods > 0:
                     # Берём дату последнего оплаченного периода как базу для пересчёта
                     cur.execute("""
