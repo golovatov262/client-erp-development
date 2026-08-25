@@ -4096,6 +4096,8 @@ def generate_loans_list_xlsx(loans):
         ('Ежемес. платёж', 'monthly_payment', 16),
         ('Остаток долга', 'balance', 16),
         ('Статус', 'status_label', 14),
+        ('Дата последнего платежа', 'last_payment_date', 16),
+        ('Срок просрочки, дн.', 'overdue_days_calc', 14),
         ('Наличие залога', 'has_collateral_label', 14),
         ('Вид обеспечения', 'collateral_types', 24),
         ('Залогодатель / Поручитель', 'pledger_names', 30),
@@ -4119,7 +4121,22 @@ def generate_loans_list_xlsx(loans):
         row['has_collateral_label'] = 'Залог' if row.get('collateral_count') else 'Без залога'
         if not row.get('org_short_name'):
             row['org_short_name'] = row.get('org_name', '')
-        for df in ('start_date', 'end_date'):
+        # Срок просрочки считаем от даты последнего платежа (а если платежей ещё не
+        # было — от даты выдачи займа) до текущей даты. Показываем только для реально
+        # просроченных договоров.
+        overdue_days_calc = ''
+        if row.get('status') == 'overdue':
+            ref_date_raw = row.get('last_payment_date') or row.get('start_date')
+            if ref_date_raw:
+                try:
+                    ref_date = ref_date_raw if isinstance(ref_date_raw, date) else date.fromisoformat(str(ref_date_raw))
+                    overdue_days_calc = (date.today() - ref_date).days
+                    if overdue_days_calc < 0:
+                        overdue_days_calc = 0
+                except (ValueError, TypeError):
+                    overdue_days_calc = ''
+        row['overdue_days_calc'] = overdue_days_calc
+        for df in ('start_date', 'end_date', 'last_payment_date'):
             if row.get(df):
                 raw = str(row[df])
                 parts = raw.split('-')
@@ -4356,7 +4373,8 @@ def handle_export(params, cur):
                         ELSE m.company_name END as member_name,
                    o.name as org_name, o.short_name as org_short_name,
                    lc.collateral_types, lc.pledger_names, lc.descriptions, lc.identifiers,
-                   lc.collateral_value_total, lc.collateral_count
+                   lc.collateral_value_total, lc.collateral_count,
+                   lp.last_payment_date
             FROM loans l JOIN members m ON m.id=l.member_id
             LEFT JOIN organizations o ON o.id=l.org_id
             LEFT JOIN (
@@ -4370,6 +4388,11 @@ def handle_export(params, cur):
                 FROM loan_collateral
                 GROUP BY loan_id
             ) lc ON lc.loan_id = l.id
+            LEFT JOIN (
+                SELECT loan_id, MAX(payment_date) as last_payment_date
+                FROM loan_payments
+                GROUP BY loan_id
+            ) lp ON lp.loan_id = l.id
             ORDER BY l.created_at DESC
         """)
         data = generate_loans_list_xlsx(rows)
