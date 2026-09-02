@@ -591,6 +591,7 @@ export interface DashboardStats {
   overdue_loan_list: OverdueLoanItem[];
   expiring_savings: ExpiringSavingItem[];
   expiring_savings_total: number;
+  smsaero_balance: number | null;
 }
 
 export interface CheckStatusResult {

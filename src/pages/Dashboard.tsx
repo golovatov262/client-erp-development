@@ -62,6 +62,15 @@ const Dashboard = () => {
         )}
       </div>
 
+      {stats?.smsaero_balance !== null && stats?.smsaero_balance !== undefined && stats.smsaero_balance < 200 && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+          <Icon name="AlertCircle" size={16} className="shrink-0" />
+          <span>
+            Низкий баланс SMSAero: <span className="font-semibold">{stats.smsaero_balance.toFixed(2)} ₽</span> — пополните, чтобы SMS-уведомления не прекратились
+          </span>
+        </div>
+      )}
+
       {orgs.length > 0 && (
         <div className="flex flex-wrap gap-2">
           <button

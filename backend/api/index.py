@@ -4842,6 +4842,8 @@ def handle_dashboard(cur, params=None):
     stats['expiring_savings'] = expiring_savings
     stats['expiring_savings_total'] = round(total_refund, 2)
 
+    stats['smsaero_balance'] = get_smsaero_balance()
+
     return stats
 
 def hash_password(pw: str) -> str:
@@ -4925,6 +4927,23 @@ def send_smsaero(phone, text):
             return False, data.get('message', 'Ошибка отправки SMS')
     except Exception as e:
         return False, str(e)
+
+def get_smsaero_balance():
+    email = os.environ.get('SMSAERO_EMAIL', '')
+    api_key = os.environ.get('SMSAERO_API_KEY', '')
+    if not email or not api_key:
+        return None
+    url = 'https://gate.smsaero.ru/v2/balance'
+    credentials = base64.b64encode(f'{email}:{api_key}'.encode()).decode()
+    req = urllib.request.Request(url, headers={'Authorization': f'Basic {credentials}', 'Accept': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get('success'):
+                return float(data.get('data', {}).get('balance', 0))
+    except Exception:
+        pass
+    return None
 
 def extract_org_short_name(name, short_name):
     import re as _re
