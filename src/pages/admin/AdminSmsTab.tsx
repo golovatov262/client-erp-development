@@ -509,11 +509,6 @@ const AdminSmsTab = () => {
                   </div>
                   <Switch checked={autoSettings.overdue_notify === "true"} onCheckedChange={v => setAutoSettings(prev => ({ ...prev, overdue_notify: v ? "true" : "false" }))} />
                 </div>
-                <div className="space-y-2 pt-2 border-t">
-                  <Label className="text-sm">Время отправки</Label>
-                  <Input type="time" value={autoSettings.remind_time || "10:00"} onChange={e => setAutoSettings(prev => ({ ...prev, remind_time: e.target.value }))} className="w-32" />
-                  <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться SMS</p>
-                </div>
               </CardContent>
             </Card>
 
@@ -544,11 +539,6 @@ const AdminSmsTab = () => {
                       );
                     })}
                   </div>
-                </div>
-                <div className="space-y-2 pt-2 border-t">
-                  <Label className="text-sm">Время отправки</Label>
-                  <Input type="time" value={autoSettings.savings_remind_time || "10:00"} onChange={e => setAutoSettings(prev => ({ ...prev, savings_remind_time: e.target.value }))} className="w-32" />
-                  <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться SMS</p>
                 </div>
               </CardContent>
             </Card>

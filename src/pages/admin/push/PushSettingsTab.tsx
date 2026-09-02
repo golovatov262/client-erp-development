@@ -1,6 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import Icon from "@/components/ui/icon";
@@ -70,12 +69,6 @@ const PushSettingsTab = ({ settings, setSettings, savingSettings, handleSaveSett
               </div>
               <Switch checked={settings.overdue_notify === "true"} onCheckedChange={v => setSettings({ ...settings, overdue_notify: v ? "true" : "false" })} />
             </div>
-
-            <div className="space-y-2">
-              <Label>Время отправки</Label>
-              <Input type="time" value={settings.remind_time} onChange={e => setSettings({ ...settings, remind_time: e.target.value })} className="w-32" />
-              <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться напоминания</p>
-            </div>
           </>
         )}
 
@@ -101,12 +94,6 @@ const PushSettingsTab = ({ settings, setSettings, savingSettings, handleSaveSett
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">Выбрано: {savingsReminderDays.length === 0 ? "ничего" : savingsReminderDays.map(d => d === "0" ? "в день окончания" : `за ${d} дн.`).join(", ")}</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Время отправки</Label>
-              <Input type="time" value={settings.savings_remind_time || "09:00"} onChange={e => setSettings({ ...settings, savings_remind_time: e.target.value })} className="w-32" />
-              <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться напоминания о сбережениях</p>
             </div>
           </>
         )}
