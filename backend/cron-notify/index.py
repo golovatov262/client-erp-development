@@ -278,22 +278,36 @@ def send_payment_reminders(cur, conn, check_date, settings):
                 tpl_payment_days_title.replace('{days}', str(days)),
                 tpl_payment_days_body.replace('{days}', str(days))))
 
-    if overdue_enabled:
-        reminders.append(('overdue_1d', today_str, 'overdue', tpl_overdue_title, tpl_overdue_body))
+    # Просрочка проверяется не по разовому совпадению даты, а 5 и 10 числа каждого
+    # месяца (все платежи по графику приходятся на конец месяца, этих двух проверок
+    # достаточно) — и по факту наличия непогашенного просроченного периода, а не по
+    # дате его наступления. reminder_type включает дату проверки, поэтому напоминание
+    # уходит повторно на каждой контрольной точке, пока долг не будет погашен.
+    if overdue_enabled and today_date.day in (5, 10):
+        reminders.append(('overdue_%s' % today_str, today_str, 'overdue', tpl_overdue_title, tpl_overdue_body))
 
     sent_total = 0
     failed_total = 0
     errors = []
 
     for rtype, target_date, sched_status, title_tpl, body_tpl in reminders:
-        cur.execute("""
-            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
-            FROM loan_schedule ls
-            JOIN loans l ON l.id = ls.loan_id
-            WHERE ls.payment_date = '%s'
-              AND ls.status = '%s'
-              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-        """ % (target_date, sched_status))
+        if sched_status == 'overdue':
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.status = 'overdue'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """)
+        else:
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.payment_date = '%s'
+                  AND ls.status = '%s'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """ % (target_date, sched_status))
         schedules = cur.fetchall()
 
         for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
@@ -503,22 +517,35 @@ def send_telegram_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('tg_reminder_%dd' % days, target_date, 'pending',
                 tpl_payment_days.replace('{days}', str(days))))
 
-    if overdue_enabled:
-        reminders.append(('tg_overdue_1d', today_str, 'overdue', tpl_overdue))
+    # Просрочка проверяется 5 и 10 числа каждого месяца (все платежи по графику
+    # приходятся на конец месяца) по факту наличия непогашенного просроченного
+    # периода, а не по дате его наступления — reminder_type включает дату проверки,
+    # поэтому напоминание уходит повторно на каждой контрольной точке, пока не оплатят.
+    if overdue_enabled and today_date.day in (5, 10):
+        reminders.append(('tg_overdue_%s' % today_str, today_str, 'overdue', tpl_overdue))
 
     sent_total = 0
     failed_total = 0
     errors = []
 
     for rtype, target_date, sched_status, body_tpl in reminders:
-        cur.execute("""
-            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
-            FROM loan_schedule ls
-            JOIN loans l ON l.id = ls.loan_id
-            WHERE ls.payment_date = '%s'
-              AND ls.status = '%s'
-              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-        """ % (target_date, sched_status))
+        if sched_status == 'overdue':
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.status = 'overdue'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """)
+        else:
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.payment_date = '%s'
+                  AND ls.status = '%s'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """ % (target_date, sched_status))
         schedules = cur.fetchall()
 
         for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
@@ -703,22 +730,35 @@ def send_max_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('max_reminder_%dd' % days, target_date, 'pending',
                 tpl_payment_days.replace('{days}', str(days))))
 
-    if overdue_enabled:
-        reminders.append(('max_overdue_1d', today_str, 'overdue', tpl_overdue))
+    # Просрочка проверяется 5 и 10 числа каждого месяца (все платежи по графику
+    # приходятся на конец месяца) по факту наличия непогашенного просроченного
+    # периода, а не по дате его наступления — reminder_type включает дату проверки,
+    # поэтому напоминание уходит повторно на каждой контрольной точке, пока не оплатят.
+    if overdue_enabled and today_date.day in (5, 10):
+        reminders.append(('max_overdue_%s' % today_str, today_str, 'overdue', tpl_overdue))
 
     sent_total = 0
     failed_total = 0
     errors = []
 
     for rtype, target_date, sched_status, body_tpl in reminders:
-        cur.execute("""
-            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
-            FROM loan_schedule ls
-            JOIN loans l ON l.id = ls.loan_id
-            WHERE ls.payment_date = '%s'
-              AND ls.status = '%s'
-              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-        """ % (target_date, sched_status))
+        if sched_status == 'overdue':
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.status = 'overdue'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """)
+        else:
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.payment_date = '%s'
+                  AND ls.status = '%s'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """ % (target_date, sched_status))
         schedules = cur.fetchall()
 
         for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
@@ -916,22 +956,35 @@ def send_sms_payment_reminders(cur, conn, check_date, settings):
             reminders.append(('sms_reminder_%dd' % days, target_date, 'pending',
                 tpl_payment_days.replace('{days}', str(days))))
 
-    if overdue_enabled:
-        reminders.append(('sms_overdue_1d', today_str, 'overdue', tpl_overdue))
+    # Просрочка проверяется 5 и 10 числа каждого месяца (все платежи по графику
+    # приходятся на конец месяца) по факту наличия непогашенного просроченного
+    # периода, а не по дате его наступления — reminder_type включает дату проверки,
+    # поэтому напоминание уходит повторно на каждой контрольной точке, пока не оплатят.
+    if overdue_enabled and today_date.day in (5, 10):
+        reminders.append(('sms_overdue_%s' % today_str, today_str, 'overdue', tpl_overdue))
 
     sent_total = 0
     failed_total = 0
     errors = []
 
     for rtype, target_date, sched_status, body_tpl in reminders:
-        cur.execute("""
-            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
-            FROM loan_schedule ls
-            JOIN loans l ON l.id = ls.loan_id
-            WHERE ls.payment_date = '%s'
-              AND ls.status = '%s'
-              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-        """ % (target_date, sched_status))
+        if sched_status == 'overdue':
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.status = 'overdue'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """)
+        else:
+            cur.execute("""
+                SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+                FROM loan_schedule ls
+                JOIN loans l ON l.id = ls.loan_id
+                WHERE ls.payment_date = '%s'
+                  AND ls.status = '%s'
+                  AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+            """ % (target_date, sched_status))
         schedules = cur.fetchall()
 
         for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
