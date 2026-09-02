@@ -15,7 +15,7 @@ def get_conn():
 
 
 def handler(event, context):
-    """Ежечасный крон: отправка автоматических уведомлений (push, telegram, max) по расписанию. Проверяет настроенное время отправки и рассылает только когда текущий час МСК совпадает с настройкой remind_time."""
+    """Ежедневный крон: отправка автоматических уведомлений (push, telegram, max, sms) по расписанию платежей и просрочек. Вызывается по расписанию один раз в сутки (настраивается на cron-job.org)."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
@@ -29,56 +29,27 @@ def handler(event, context):
     cur = conn.cursor()
 
     now_msk = datetime.now(MSK)
-    current_hour = now_msk.hour
     today_str = body.get('date', now_msk.date().isoformat())
-    force = body.get('force', False)
 
     try:
-        push_result = {'skipped': True, 'reason': 'time mismatch'}
-        savings_push_result = {'skipped': True, 'reason': 'time mismatch'}
-        tg_result = {'skipped': True, 'reason': 'time mismatch'}
-        tg_savings_result = {'skipped': True, 'reason': 'time mismatch'}
-        max_result = {'skipped': True, 'reason': 'time mismatch'}
-        max_savings_result = {'skipped': True, 'reason': 'time mismatch'}
-        sms_result = {'skipped': True, 'reason': 'time mismatch'}
-        sms_savings_result = {'skipped': True, 'reason': 'time mismatch'}
-
         push_settings = get_push_settings(cur)
         tg_settings = get_telegram_settings(cur)
         max_settings = get_max_settings(cur)
         sms_settings = get_sms_settings(cur)
 
-        push_loan_hour = parse_hour(push_settings.get('remind_time', '09:00'))
-        push_savings_hour = parse_hour(push_settings.get('savings_remind_time', '09:00'))
-        tg_loan_hour = parse_hour(tg_settings.get('remind_time', '09:00'))
-        tg_savings_hour = parse_hour(tg_settings.get('savings_remind_time', '09:00'))
-        max_loan_hour = parse_hour(max_settings.get('remind_time', '09:00'))
-        max_savings_hour = parse_hour(max_settings.get('savings_remind_time', '09:00'))
-        sms_loan_hour = parse_hour(sms_settings.get('remind_time', '10:00'))
-        sms_savings_hour = parse_hour(sms_settings.get('savings_remind_time', '10:00'))
-
-        if force or current_hour == push_loan_hour:
-            push_result = send_payment_reminders(cur, conn, today_str, push_settings)
-        if force or current_hour == push_savings_hour:
-            savings_push_result = send_savings_reminders(cur, conn, today_str, push_settings)
-        if force or current_hour == tg_loan_hour:
-            tg_result = send_telegram_payment_reminders(cur, conn, today_str, tg_settings)
-        if force or current_hour == tg_savings_hour:
-            tg_savings_result = send_telegram_savings_reminders(cur, conn, today_str, tg_settings)
-        if force or current_hour == max_loan_hour:
-            max_result = send_max_payment_reminders(cur, conn, today_str, max_settings)
-        if force or current_hour == max_savings_hour:
-            max_savings_result = send_max_savings_reminders(cur, conn, today_str, max_settings)
-        if force or current_hour == sms_loan_hour:
-            sms_result = send_sms_payment_reminders(cur, conn, today_str, sms_settings)
-        if force or current_hour == sms_savings_hour:
-            sms_savings_result = send_sms_savings_reminders(cur, conn, today_str, sms_settings)
+        push_result = send_payment_reminders(cur, conn, today_str, push_settings)
+        savings_push_result = send_savings_reminders(cur, conn, today_str, push_settings)
+        tg_result = send_telegram_payment_reminders(cur, conn, today_str, tg_settings)
+        tg_savings_result = send_telegram_savings_reminders(cur, conn, today_str, tg_settings)
+        max_result = send_max_payment_reminders(cur, conn, today_str, max_settings)
+        max_savings_result = send_max_savings_reminders(cur, conn, today_str, max_settings)
+        sms_result = send_sms_payment_reminders(cur, conn, today_str, sms_settings)
+        sms_savings_result = send_sms_savings_reminders(cur, conn, today_str, sms_settings)
 
         conn.commit()
 
         result = {
             'success': True,
-            'current_hour_msk': current_hour,
             'date': today_str,
             'push_reminders': push_result,
             'savings_push_reminders': savings_push_result,
@@ -97,14 +68,6 @@ def handler(event, context):
     finally:
         cur.close()
         conn.close()
-
-
-def parse_hour(time_str):
-    try:
-        parts = time_str.strip().split(':')
-        return int(parts[0])
-    except Exception:
-        return 9
 
 
 def get_push_settings(cur):
