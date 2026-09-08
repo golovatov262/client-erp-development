@@ -6053,7 +6053,7 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         offset = int(params.get('offset', 0))
         cur.execute("""SELECT pm.*, u.name as created_by_name
             FROM push_messages pm LEFT JOIN users u ON u.id=pm.created_by
-            ORDER BY pm.created_at DESC LIMIT %d OFFSET %d""" % (limit, offset))
+            ORDER BY pm.created_at DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
@@ -6062,8 +6062,12 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
                     r[k] = v.isoformat()
                 elif isinstance(v, Decimal):
                     r[k] = float(v)
-        cur.execute("SELECT COUNT(*) FROM push_messages")
-        total = cur.fetchone()[0]
+            r['is_auto'] = False
+
+        rows.extend(get_auto_reminder_history(cur, 'push_auto_log', 'push'))
+        rows.sort(key=lambda r: r['created_at'], reverse=True)
+        total = len(rows)
+        rows = rows[offset:offset + limit]
         return {'items': rows, 'total': total}
 
     if action == 'send':
@@ -6178,6 +6182,62 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         return {'success': True}
 
     return {'error': 'Неизвестное действие: %s' % action}
+
+AUTO_REMINDER_TITLES = {
+    'reminder_today': 'Автонапоминание: платёж сегодня',
+    'reminder_1d': 'Автонапоминание: платёж завтра',
+    'overdue': 'Автонапоминание: просрочка платежа',
+    'savings_end_today': 'Автонапоминание: сбережения истекают сегодня',
+    'savings_end_1d': 'Автонапоминание: сбережения истекают завтра',
+    'savings_end': 'Автонапоминание: скоро истекают сбережения',
+}
+
+def humanize_auto_reminder_type(rtype):
+    """Преобразует технический reminder_type автоматической рассылки в понятное название."""
+    base = re.sub(r'_\d{4}-\d{2}-\d{2}$', '', rtype)
+    base = re.sub(r'^(sms_|tg_|max_)', '', base)
+    if base in AUTO_REMINDER_TITLES:
+        return AUTO_REMINDER_TITLES[base]
+    m = re.match(r'reminder_(\d+)d$', base)
+    if m:
+        return 'Автонапоминание: платёж через %s дн.' % m.group(1)
+    m = re.match(r'savings_end_(\d+)d$', base)
+    if m:
+        return 'Автонапоминание: сбережения истекают через %s дн.' % m.group(1)
+    if base.startswith('overdue'):
+        return 'Автонапоминание: просрочка платежа'
+    return 'Автонапоминание'
+
+def get_auto_reminder_history(cur, table, channel_label):
+    """Собирает сгруппированную историю автоматических рассылок (cron) из служебной таблицы *_auto_log
+    в формате, совместимом с ручными рассылками из notification_history."""
+    cur.execute("""
+        SELECT reminder_type, DATE_TRUNC('minute', sent_at) as sent_min, COUNT(*)
+        FROM %s
+        GROUP BY reminder_type, DATE_TRUNC('minute', sent_at)
+        ORDER BY sent_min DESC
+    """ % table)
+    items = []
+    for idx, (rtype, sent_min, cnt) in enumerate(cur.fetchall()):
+        items.append({
+            'id': -(idx + 1),
+            'channel': channel_label,
+            'title': humanize_auto_reminder_type(rtype),
+            'body': 'Отправлено автоматически по расписанию cron',
+            'url': None,
+            'target': 'auto',
+            'target_user_ids': None,
+            'sent_count': cnt,
+            'failed_count': 0,
+            'status': 'sent',
+            'created_by': None,
+            'created_by_name': 'Автоматически',
+            'created_at': sent_min.isoformat(),
+            'sent_at': sent_min.isoformat(),
+            'error_text': None,
+            'is_auto': True,
+        })
+    return items
 
 def handle_notifications(method, params, body, staff, cur, conn):
     """Управление уведомлениями: Telegram, Email, общая история"""
@@ -6365,7 +6425,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         where = "WHERE nh.channel='%s'" % channel.replace("'", "''") if channel else ""
         cur.execute("""SELECT nh.*, u.name as created_by_name
             FROM notification_history nh LEFT JOIN users u ON u.id=nh.created_by
-            %s ORDER BY nh.created_at DESC LIMIT %d OFFSET %d""" % (where, limit, offset))
+            %s ORDER BY nh.created_at DESC""" % where)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
@@ -6374,9 +6434,15 @@ def handle_notifications(method, params, body, staff, cur, conn):
                     r[k] = v.isoformat()
                 elif isinstance(v, Decimal):
                     r[k] = float(v)
-        count_sql = "SELECT COUNT(*) FROM notification_history" + (" WHERE channel='%s'" % channel.replace("'", "''") if channel else "")
-        cur.execute(count_sql)
-        total = cur.fetchone()[0]
+            r['is_auto'] = False
+
+        auto_table = {'sms': 'sms_auto_log', 'telegram': 'telegram_auto_log', 'max': 'max_auto_log'}.get(channel)
+        if auto_table:
+            rows.extend(get_auto_reminder_history(cur, auto_table, channel))
+
+        rows.sort(key=lambda r: r['created_at'], reverse=True)
+        total = len(rows)
+        rows = rows[offset:offset + limit]
         return {'items': rows, 'total': total}
 
     if action == 'history_log':

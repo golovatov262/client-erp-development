@@ -1300,6 +1300,7 @@ export interface PushMessage {
   created_by_name: string;
   created_at: string;
   sent_at: string | null;
+  is_auto?: boolean;
 }
 
 export interface PushMessageLogEntry {
@@ -1382,6 +1383,7 @@ export interface NotificationHistoryItem {
   created_at: string;
   sent_at: string | null;
   error_text: string | null;
+  is_auto?: boolean;
 }
 
 export interface NotificationLogEntry {

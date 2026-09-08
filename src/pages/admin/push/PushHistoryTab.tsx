@@ -66,19 +66,32 @@ const PushHistoryTab = ({ messages, subscribers }: PushHistoryTabProps) => {
                 {messages.map(m => {
                   const st = statusMap[m.status] || { label: m.status, variant: "secondary" as const };
                   return (
-                    <TableRow key={m.id}>
+                    <TableRow key={`${m.is_auto ? "auto" : "manual"}-${m.id}`}>
                       <TableCell className="text-xs whitespace-nowrap">{fmtDate(m.sent_at || m.created_at)}</TableCell>
-                      <TableCell className="font-medium text-sm max-w-[150px] truncate">{m.title}</TableCell>
+                      <TableCell className="font-medium text-sm max-w-[150px] truncate">
+                        <div className="flex items-center gap-1.5">
+                          {m.is_auto && <Icon name="Clock" size={12} className="text-muted-foreground shrink-0" />}
+                          {m.title}
+                        </div>
+                      </TableCell>
                       <TableCell className="hidden sm:table-cell text-xs text-muted-foreground max-w-[200px] truncate">{m.body}</TableCell>
-                      <TableCell><Badge variant={st.variant} className="text-xs">{st.label}</Badge></TableCell>
+                      <TableCell>
+                        {m.is_auto ? (
+                          <Badge variant="secondary" className="text-xs">Авто</Badge>
+                        ) : (
+                          <Badge variant={st.variant} className="text-xs">{st.label}</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right text-sm">
                         <span className="text-green-600">{m.sent_count}</span>
                         {m.failed_count > 0 && <span className="text-red-500 ml-1">/ {m.failed_count}</span>}
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openLog(m.id)} title="Детали">
-                          <Icon name="Eye" size={14} />
-                        </Button>
+                        {!m.is_auto && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openLog(m.id)} title="Детали">
+                            <Icon name="Eye" size={14} />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
