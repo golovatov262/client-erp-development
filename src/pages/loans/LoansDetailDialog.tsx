@@ -35,19 +35,6 @@ interface LoansDetailDialogProps {
   orgs?: Organization[];
   onPayment: () => void;
   onEarlyRepay: () => void;
-  onModify: () => void;
-  onEditPayment: (p: LoanPayment) => void;
-  onDeletePayment: (id: number) => void;
-  onDeleteContract: () => void;
-  onRebuildSchedule: () => void;
-  onCheckStatus: () => void;
-  onRecalcStatuses: () => void;
-  onReconciliation: () => void;
-  onFixSchedule: () => void;
-  onReapplyPayments: () => void;
-  onEditLoan: () => void;
-  onHoliday: () => void;
-  onEndHolidayEarly: () => void;
 }
 
 const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
@@ -189,12 +176,6 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "interest_part", label: "Проценты", render: (p: LoanPayment) => fmt(p.interest_part) },
     { key: "penalty_part", label: "Штрафы", render: (p: LoanPayment) => p.penalty_part > 0 ? fmt(p.penalty_part) : "—" },
     { key: "description", label: "Примечание", render: (p: LoanPayment) => <span className="text-xs text-muted-foreground">{p.description || "—"}</span> },
-    { key: "id", label: "", render: (p: LoanPayment) => (isAdmin || isManager) ? (
-      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-        <button onClick={() => props.onEditPayment(p)} className="p-1 rounded hover:bg-muted"><Icon name="Pencil" size={14} /></button>
-        {(isAdmin || isManager) && <button onClick={() => props.onDeletePayment(p.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
-      </div>
-    ) : null }
   ];
 
   return (
@@ -222,54 +203,17 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           </div>
         )}
 
-        <div className="flex items-center justify-between">
-          <div className="grid md:grid-cols-4 gap-2 text-sm flex-1">
+        <div className="grid md:grid-cols-4 gap-2 text-sm">
             <div><span className="text-muted-foreground">Ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
             <div><span className="text-muted-foreground">Срок:</span> <span className="font-medium">{detail.term_months} мес.</span></div>
             <div><span className="text-muted-foreground">Начало:</span> <span className="font-medium">{fmtDate(detail.start_date)}</span></div>
             <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
-          </div>
-          {(isAdmin || isManager) && (
-            <button onClick={props.onEditLoan} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Редактировать параметры">
-              <Icon name="Pencil" size={16} />
-            </button>
-          )}
         </div>
 
         {(isAdmin || isManager) && (
-          <div className="flex flex-wrap gap-2 justify-between">
-            <div className="flex flex-wrap gap-2">
-              {(detail.status === "active" || detail.status === "overdue") && <>
-                <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
-                <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
-                <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
-              </>}
-              {(detail.status === "active" || detail.status === "overdue" || detail.status === "holiday") && (
-                <Button size="sm" variant="outline" onClick={props.onHoliday}>
-                  <Icon name="Umbrella" size={14} className="mr-1" />
-                  {detail.status === "holiday" ? "Изменить каникулы" : "Кредитные каникулы"}
-                </Button>
-              )}
-              {detail.status === "holiday" && (
-                <Button size="sm" variant="outline" onClick={props.onEndHolidayEarly}>
-                  <Icon name="CalendarOff" size={14} className="mr-1" />
-                  Закрыть каникулы досрочно
-                </Button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={props.onReconciliation}>
-                <Icon name="FileSearch" size={14} className="mr-1" />Сверка платежей
-              </Button>
-              {(isAdmin || isManager) && <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>}
-              {(isAdmin || isManager) && <Button size="sm" variant="outline" onClick={props.onReapplyPayments}><Icon name="Calculator" size={14} className="mr-1" />Переразнести платежи</Button>}
-              {isAdmin && <>
-                <Button size="sm" variant="outline" onClick={props.onFixSchedule}><Icon name="Wrench" size={14} className="mr-1" />Исправить дубли</Button>
-                <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>
-                <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
-              </>}
-              {(isAdmin || isManager) && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
-            </div>
+          (detail.status === "active" || detail.status === "overdue") && <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
+            <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
           </div>
         )}
 

@@ -679,6 +679,8 @@ def handle_members(method, params, body, cur, conn, staff=None, ip=''):
 def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
+        if action in ('check_status', 'reconciliation_report'):
+            return {'error': 'Эта служебная функция удалена', '_status': 410}
         if action == 'detail':
             loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % params['id'])
             if not loan:
@@ -860,6 +862,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
     elif method == 'POST':
         action = body.get('action', 'create')
+        removed_actions = {
+            'modify', 'update_loan', 'update_payment', 'delete_payment',
+            'delete_contract', 'delete_all_payments', 'reapply_payments',
+            'fix_schedule', 'recalc_statuses', 'rebuild_schedule',
+            'set_holiday', 'cancel_holiday', 'end_holiday_early',
+        }
+        if action in removed_actions:
+            return {'error': 'Это действие удалено. Для договора доступны только внесение платежа и досрочное погашение', '_status': 410}
         if action == 'create':
             cn = body['contract_no']
             mid = int(body['member_id'])
@@ -1291,60 +1301,22 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'early_repayment':
             lid = int(body['loan_id'])
-            amt = safe_float(body['amount'], 'сумма')
+            amt = Decimal(str(safe_float(body['amount'], 'сумма')))
             rt = body.get('repayment_type', 'reduce_term')
             pd = body.get('payment_date', date.today().isoformat())
-
-            cur.execute("SELECT amount, rate, balance, term_months, start_date, schedule_type, monthly_payment FROM loans WHERE id=%s" % lid)
-            lr = cur.fetchone()
-            cb, r, st = float(lr[2]), float(lr[1]), lr[5]
-            old_monthly = float(lr[6]) if lr[6] else 0
-            nb = cb - amt
-
-            if nb <= 0:
-                cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
-                cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
-                cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, payment_type) VALUES (%s,'%s',%s,%s,'early_full')" % (lid, pd, amt, cb))
-                audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Полное досрочное погашение: %s' % amt, ip)
-                conn.commit()
-                return {'success': True, 'new_balance': 0, 'status': 'closed'}
-
-            cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
-            remaining_periods = cur.fetchone()[0]
-            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
-            cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
-            paid_count = cur.fetchone()[0]
-
-            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
-
-            if rt == 'reduce_payment':
-                nt = max(remaining_periods, 1)
-            else:
-                if old_monthly > 0:
-                    best_term = remaining_periods
-                    for t in range(1, remaining_periods + 1):
-                        _, m = fn(nb, r, t, date.fromisoformat(pd))
-                        if m <= old_monthly * 1.1:
-                            best_term = t
-                            break
-                    if best_term >= remaining_periods:
-                        best_term = max(remaining_periods - 1, 1)
-                    nt = max(best_term, 1)
-                else:
-                    nt = max(remaining_periods, 1)
-
-            ns, nm = fn(nb, r, nt, date.fromisoformat(pd))
-            for item in ns:
-                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, paid_count + item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
-
-            ne = date.fromisoformat(ns[-1]['payment_date'])
-            total_term = paid_count + len(ns)
-            cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), total_term, lid))
-            cur.execute("INSERT INTO loan_payments (loan_id,payment_date,amount,principal_part,payment_type) VALUES (%s,'%s',%s,%s,'early_partial')" % (lid, pd, amt, amt))
+            if rt not in ('reduce_payment', 'reduce_term'):
+                return {'error': 'Выберите: уменьшить платёж или сократить срок'}
+            result = post_loan_payment(
+                cur, lid, amt, pd, 'Досрочное погашение',
+                source='manual', early_strategy=rt)
+            if result.get('unapplied', 0) > 0.01:
+                raise ValueError('Сумма досрочного погашения превышает общую задолженность')
             refresh_loan_overdue_status(cur, lid)
-            audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Частичное: %s, тип: %s' % (amt, rt), ip)
+            audit_log(cur, staff, 'early_repayment', 'loan', lid, '',
+                      'Сумма: %s; v2; вариант: %s; ОД: %s; %%: %s' %
+                      (amt, rt, result['principal_part'], result['interest_part']), ip)
             conn.commit()
-            return {'success': True, 'new_balance': nb, 'new_schedule': ns, 'new_monthly': nm}
+            return result
 
         elif action == 'update_payment':
             pid = int(body['payment_id'])

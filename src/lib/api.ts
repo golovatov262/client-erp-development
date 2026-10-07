@@ -145,37 +145,7 @@ export const api = {
     payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
-      request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
-    modify: (data: { loan_id: number; new_rate?: number; new_term?: number; new_amount?: number; effective_date?: string }) =>
-      request<{ success: boolean; new_schedule: ScheduleItem[]; monthly_payment: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "modify", ...data }),
-    updateLoan: (data: { loan_id: number; contract_no?: string; member_id?: number; amount?: number; rate?: number; term_months?: number; schedule_type?: string; start_date?: string; org_id?: number | null }) =>
-      request<{ success: boolean; schedule: ScheduleItem[]; monthly_payment: number; new_end_date: string; new_balance: number }>("POST", undefined, { entity: "loans", action: "update_loan", ...data }),
-    deleteContract: (loanId: number) =>
-      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_contract", loan_id: loanId }),
-    deleteAllPayments: (loanId: number) =>
-      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_all_payments", loan_id: loanId }),
-    updatePayment: (data: { payment_id: number; payment_date?: string; amount?: number; principal_part?: number; interest_part?: number; penalty_part?: number; manual_distribution?: boolean }) =>
-      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
-    deletePayment: (paymentId: number) =>
-      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_payment", payment_id: paymentId }),
-    fixSchedule: (loanId: number) =>
-      request<{ success: boolean; removed_duplicates: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "fix_schedule", loan_id: loanId }),
-    rebuildSchedule: (loanId: number, termMonths?: number, rate?: number) =>
-      request<{ success: boolean; periods: number; monthly_payment: number; end_date: string }>("POST", undefined, { entity: "loans", action: "rebuild_schedule", loan_id: loanId, ...(termMonths ? { term_months: termMonths } : {}), ...(rate ? { rate } : {}) }),
-    checkStatus: (loanNumber: string) =>
-      request<CheckStatusResult>("GET", { entity: "loans", action: "check_status", loan_number: loanNumber }),
-    recalcStatuses: (loanId: number) =>
-      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "recalc_statuses", loan_id: loanId }),
-    reapplyPayments: (loanId: number) =>
-      request<{ success: boolean; contract_no: string }>("POST", undefined, { entity: "loans", action: "reapply_payments", loan_id: loanId }),
-    reconciliationReport: (loanId: number) =>
-      request<ReconciliationReport>("GET", { entity: "loans", action: "reconciliation_report", id: loanId }),
-    setHoliday: (data: { loan_id: number; holiday_start: string; holiday_months: number }) =>
-      request<{ success: boolean; holiday_start: string; holiday_end: string; new_end_date: string; holiday_months: number; extended_schedule: ScheduleItem[] }>("POST", undefined, { entity: "loans", action: "set_holiday", ...data }),
-    cancelHoliday: (loanId: number) =>
-      request<{ success: boolean; message: string }>("POST", undefined, { entity: "loans", action: "set_holiday", loan_id: loanId, holiday_months: 0 }),
-    endHolidayEarly: (loanId: number) =>
-      request<{ success: boolean; message: string; used_months: number; holiday_end?: string; new_end_date?: string }>("POST", undefined, { entity: "loans", action: "end_holiday_early", loan_id: loanId }),
+      request<PaymentResult>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
   },
 
   loanCollateral: {
@@ -942,6 +912,7 @@ export interface PaymentResult {
   penalty_part?: number;
   schedule_recalculated?: boolean;
   new_monthly?: number;
+  new_term?: number;
   needs_choice?: boolean;
   overpay_amount?: number;
   current_payment?: number;

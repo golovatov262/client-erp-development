@@ -82,8 +82,50 @@ def _recalculate_future_in_place(cur, loan_id, balance, payment_date):
     return monthly
 
 
+def _recalculate_future_reduce_term(cur, loan_id, balance, payment_date):
+    """Keep the contractual payment and shorten the remaining schedule."""
+    cur.execute("""SELECT id,payment_no,payment_date FROM loan_schedule
+        WHERE loan_id=%s AND payment_date>%s AND COALESCE(paid_amount,0)=0
+          AND status IN ('pending','overdue','partial') ORDER BY payment_no,id FOR UPDATE""",
+        (loan_id, _month_end(payment_date)))
+    rows = cur.fetchall()
+    if not rows or balance <= EPS:
+        return None, None
+    cur.execute("SELECT rate,monthly_payment FROM loans WHERE id=%s", (loan_id,))
+    rate, fixed_payment = cur.fetchone()
+    rate_m = Decimal(str(rate)) / Decimal('1200')
+    fixed_payment = money(fixed_payment)
+    if fixed_payment <= money(balance * rate_m):
+        raise ValueError('Текущий платёж не покрывает проценты; сократить срок нельзя')
+
+    running = money(balance)
+    used = []
+    for sid, payment_no, due in rows:
+        interest = money(running * rate_m)
+        principal = min(running, money(fixed_payment - interest))
+        payment = money(principal + interest)
+        running = money(running - principal)
+        cur.execute("""UPDATE loan_schedule SET payment_amount=%s,principal_amount=%s,
+            interest_amount=%s,balance_after=%s,status='pending' WHERE id=%s""",
+            (payment, principal, interest, running, sid))
+        used.append((sid, payment_no, due))
+        if running <= EPS:
+            break
+    if running > EPS:
+        raise ValueError('В оставшихся периодах нельзя сохранить текущий платёж')
+
+    used_ids = {row[0] for row in used}
+    for sid, _, _ in rows:
+        if sid not in used_ids:
+            cur.execute("DELETE FROM loan_schedule WHERE id=%s", (sid,))
+    last_no, last_date = used[-1][1], used[-1][2]
+    cur.execute("""UPDATE loans SET term_months=%s,end_date=%s,updated_at=NOW()
+        WHERE id=%s""", (last_no, last_date, loan_id))
+    return fixed_payment, last_no
+
+
 def post_loan_payment(cur, loan_id, amount, payment_date, description='', source='manual',
-                      source_ref=None, forced=None):
+                      source_ref=None, forced=None, early_strategy='reduce_payment'):
     """Post one payment atomically. Caller owns commit/rollback."""
     payment_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
     amount = money(amount)
@@ -185,12 +227,23 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         payment_type=%s WHERE id=%s""", (principal_total, totals['interest'], totals['penalty'], payment_type, payment_id))
     cur.execute("UPDATE loans SET balance=%s,status=%s,updated_at=NOW() WHERE id=%s",
                 (new_balance, 'closed' if new_balance <= EPS else 'active', loan_id))
+    if early_strategy not in ('reduce_payment', 'reduce_term'):
+        raise ValueError('Неизвестный вариант досрочного погашения')
     new_monthly = None
-    if totals['early_principal'] > EPS and new_balance > EPS:
-        new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date)
+    new_term = None
+    if totals['early_principal'] > EPS:
+        if new_balance <= EPS:
+            cur.execute("""DELETE FROM loan_schedule WHERE loan_id=%s AND payment_date>%s
+                AND COALESCE(paid_amount,0)=0""", (loan_id, _month_end(payment_date)))
+            cur.execute("UPDATE loans SET end_date=%s,updated_at=NOW() WHERE id=%s", (payment_date, loan_id))
+        elif early_strategy == 'reduce_term':
+            new_monthly, new_term = _recalculate_future_reduce_term(cur, loan_id, new_balance, payment_date)
+        else:
+            new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date)
     return {'payment_id': payment_id, 'principal_part': float(principal_total),
             'interest_part': float(totals['interest']), 'penalty_part': float(totals['penalty']),
             'early_principal': float(totals['early_principal']), 'unapplied': float(max(remaining, 0)),
             'new_balance': float(new_balance), 'new_monthly': float(new_monthly) if new_monthly else None,
+            'new_term': new_term,
             'schedule_recalculated': bool(new_monthly),
             'engine_version': 'v2'}

@@ -5,19 +5,15 @@ import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { toNum, Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization, humanizeError } from "@/lib/api";
+import api, { toNum, Loan, LoanDetail, Member, Organization, humanizeError } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
-import LoanReconciliationReport from "./loans/LoanReconciliationReport";
-import LoanEditDialog from "./loans/LoanEditDialog";
 import LoanApplicationsTab from "./loans/LoanApplicationsTab";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -65,7 +61,6 @@ const Loans = () => {
   const [detail, setDetail] = useState<LoanDetail | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showEarly, setShowEarly] = useState(false);
-  const [showModify, setShowModify] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
   const { isAdmin, isManager } = useAuth();
@@ -73,21 +68,7 @@ const Loans = () => {
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), manual: false, principal: "", interest: "", penalty: "" });
   const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
-  const [earlyPreview, setEarlyPreview] = useState<ScheduleItem[] | null>(null);
-  const [earlyMonthly, setEarlyMonthly] = useState(0);
-  const [modifyForm, setModifyForm] = useState({ new_rate: "", new_term: "", new_amount: "", effective_date: new Date().toISOString().slice(0, 10) });
-  const [modifyPreview, setModifyPreview] = useState<ScheduleItem[] | null>(null);
-  const [modifyMonthly, setModifyMonthly] = useState(0);
-  const [showEditPayment, setShowEditPayment] = useState(false);
-  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: false });
-  const [showOverpayChoice, setShowOverpayChoice] = useState(false);
-  const [overpayOptions, setOverpayOptions] = useState<Record<string, { new_monthly: number; new_term: number; description: string }>>({});
-  const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
-  const [showReconciliation, setShowReconciliation] = useState(false);
-  const [showEditLoan, setShowEditLoan] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [showHoliday, setShowHoliday] = useState(false);
-  const [holidayForm, setHolidayForm] = useState({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: "3" });
   const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
@@ -137,30 +118,19 @@ const Loans = () => {
     setShowDetail(true);
   };
 
-  const handlePayment = async (strategy?: string) => {
+  const handlePayment = async () => {
     if (!detail || !payForm.amount) return;
     setSaving(true);
     try {
       const res = await api.loans.payment({
         loan_id: detail.id, payment_date: payForm.date,
-        amount: toNum(payForm.amount), overpay_strategy: strategy,
+        amount: toNum(payForm.amount),
         ...(payForm.manual ? { forced_distribution: {
           principal: toNum(payForm.principal || "0"),
           interest: toNum(payForm.interest || "0"),
           penalty: toNum(payForm.penalty || "0"),
         }} : {}),
       });
-      if (res.needs_choice && res.options) {
-        setOverpayOptions(res.options);
-        setOverpayInfo({
-          overpay_amount: res.overpay_amount || 0,
-          current_payment: res.current_payment || 0,
-          total_amount: res.total_amount || 0,
-        });
-        setShowPayment(false);
-        setShowOverpayChoice(true);
-        return;
-      }
       const parts = [`Осн. долг: ${fmt(res.principal_part || 0)}`, `Проценты: ${fmt(res.interest_part || 0)}`];
       if ((res.penalty_part || 0) > 0) parts.push(`Штрафы: ${fmt(res.penalty_part || 0)}`);
       let title = "Платёж внесён";
@@ -172,7 +142,6 @@ const Loans = () => {
       }
       toast({ title, description: parts.join(" · ") });
       setShowPayment(false);
-      setShowOverpayChoice(false);
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();
@@ -181,283 +150,21 @@ const Loans = () => {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleEarlyPreview = async () => {
-    if (!detail || !earlyForm.amount) return;
-    const newBalance = detail.balance - toNum(earlyForm.amount);
-    if (newBalance <= 0) {
-      setEarlyPreview(null);
-      setEarlyMonthly(0);
-      return;
-    }
-    const remainingPeriods = detail.schedule.filter(s => s.status === "pending").length;
-    if (remainingPeriods === 0) return;
-    const res = await api.loans.calcSchedule(
-      newBalance,
-      detail.rate,
-      earlyForm.repayment_type === "reduce_term" ? Math.max(1, remainingPeriods - 1) : remainingPeriods,
-      detail.schedule_type,
-      new Date().toISOString().slice(0, 10)
-    );
-    setEarlyPreview(res.schedule);
-    setEarlyMonthly(res.monthly_payment);
   };
 
   const handleEarlyRepay = async () => {
     if (!detail || !earlyForm.amount) return;
     setSaving(true);
     try {
-      await api.loans.earlyRepayment({
+      const res = await api.loans.earlyRepayment({
         loan_id: detail.id, amount: toNum(earlyForm.amount),
         repayment_type: earlyForm.repayment_type, payment_date: earlyForm.date,
       });
-      toast({ title: "Досрочное погашение выполнено" });
+      const parts = [`Проценты: ${fmt(res.interest_part || 0)}`, `Основной долг: ${fmt(res.principal_part || 0)}`];
+      if (res.new_monthly) parts.push(`Новый платёж: ${fmt(res.new_monthly)}`);
+      if (res.new_term) parts.push(`Новый срок: ${res.new_term} мес.`);
+      toast({ title: "Досрочное погашение выполнено", description: parts.join(" · ") });
       setShowEarly(false);
-      setEarlyPreview(null);
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleModifyPreview = async () => {
-    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term && !modifyForm.new_amount)) return;
-    const newRate = modifyForm.new_rate ? toNum(modifyForm.new_rate) : detail.rate;
-    const remainingPeriods = detail.schedule.filter(s => s.status === "pending").length;
-    const newTerm = modifyForm.new_term ? toNum(modifyForm.new_term) : remainingPeriods;
-    const extra = modifyForm.new_amount ? toNum(modifyForm.new_amount) - detail.amount : 0;
-    const newBalance = detail.balance + (extra > 0 ? extra : 0);
-    const effectiveDate = modifyForm.effective_date || new Date().toISOString().slice(0, 10);
-    const res = await api.loans.calcSchedule(newBalance, newRate, newTerm, detail.schedule_type, effectiveDate);
-    setModifyPreview(res.schedule);
-    setModifyMonthly(res.monthly_payment);
-  };
-
-  const handleModify = async () => {
-    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term && !modifyForm.new_amount)) return;
-    if (!modifyForm.effective_date) {
-      toast({ title: "Укажите дату изменений", variant: "destructive" });
-      return;
-    }
-    if (modifyForm.new_amount && toNum(modifyForm.new_amount) <= detail.amount) {
-      toast({ title: "Новая сумма должна быть больше текущей (" + fmt(detail.amount) + ")", variant: "destructive" });
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.loans.modify({
-        loan_id: detail.id,
-        new_rate: modifyForm.new_rate ? toNum(modifyForm.new_rate) : undefined,
-        new_term: modifyForm.new_term ? toNum(modifyForm.new_term) : undefined,
-        new_amount: modifyForm.new_amount ? toNum(modifyForm.new_amount) : undefined,
-        effective_date: modifyForm.effective_date,
-      });
-      toast({ title: "Условия изменены, график пересчитан" });
-      setShowModify(false);
-      setModifyPreview(null);
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEditPayment = async () => {
-    if (!detail || !editPayForm.amount) return;
-    setSaving(true);
-    try {
-      await api.loans.updatePayment({
-        payment_id: editPayForm.payment_id,
-        payment_date: editPayForm.payment_date,
-        amount: toNum(editPayForm.amount),
-        principal_part: editPayForm.principal_part ? toNum(editPayForm.principal_part) : undefined,
-        interest_part: editPayForm.interest_part ? toNum(editPayForm.interest_part) : undefined,
-        penalty_part: editPayForm.penalty_part ? toNum(editPayForm.penalty_part) : undefined,
-        manual_distribution: editPayForm.manual_distribution,
-      });
-      toast({ title: "Платёж изменён" });
-      setShowEditPayment(false);
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeletePayment = async (paymentId: number) => {
-    if (!detail || !confirm("Удалить платёж?")) return;
-    try {
-      await api.loans.deletePayment(paymentId);
-      toast({ title: "Платёж удалён" });
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const openEditPayment = (p: LoanPayment) => {
-    setEditPayForm({
-      payment_id: p.id,
-      payment_date: p.payment_date,
-      amount: String(p.amount),
-      principal_part: String(p.principal_part),
-      interest_part: String(p.interest_part),
-      penalty_part: String(p.penalty_part),
-      manual_distribution: !!p.manual_distribution,
-    });
-    setShowEditPayment(true);
-  };
-
-  const handleDeleteContract = async () => {
-    if (!detail || !confirm(`Удалить договор займа ${detail.contract_no}? Все связанные данные будут удалены.`)) return;
-    try {
-      await api.loans.deleteContract(detail.id);
-      toast({ title: "Договор удалён" });
-      setShowDetail(false);
-      setDetail(null);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleRebuildSchedule = async () => {
-    if (!detail) return;
-    const termInput = prompt(`Пересоздать график с даты начала (${detail.start_date}).\nУкажите срок в месяцах:`, String(detail.term_months));
-    if (!termInput) return;
-    const term = parseInt(termInput);
-    if (!term || term < 1) { toast({ title: "Некорректный срок", variant: "destructive" }); return; }
-    try {
-      const res = await api.loans.rebuildSchedule(detail.id, term);
-      toast({ title: "График пересоздан", description: `Периодов: ${res.periods}, платёж: ${fmt(res.monthly_payment)}` });
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleCheckStatus = async () => {
-    if (!detail) return;
-    try {
-      const data = await api.loans.checkStatus(detail.contract_no);
-      console.log('=== ДИАГНОСТИКА СТАТУСОВ ===');
-      console.log('Договор:', data.loan_number);
-      console.log('Всего платежей по графику:', data.schedule.length);
-      console.log('Статистика:', data.stats);
-      console.log('Сумма paid_amount из графика:', data.total_paid_from_schedule, '₽');
-      console.log('Сумма фактических платежей:', data.total_paid_from_payments, '₽');
-      console.log('Последний оплаченный период:', data.last_paid_period);
-      console.log('\nГрафик платежей:', data.schedule);
-      console.log('\nФактические платежи:', data.payments);
-      toast({ title: "Диагностика завершена", description: "Результаты в консоли (F12)" });
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleFixSchedule = async () => {
-    if (!detail || !confirm('Исправить дубли и пересчитать баланс по договору?')) return;
-    try {
-      const res = await api.loans.fixSchedule(detail.id);
-      toast({ title: "График исправлен", description: `Удалено дублей: ${res.removed_duplicates}, баланс: ${fmt(res.new_balance)}` });
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleRecalcStatuses = async () => {
-    if (!detail || !confirm('Пересчитать статусы платежей на основе фактических платежей?')) return;
-    try {
-      await api.loans.recalcStatuses(detail.id);
-      toast({ title: "Статусы пересчитаны" });
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleReapplyPayments = async () => {
-    if (!detail || !confirm('Переразнести все платежи по договору заново с учётом актуальных штрафов и процентов? Суммы платежей не изменятся, изменятся только их части (ОД / % / штраф).')) return;
-    try {
-      await api.loans.reapplyPayments(detail.id);
-      toast({ title: "Платежи переразнесены" });
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    }
-  };
-
-  const handleHoliday = async () => {
-    if (!detail) return;
-    const months = parseInt(holidayForm.holiday_months);
-    if (!months || months < 1 || months > 12) {
-      toast({ title: "Укажите количество месяцев от 1 до 12", variant: "destructive" });
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await api.loans.setHoliday({ loan_id: detail.id, holiday_start: holidayForm.holiday_start, holiday_months: months });
-      toast({ title: "Кредитные каникулы установлены", description: `До ${res.holiday_end}, срок продлён до ${res.new_end_date}` });
-      setShowHoliday(false);
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancelHoliday = async () => {
-    if (!detail) return;
-    setSaving(true);
-    try {
-      await api.loans.cancelHoliday(detail.id);
-      toast({ title: "Кредитные каникулы отменены" });
-      setShowHoliday(false);
-      const d = await api.loans.get(detail.id);
-      setDetail(d);
-      load();
-    } catch (e) {
-      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEndHolidayEarly = async () => {
-    if (!detail) return;
-    if (!confirm("Закрыть каникулы досрочно? Статус договора будет переведён в «активный», срок и график пересчитаны.")) return;
-    setSaving(true);
-    try {
-      const res = await api.loans.endHolidayEarly(detail.id);
-      const desc = res.used_months
-        ? `Использовано ${res.used_months} мес. Новая дата окончания: ${res.new_end_date || ""}`
-        : "Каникулы не успели начаться — полностью отменены";
-      toast({ title: "Каникулы закрыты", description: desc });
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();
@@ -564,8 +271,6 @@ const Loans = () => {
 
       <LoansDetailDialog
         open={showDetail}
-        onCheckStatus={handleCheckStatus}
-        onRecalcStatuses={handleRecalcStatuses}
         onOpenChange={setShowDetail}
         detail={detail}
         isAdmin={isAdmin}
@@ -573,48 +278,7 @@ const Loans = () => {
         orgs={orgs}
         onPayment={() => setShowPayment(true)}
         onEarlyRepay={() => setShowEarly(true)}
-        onModify={() => setShowModify(true)}
-        onEditPayment={openEditPayment}
-        onDeletePayment={handleDeletePayment}
-        onDeleteContract={handleDeleteContract}
-        onRebuildSchedule={handleRebuildSchedule}
-        onReconciliation={() => setShowReconciliation(true)}
-        onFixSchedule={handleFixSchedule}
-        onReapplyPayments={handleReapplyPayments}
-        onEditLoan={() => setShowEditLoan(true)}
-        onHoliday={() => {
-          setHolidayForm({ holiday_start: new Date().toISOString().slice(0, 10), holiday_months: detail?.holiday_months ? String(detail.holiday_months) : "3" });
-          setShowHoliday(true);
-        }}
-        onEndHolidayEarly={handleEndHolidayEarly}
       />
-
-      {detail && (
-        <LoanReconciliationReport
-          open={showReconciliation}
-          onOpenChange={setShowReconciliation}
-          loanId={detail.id}
-          contractNo={detail.contract_no}
-        />
-      )}
-
-      {detail && (
-        <LoanEditDialog
-          open={showEditLoan}
-          onOpenChange={setShowEditLoan}
-          detail={detail}
-          members={members}
-          orgs={orgs}
-          saving={saving}
-          setSaving={setSaving}
-          toast={toast}
-          onSaved={async () => {
-            const d = await api.loans.get(detail.id);
-            setDetail(d);
-            load();
-          }}
-        />
-      )}
 
       <LoansActionDialogs
         detail={detail}
@@ -628,74 +292,8 @@ const Loans = () => {
         setShowEarly={setShowEarly}
         earlyForm={earlyForm}
         setEarlyForm={setEarlyForm}
-        earlyPreview={earlyPreview}
-        earlyMonthly={earlyMonthly}
-        handleEarlyPreview={handleEarlyPreview}
         handleEarlyRepay={handleEarlyRepay}
-        showModify={showModify}
-        setShowModify={setShowModify}
-        modifyForm={modifyForm}
-        setModifyForm={setModifyForm}
-        modifyPreview={modifyPreview}
-        modifyMonthly={modifyMonthly}
-        handleModifyPreview={handleModifyPreview}
-        handleModify={handleModify}
-        showEditPayment={showEditPayment}
-        setShowEditPayment={setShowEditPayment}
-        editPayForm={editPayForm}
-        setEditPayForm={setEditPayForm}
-        handleEditPayment={handleEditPayment}
-        showOverpayChoice={showOverpayChoice}
-        setShowOverpayChoice={setShowOverpayChoice}
-        overpayOptions={overpayOptions}
-        overpayInfo={overpayInfo}
       />
-
-      <Dialog open={showHoliday} onOpenChange={setShowHoliday}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Icon name="Umbrella" size={18} />
-              Кредитные каникулы
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              В период каникул проценты и платежи не начисляются. После окончания каникул срок займа продлевается на указанное количество месяцев с начислением процентов.
-            </p>
-            <div className="space-y-2">
-              <Label>Дата начала каникул</Label>
-              <Input type="date" value={holidayForm.holiday_start} onChange={e => setHolidayForm(f => ({ ...f, holiday_start: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Количество месяцев (1–12)</Label>
-              <Select value={holidayForm.holiday_months} onValueChange={v => setHolidayForm(f => ({ ...f, holiday_months: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => (
-                    <SelectItem key={m} value={String(m)}>{m} {m === 1 ? "месяц" : m < 5 ? "месяца" : "месяцев"}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {detail?.holiday_start && (
-              <div className="text-xs text-muted-foreground bg-muted px-3 py-2 rounded">
-                Текущие каникулы: {detail.holiday_start} — {detail.holiday_end} ({detail.holiday_months} мес.)
-              </div>
-            )}
-          </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
-            {detail?.holiday_start && (
-              <Button variant="outline" onClick={handleCancelHoliday} disabled={saving} className="text-red-600 border-red-200 hover:bg-red-50">
-                Отменить каникулы
-              </Button>
-            )}
-            <Button onClick={handleHoliday} disabled={saving}>
-              {saving ? "Сохранение..." : "Установить каникулы"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
