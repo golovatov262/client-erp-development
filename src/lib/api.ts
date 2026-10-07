@@ -1464,7 +1464,7 @@ const SBER_URL = (funcUrls as Record<string, string>)["sber-statements"] || (fun
 
 function sberRequest<T>(method: string, params?: Params, body?: unknown): Promise<T> {
   if (!SBER_URL) return Promise.reject(new Error("Функция sber-statements ещё не настроена"));
-  const url = new URL(SBER_URL);
+  const url = new URL(SBER_URL, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([key, val]) => {
       if (val !== undefined) url.searchParams.set(key, String(val));
