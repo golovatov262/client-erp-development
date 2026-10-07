@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Client ERP bank sync daily at 08:30 Moscow time
+
+[Timer]
+OnCalendar=*-*-* 05:30:00 UTC
+Persistent=true
+RandomizedDelaySec=30
+Unit=client-erp-bank-sync.service
+
+[Install]
+WantedBy=timers.target

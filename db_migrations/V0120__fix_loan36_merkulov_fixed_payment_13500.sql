@@ -63,7 +63,8 @@ SELECT 36, pno,
        ROUND(bal_before - principal, 2),
        'pending', 0, 0, 0
 FROM s
-WHERE pno > 132;
+WHERE pno > 132
+  AND EXISTS (SELECT 1 FROM t_p25513958_client_erp_developme.loans WHERE id = 36);
 
 UPDATE t_p25513958_client_erp_developme.loans
 SET balance = 718029.05,

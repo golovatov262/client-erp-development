@@ -1,0 +1,7 @@
+[Unit]
+Description=Issue TLS certificate for mykpk.ru after DNS propagation
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/install-mykpk-tls

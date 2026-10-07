@@ -71,7 +71,7 @@ const Loans = () => {
   const { isAdmin, isManager } = useAuth();
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
-  const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
+  const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), manual: false, principal: "", interest: "", penalty: "" });
   const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
   const [earlyPreview, setEarlyPreview] = useState<ScheduleItem[] | null>(null);
   const [earlyMonthly, setEarlyMonthly] = useState(0);
@@ -144,6 +144,11 @@ const Loans = () => {
       const res = await api.loans.payment({
         loan_id: detail.id, payment_date: payForm.date,
         amount: toNum(payForm.amount), overpay_strategy: strategy,
+        ...(payForm.manual ? { forced_distribution: {
+          principal: toNum(payForm.principal || "0"),
+          interest: toNum(payForm.interest || "0"),
+          penalty: toNum(payForm.penalty || "0"),
+        }} : {}),
       });
       if (res.needs_choice && res.options) {
         setOverpayOptions(res.options);

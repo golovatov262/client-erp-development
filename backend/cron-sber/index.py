@@ -10,7 +10,12 @@ from decimal import Decimal, ROUND_HALF_UP
 import psycopg2
 import requests
 import urllib3
+import sys
+from pathlib import Path
 from html.parser import HTMLParser
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from loan_payment_engine import post_loan_payment
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -52,10 +57,28 @@ CORS_HEADERS = {
     'Access-Control-Max-Age': '86400',
 }
 
-IMAP_HOST = os.environ.get('BANK_IMAP_HOST', 'mail.jino.ru')
-IMAP_PORT = int(os.environ.get('BANK_IMAP_PORT', '143'))
-IMAP_USER = os.environ.get('BANK_IMAP_USER', 'cber@sll-expert.ru')
-IMAP_PASS = os.environ.get('BANK_IMAP_PASSWORD', '')
+def get_secret(name, default=''):
+    """Read a runtime secret from env or the encrypted admin settings."""
+    env_value = os.environ.get(name, '')
+    if env_value:
+        return env_value
+    encryption_key = os.environ.get('APP_ENCRYPTION_KEY', '')
+    if not encryption_key:
+        return default
+    try:
+        conn = psycopg2.connect(os.environ['DATABASE_URL'])
+        cur = conn.cursor()
+        cur.execute("SELECT pgp_sym_decrypt(encrypted_value, %s) FROM integration_secrets WHERE key=%s", (encryption_key, name))
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else default
+    except Exception:
+        return default
+
+IMAP_HOST = get_secret('BANK_IMAP_HOST', 'mail.jino.ru')
+IMAP_PORT = int(get_secret('BANK_IMAP_PORT', '143'))
+IMAP_USER = get_secret('BANK_IMAP_USER', 'cber@sll-expert.ru')
+IMAP_PASS = get_secret('BANK_IMAP_PASSWORD', '')
 NOTIFY_EMAIL = 'info@sll-expert.ru'
 
 
@@ -1013,11 +1036,16 @@ def accrue_loan_penalties_until(cur, lid, target_date):
     return total_added
 
 
-def process_loan_payment(cur, conn, loan_id, amount, payment_date, description):
+def process_loan_payment(cur, conn, loan_id, amount, payment_date, description, source_ref=None):
     """Разнесение платежа по займу.
     При досрочном погашении (сумма > текущего периода) проценты считаются
     за фактические дни от предыдущего платежа, а не по графику.
     Перед разнесением доначисляет пени по всем просроченным периодам до даты платежа."""
+    effective_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date)[:10])
+    if effective_date >= date(2026, 10, 7):
+        result = post_loan_payment(cur, loan_id, amount, effective_date, description,
+                                   source='bank', source_ref=source_ref)
+        return result['payment_id'], None
     try:
         accrue_loan_penalties_until(cur, loan_id, payment_date)
     except Exception:
@@ -1399,7 +1427,7 @@ def load_statement_from_1c(cur, conn, section, connection_id):
             pay_date = doc_date or stmt_date
             desc = 'Авто из выписки %s' % stmt_date
             if m_entity == 'loan':
-                pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
+                pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc, 'bank_txn:%s' % txn_id)
                 if pay_id:
                     refresh_loan_overdue_status(cur, m_entity_id)
                     cur.execute("UPDATE bank_transactions SET match_status='applied', payment_id=%s WHERE id=%s" % (pay_id, txn_id))
@@ -1738,7 +1766,7 @@ def handle_reapply(body):
             pay_date = parse_1c_date(doc_date) or stmt_date
             desc = 'Авто из выписки %s' % stmt_date
             if m_entity == 'loan':
-                pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc)
+                pay_id, _ = process_loan_payment(cur, conn, m_entity_id, Decimal(str(amount_val)), pay_date, desc, 'bank_txn:%s' % txn_id)
                 if pay_id:
                     cur.execute("UPDATE bank_transactions SET match_status='applied', payment_id=%s WHERE id=%s" % (pay_id, txn_id))
                     matched += 1

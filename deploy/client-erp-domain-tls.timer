@@ -1,0 +1,11 @@
+[Unit]
+Description=Check mykpk.ru DNS and install TLS
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -13,6 +13,7 @@ import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
 import AdminNotifications from "./admin/AdminNotifications";
 import AdminApiKeys from "./admin/AdminApiKeys";
+import AdminIntegrations from "./admin/AdminIntegrations";
 
 type UserRow = StaffUser & { [key: string]: unknown };
 
@@ -140,6 +141,7 @@ const Admin = () => {
           <TabsTrigger value="organizations">Организации</TabsTrigger>
           <TabsTrigger value="notifications">Уведомления</TabsTrigger>
           <TabsTrigger value="api_keys">API-ключи</TabsTrigger>
+          <TabsTrigger value="integrations">Интеграции</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -181,6 +183,7 @@ const Admin = () => {
         <TabsContent value="api_keys">
           <AdminApiKeys />
         </TabsContent>
+        <TabsContent value="integrations"><AdminIntegrations /></TabsContent>
       </Tabs>
 
       <Dialog open={showPwChange} onOpenChange={setShowPwChange}>

@@ -1,0 +1,17 @@
+[Unit]
+Description=Client ERP daily loan overdue and penalty processing
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=clienterp
+Group=clienterp
+WorkingDirectory=/opt/client-erp
+EnvironmentFile=/opt/client-erp/.env
+Environment=TZ=Europe/Moscow
+ExecStart=/opt/client-erp/.venv/bin/python /opt/client-erp/scripts/run_daily_accrual.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/client-erp/data

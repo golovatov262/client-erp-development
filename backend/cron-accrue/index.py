@@ -54,9 +54,19 @@ def handler(event, context):
     try:
         accrual_date = body.get('date', date.today().isoformat())
 
-        # Автозакрытие истёкших вкладов (end_date < сегодня и статус active)
-        cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
-        auto_closed = max(0, cur.rowcount)
+        # Пени начисляются прибавлением дневной суммы, поэтому повторный запуск
+        # за ту же дату должен быть жёстко запрещён на уровне БД.
+        cur.execute("""
+            INSERT INTO cron_run_log(job_name, run_date, status)
+            VALUES ('daily_loan_penalty', %s, 'running')
+            ON CONFLICT(job_name, run_date) DO NOTHING
+        """, (accrual_date,))
+        if cur.rowcount == 0:
+            conn.rollback()
+            return {'statusCode': 200, 'headers': headers, 'body': json.dumps({
+                'success': True, 'date': accrual_date, 'skipped': True,
+                'reason': 'already_processed'
+            })}
 
         # Проверяем глобальный флаг автоматического начисления процентов по сбережениям.
         # Если 'off' — пропускаем начисление по вкладам (просрочки/пени по займам работают).
@@ -68,6 +78,23 @@ def handler(event, context):
                 savings_accrual_enabled = False
         except Exception:
             pass
+
+        # Жёсткая дата остановки защищает от случайного включения флага в интерфейсе.
+        savings_stop_date = None
+        try:
+            cur.execute("SELECT value FROM system_settings WHERE key='savings_accrual_stop_date'")
+            stop_row = cur.fetchone()
+            savings_stop_date = stop_row[0] if stop_row else None
+            if savings_stop_date and accrual_date > str(savings_stop_date):
+                savings_accrual_enabled = False
+        except Exception:
+            pass
+
+        # Когда начисления остановлены, cron не меняет и статусы сбережений.
+        auto_closed = 0
+        if savings_accrual_enabled:
+            cur.execute("UPDATE savings SET status='closed', updated_at=NOW() WHERE status='active' AND end_date IS NOT NULL AND end_date < '%s'" % accrual_date)
+            auto_closed = max(0, cur.rowcount)
 
         # Список дат для начисления: пропущенные дни за последние 7 дней + сегодня
         # Для каждого вклада индивидуально проверяем наличие начисления
@@ -131,13 +158,8 @@ def handler(event, context):
                 else:
                     recovery_count += 1
 
-            # Коммитим каждую дату отдельно
-            conn.commit()
-
         overdue_result = check_overdue_loans(cur, accrual_date)
         penalty_result = accrue_penalties(cur, accrual_date)
-
-        conn.commit()
 
         result = {
             'success': True,
@@ -146,12 +168,19 @@ def handler(event, context):
             'skipped': skipped,
             'total_accrued': float(total),
             'savings_accrual_enabled': savings_accrual_enabled,
+            'savings_accrual_stop_date': savings_stop_date,
             'savings_auto_closed': auto_closed,
             'recovery_accruals': recovery_count,
             'overdue': overdue_result,
             'penalties': penalty_result,
             'notifications': 'moved to cron-notify function'
         }
+        cur.execute("""
+            UPDATE cron_run_log
+            SET status='success', result=%s::jsonb, finished_at=NOW()
+            WHERE job_name='daily_loan_penalty' AND run_date=%s
+        """, (json.dumps(result), accrual_date))
+        conn.commit()
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
     except Exception as e:

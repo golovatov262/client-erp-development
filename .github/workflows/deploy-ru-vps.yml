@@ -1,0 +1,66 @@
+name: Deploy CRM to RU_VPS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: client-erp-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure SSH
+        env:
+          RU_VPS_SSH_KEY: ${{ secrets.RU_VPS_SSH_KEY }}
+          RU_VPS_KNOWN_HOSTS: ${{ secrets.RU_VPS_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$RU_VPS_SSH_KEY" > ~/.ssh/ru_vps_key
+          printf '%s\n' "$RU_VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/ru_vps_key ~/.ssh/known_hosts
+
+      - name: Upload application
+        run: |
+          SSH="ssh -i $HOME/.ssh/ru_vps_key -o BatchMode=yes"
+          RSYNC_RSH="$SSH" rsync -az --delete --exclude '__pycache__/' --exclude '*.pyc' backend/ root@109.73.192.20:/opt/client-erp/backend/
+          RSYNC_RSH="$SSH" rsync -az --delete scripts/ root@109.73.192.20:/opt/client-erp/scripts/
+          RSYNC_RSH="$SSH" rsync -az --delete db_migrations/ root@109.73.192.20:/opt/client-erp/db_migrations/
+          RSYNC_RSH="$SSH" rsync -az --delete dist/ root@109.73.192.20:/opt/client-erp/dist/
+          RSYNC_RSH="$SSH" rsync -az backend/server-requirements.txt root@109.73.192.20:/opt/client-erp/backend/server-requirements.txt
+
+      - name: Migrate, restart, and verify
+        run: |
+          ssh -i ~/.ssh/ru_vps_key -o BatchMode=yes root@109.73.192.20 <<'REMOTE'
+          set -euo pipefail
+          chown -R clienterp:clienterp /opt/client-erp/backend /opt/client-erp/scripts /opt/client-erp/db_migrations /opt/client-erp/dist
+          /opt/client-erp/.venv/bin/pip install -q -r /opt/client-erp/backend/server-requirements.txt
+          set -a
+          . /opt/client-erp/.env
+          set +a
+          /opt/client-erp/.venv/bin/python /opt/client-erp/scripts/apply_migrations.py
+          systemctl restart client-erp.service
+          systemctl is-active --quiet client-erp.service
+          curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1:8110/health
+          REMOTE

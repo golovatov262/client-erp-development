@@ -16,9 +16,48 @@ import urllib.parse
 import urllib.error
 import boto3
 import bcrypt
+try:
+    from loan_payment_engine import post_loan_payment
+except ImportError:
+    from backend.loan_payment_engine import post_loan_payment
+
+INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
+
+def handle_integration_secrets(method, body, staff, cur, conn):
+    if not staff or staff.get('role') != 'admin':
+        return {'error': 'Доступ разрешён только администратору', '_status': 403}
+    encryption_key = os.environ.get('APP_ENCRYPTION_KEY', '')
+    if not encryption_key:
+        return {'error': 'На сервере не настроен APP_ENCRYPTION_KEY', '_status': 503}
+    if method == 'GET':
+        cur.execute("SELECT key, updated_at FROM integration_secrets ORDER BY key")
+        saved = {r[0]: r[1].isoformat() if r[1] else None for r in cur.fetchall()}
+        return [{'key': k, 'configured': k in saved, 'updated_at': saved.get(k)} for k in sorted(INTEGRATION_SECRET_KEYS)]
+    if method == 'PUT':
+        values = body.get('values') or {}
+        invalid = set(values) - INTEGRATION_SECRET_KEYS
+        if invalid:
+            return {'error': 'Неизвестные поля: %s' % ', '.join(sorted(invalid))}
+        changed = []
+        for key, value in values.items():
+            value = str(value or '').strip()
+            if not value:
+                continue
+            cur.execute("INSERT INTO integration_secrets(key,encrypted_value,updated_at,updated_by) VALUES(%s,pgp_sym_encrypt(%s,%s),NOW(),%s) ON CONFLICT(key) DO UPDATE SET encrypted_value=EXCLUDED.encrypted_value,updated_at=NOW(),updated_by=EXCLUDED.updated_by", (key,value,encryption_key,staff.get('id')))
+            changed.append(key)
+        conn.commit()
+        return {'success': True, 'changed': changed}
+    if method == 'DELETE':
+        key = str(body.get('key') or '')
+        if key not in INTEGRATION_SECRET_KEYS:
+            return {'error': 'Неизвестное поле'}
+        cur.execute("DELETE FROM integration_secrets WHERE key=%s", (key,))
+        conn.commit()
+        return {'success': True}
+    return {'error': 'Метод не поддерживается'}
 
 def humanize_db_error(e):
     """Переводит технические ошибки БД/кода в понятные пользователю сообщения."""
@@ -855,6 +894,18 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             amt = Decimal(str(safe_float(body['amount'], 'сумма')))
             overpay_strategy = body.get('overpay_strategy', '')
 
+            # С 07.10.2026 все новые платежи идут через единый движок. Историю до
+            # точки сверки с 1С не переигрываем.
+            if date.fromisoformat(str(pd)) >= date(2026, 10, 7):
+                forced = body.get('forced_distribution')
+                result = post_loan_payment(
+                    cur, lid, amt, pd, body.get('description', 'Ручной платёж'),
+                    source='manual', forced=forced)
+                audit_log(cur, staff, 'payment', 'loan', lid, str(lid),
+                          'Платёж %s; единый движок v2' % amt, ip)
+                conn.commit()
+                return result
+
             try:
                 accrue_loan_penalties_until(cur, lid, date.fromisoformat(pd) if isinstance(pd, str) else pd)
             except Exception:
@@ -1297,10 +1348,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'update_payment':
             pid = int(body['payment_id'])
-            cur.execute("SELECT loan_id, amount, principal_part, interest_part, penalty_part, payment_date FROM loan_payments WHERE id=%s" % pid)
+            cur.execute("SELECT loan_id, amount, principal_part, interest_part, penalty_part, payment_date, engine_version FROM loan_payments WHERE id=%s" % pid)
             old = cur.fetchone()
             if not old:
                 return {'error': 'Платёж не найден'}
+            if old[6] == 'v2':
+                return {'error': 'Новый платёж нельзя переигрывать через старый пересчёт. Внесите корректирующий платёж с принудительным распределением.'}
             lid = old[0]
             old_principal = Decimal(str(old[2]))
             new_date = body.get('payment_date', str(old[5]))
@@ -1318,10 +1371,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'delete_payment':
             pid = int(body['payment_id'])
-            cur.execute("SELECT loan_id, principal_part FROM loan_payments WHERE id=%s" % pid)
+            cur.execute("SELECT loan_id, principal_part, engine_version FROM loan_payments WHERE id=%s" % pid)
             old = cur.fetchone()
             if not old:
                 return {'error': 'Платёж не найден'}
+            if old[2] == 'v2':
+                return {'error': 'Новый платёж нельзя удалять с пересчётом истории. Внесите корректирующую операцию.'}
             lid, old_pp = old[0], Decimal(str(old[1]))
             cur.execute("DELETE FROM loan_payments WHERE id=%s" % pid)
             if old_pp > 0:
@@ -8292,7 +8347,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -9454,6 +9509,8 @@ def handler(event, context):
             result = handle_sber_test(params, body)
         elif entity == 'api_keys':
             result = handle_api_keys(method, params, body, staff, cur, conn)
+        elif entity == 'integration_secrets':
+            result = handle_integration_secrets(method, body, staff, cur, conn)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         elif entity == 'agents':

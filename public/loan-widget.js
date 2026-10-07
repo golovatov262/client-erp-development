@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var API_URL = 'https://functions.poehali.dev/0924bff4-d641-4d72-bf91-6be621dfc8d9';
+  var API_URL = new URL('/public-application', window.location.origin).toString();
   var CONTAINER_ID = (window.LOAN_WIDGET_CONTAINER || 'loan-widget');
   var SOURCE = (window.LOAN_WIDGET_SOURCE || (location && location.hostname) || 'website');
 

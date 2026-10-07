@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Client ERP loan overdue and penalty processing at 00:05 MSK
+
+[Timer]
+OnCalendar=*-*-* 00:05:00 Europe/Moscow
+Persistent=false
+RandomizedDelaySec=20
+Unit=client-erp-daily-accrual.service
+
+[Install]
+WantedBy=timers.target

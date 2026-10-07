@@ -2,7 +2,7 @@ import funcUrls from "../../backend/func2url.json";
 
 export const toNum = (v: string | number): number => typeof v === "number" ? v : Number(String(v).replace(",", "."));
 
-const API_URL = funcUrls.api;
+const API_URL = new URL(funcUrls.api, window.location.origin).toString();
 
 type Params = Record<string, string | number | undefined>;
 
@@ -96,6 +96,11 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 
 export const api = {
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
+  integrationSecrets: {
+    list: () => request<IntegrationSecretStatus[]>("GET", { entity: "integration_secrets" }),
+    save: (values: Record<string,string>) => request<{success:boolean;changed:string[]}>("PUT", { entity: "integration_secrets" }, { entity: "integration_secrets", values }),
+    remove: (key:string) => request<{success:boolean}>("DELETE", { entity: "integration_secrets" }, { entity: "integration_secrets", key }),
+  },
 
   members: {
     list: () => request<Member[]>("GET", { entity: "members" }),
@@ -137,7 +142,7 @@ export const api = {
         entity: "loans", action: "schedule", amount, rate, term, schedule_type: scheduleType, start_date: startDate,
       }),
     create: (data: CreateLoanData) => request<{ id: number; schedule: ScheduleItem[]; monthly_payment: number }>("POST", undefined, { entity: "loans", action: "create", ...data }),
-    payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string }) =>
+    payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
@@ -1592,6 +1597,7 @@ export interface BankImapStatus {
     last_sync_error: string;
   }[];
 }
+export interface IntegrationSecretStatus { key:string; configured:boolean; updated_at:string|null }
 
 export interface AgentItem {
   id: number;

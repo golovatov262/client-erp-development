@@ -1,6 +1,6 @@
 import funcUrls from "../../backend/func2url.json";
 
-const API_URL = funcUrls.api;
+const API_URL = new URL(funcUrls.api, window.location.origin).toString();
 
 function getStaffToken(): string {
   return localStorage.getItem("staff_token") || "";

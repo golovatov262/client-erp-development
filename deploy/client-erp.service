@@ -1,0 +1,21 @@
+[Unit]
+Description=Client ERP CRM API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=clienterp
+Group=clienterp
+WorkingDirectory=/opt/client-erp
+EnvironmentFile=/opt/client-erp/.env
+ExecStart=/opt/client-erp/.venv/bin/uvicorn server:app --app-dir /opt/client-erp/backend --host 127.0.0.1 --port 8110 --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/client-erp/data
+
+[Install]
+WantedBy=multi-user.target

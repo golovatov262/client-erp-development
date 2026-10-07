@@ -21,7 +21,7 @@ interface ApiKey {
   usage_count: number;
 }
 
-const BASE_URL = "https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450";
+const BASE_URL = new URL("/api", window.location.origin).toString();
 
 const Code = ({ children }: { children: React.ReactNode }) => (
   <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
