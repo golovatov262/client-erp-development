@@ -35,6 +35,7 @@ interface LoansDetailDialogProps {
   orgs?: Organization[];
   onPayment: () => void;
   onEarlyRepay: () => void;
+  onEditPayment: (payment: LoanPayment) => void;
 }
 
 const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
@@ -176,6 +177,11 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "interest_part", label: "Проценты", render: (p: LoanPayment) => fmt(p.interest_part) },
     { key: "penalty_part", label: "Штрафы", render: (p: LoanPayment) => p.penalty_part > 0 ? fmt(p.penalty_part) : "—" },
     { key: "description", label: "Примечание", render: (p: LoanPayment) => <span className="text-xs text-muted-foreground">{p.description || "—"}</span> },
+    { key: "id", label: "", render: (p: LoanPayment) => (isAdmin || isManager) ? (
+      <button type="button" title="Редактировать платёж" onClick={() => props.onEditPayment(p)} className="p-1 rounded hover:bg-muted">
+        <Icon name="Pencil" size={14} />
+      </button>
+    ) : null },
   ];
 
   return (

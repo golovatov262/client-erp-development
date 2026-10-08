@@ -863,7 +863,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
     elif method == 'POST':
         action = body.get('action', 'create')
         removed_actions = {
-            'modify', 'update_loan', 'update_payment', 'delete_payment',
+            'modify', 'update_loan', 'delete_payment',
             'delete_contract', 'delete_all_payments', 'reapply_payments',
             'fix_schedule', 'recalc_statuses', 'rebuild_schedule',
             'set_holiday', 'cancel_holiday', 'end_holiday_early',
@@ -1324,8 +1324,6 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             old = cur.fetchone()
             if not old:
                 return {'error': 'Платёж не найден'}
-            if old[6] == 'v2':
-                return {'error': 'Новый платёж нельзя переигрывать через старый пересчёт. Внесите корректирующий платёж с принудительным распределением.'}
             lid = old[0]
             old_principal = Decimal(str(old[2]))
             new_date = body.get('payment_date', str(old[5]))
@@ -1334,9 +1332,59 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             new_ip = Decimal(str(body.get('interest_part', float(old[3]))))
             new_pnp = Decimal(str(body.get('penalty_part', float(old[4]))))
             manual = bool(body.get('manual_distribution', False))
+            if new_amount <= 0 or min(new_pp, new_ip, new_pnp) < 0:
+                return {'error': 'Сумма и части платежа должны быть неотрицательными'}
+            if abs(new_amount - new_pp - new_ip - new_pnp) > Decimal('0.01'):
+                return {'error': 'Сумма платежа должна совпадать с суммой основного долга, процентов и штрафов'}
+            if old[6] == 'v2':
+                cur.execute("SELECT balance,status FROM loans WHERE id=%s FOR UPDATE", (lid,))
+                loan_balance, loan_status = cur.fetchone()
+                new_balance = Decimal(str(loan_balance)) + old_principal - new_pp
+                if new_balance < 0:
+                    return {'error': 'Основной долг платежа превышает остаток задолженности'}
+                cur.execute("""SELECT schedule_id,COALESCE(SUM(amount),0) FROM loan_payment_allocations
+                    WHERE payment_id=%s AND schedule_id IS NOT NULL GROUP BY schedule_id""", (pid,))
+                for schedule_id, allocated in cur.fetchall():
+                    cur.execute("UPDATE loan_schedule SET paid_amount=GREATEST(0,COALESCE(paid_amount,0)-%s) WHERE id=%s", (allocated, schedule_id))
+                cur.execute("DELETE FROM loan_payment_allocations WHERE payment_id=%s", (pid,))
+
+                month_end = (date.fromisoformat(str(new_date)).replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+                cur.execute("""SELECT id,payment_date,principal_amount,interest_amount,COALESCE(paid_amount,0)
+                    FROM loan_schedule WHERE loan_id=%s AND payment_date<=%s
+                      AND status NOT IN ('holiday','holiday_pending') ORDER BY payment_no,id FOR UPDATE""", (lid, month_end))
+                schedule_rows = cur.fetchall()
+                touched = set()
+                for component, requested, col in (('interest', new_ip, 3), ('principal', new_pp, 2)):
+                    left = requested
+                    for row in schedule_rows:
+                        if left <= Decimal('0.005'):
+                            break
+                        cur.execute("""SELECT COALESCE(SUM(amount) FILTER (WHERE component='interest'),0),
+                            COALESCE(SUM(amount) FILTER (WHERE component='principal'),0),COALESCE(SUM(amount),0)
+                            FROM loan_payment_allocations WHERE schedule_id=%s""", (row[0],))
+                        alloc_i, alloc_p, alloc_total = map(Decimal, map(str, cur.fetchone()))
+                        legacy_paid = max(Decimal('0'), Decimal(str(row[4])) - alloc_total)
+                        covered = min(legacy_paid, Decimal(str(row[3]))) + alloc_i if component == 'interest' else min(max(legacy_paid - Decimal(str(row[3])), Decimal('0')), Decimal(str(row[2]))) + alloc_p
+                        capacity = max(Decimal('0'), Decimal(str(row[col])) - covered)
+                        take = min(left, capacity)
+                        if take > 0:
+                            cur.execute("INSERT INTO loan_payment_allocations(payment_id,schedule_id,component,amount,allocation_mode) VALUES(%s,%s,%s,%s,'manual')", (pid, row[0], component, take))
+                            cur.execute("UPDATE loan_schedule SET paid_amount=COALESCE(paid_amount,0)+%s,paid_date=%s,payment_id=%s WHERE id=%s", (take, new_date, pid, row[0]))
+                            touched.add(row[0]); left -= take
+                    if left > Decimal('0.005'):
+                        extra_component = 'early_principal' if component == 'principal' else 'interest'
+                        cur.execute("INSERT INTO loan_payment_allocations(payment_id,schedule_id,component,amount,allocation_mode) VALUES(%s,NULL,%s,%s,'manual')", (pid, extra_component, left))
+                cur.execute("""UPDATE loan_schedule SET status=CASE
+                    WHEN COALESCE(paid_amount,0)>=principal_amount+interest_amount-0.005 THEN 'paid'
+                    WHEN COALESCE(paid_amount,0)>0 AND payment_date<%s THEN 'overdue'
+                    WHEN COALESCE(paid_amount,0)>0 THEN 'partial'
+                    WHEN payment_date<%s THEN 'overdue' ELSE 'pending' END
+                    WHERE loan_id=%s AND status NOT IN ('holiday','holiday_pending')""", (new_date, new_date, lid))
+                cur.execute("UPDATE loans SET balance=%s,status=%s,updated_at=NOW() WHERE id=%s", (new_balance, 'closed' if new_balance <= 0 else ('active' if loan_status == 'closed' else loan_status), lid))
             cur.execute("UPDATE loan_payments SET payment_date='%s', amount=%s, principal_part=%s, interest_part=%s, penalty_part=%s, manual_distribution=%s WHERE id=%s" % (
                 new_date, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), manual, pid))
-            recalc_loan_schedule_statuses(cur, lid)
+            if old[6] != 'v2':
+                recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s, штраф: %s%s' % (pid, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), ' (ручное)' if manual else ''), ip)
             conn.commit()
             return {'success': True}

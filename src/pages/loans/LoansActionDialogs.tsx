@@ -21,6 +21,11 @@ interface LoansActionDialogsProps {
   earlyForm: { amount: string; repayment_type: string; date: string };
   setEarlyForm: (v: { amount: string; repayment_type: string; date: string }) => void;
   handleEarlyRepay: () => void;
+  showEditPayment: boolean;
+  setShowEditPayment: (v: boolean) => void;
+  editPayForm: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean };
+  setEditPayForm: (v: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean }) => void;
+  handleEditPayment: () => void;
 }
 
 const LoansActionDialogs = (props: LoansActionDialogsProps) => {
@@ -29,6 +34,8 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
     toNumber(props.payForm.amount) - toNumber(props.payForm.principal) -
     toNumber(props.payForm.interest) - toNumber(props.payForm.penalty)
   ) > 0.01;
+  const editMismatch = Math.abs(toNumber(props.editPayForm.amount) - toNumber(props.editPayForm.principal_part) -
+    toNumber(props.editPayForm.interest_part) - toNumber(props.editPayForm.penalty_part)) > 0.01;
 
   return <>
     <Dialog open={props.showPayment} onOpenChange={props.setShowPayment}>
@@ -75,6 +82,24 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
           </div>
         </div>
         <DialogFooter><Button onClick={props.handleEarlyRepay} disabled={saving || !props.earlyForm.amount || !props.earlyForm.date}>{saving ? "Проведение…" : "Погасить"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={props.showEditPayment} onOpenChange={props.setShowEditPayment}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Редактирование платежа</DialogTitle></DialogHeader>
+        <div className="space-y-2">
+          <div><Label>Дата</Label><Input type="date" value={props.editPayForm.payment_date} onChange={e => props.setEditPayForm({ ...props.editPayForm, payment_date: e.target.value })} /></div>
+          <div><Label>Сумма</Label><Input type="number" value={props.editPayForm.amount} onChange={e => props.setEditPayForm({ ...props.editPayForm, amount: e.target.value })} /></div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><Label>Основной долг</Label><Input type="number" value={props.editPayForm.principal_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, principal_part: e.target.value })} /></div>
+            <div><Label>Проценты</Label><Input type="number" value={props.editPayForm.interest_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, interest_part: e.target.value })} /></div>
+            <div><Label>Штрафы</Label><Input type="number" value={props.editPayForm.penalty_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, penalty_part: e.target.value })} /></div>
+          </div>
+          <div className="rounded-md border bg-amber-50 p-3 text-xs text-amber-800">Распределение будет сохранено вручную. Сумма частей должна совпадать с общей суммой платежа.</div>
+          {editMismatch && <div className="text-xs text-red-600">Сумма частей не совпадает с общей суммой</div>}
+        </div>
+        <DialogFooter><Button onClick={props.handleEditPayment} disabled={saving || editMismatch || !props.editPayForm.payment_date}>Сохранить</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </>;

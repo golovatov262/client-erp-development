@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { toNum, Loan, LoanDetail, Member, Organization, humanizeError } from "@/lib/api";
+import api, { toNum, Loan, LoanDetail, LoanPayment, Member, Organization, humanizeError } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
@@ -68,6 +68,8 @@ const Loans = () => {
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), manual: false, principal: "", interest: "", penalty: "" });
   const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
+  const [showEditPayment, setShowEditPayment] = useState(false);
+  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: true });
   const [exporting, setExporting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -167,6 +169,37 @@ const Loans = () => {
       setShowEarly(false);
       const d = await api.loans.get(detail.id);
       setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEditPayment = (payment: LoanPayment) => {
+    setEditPayForm({
+      payment_id: payment.id, payment_date: payment.payment_date, amount: String(payment.amount),
+      principal_part: String(payment.principal_part), interest_part: String(payment.interest_part),
+      penalty_part: String(payment.penalty_part), manual_distribution: true,
+    });
+    setShowEditPayment(true);
+  };
+
+  const handleEditPayment = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.loans.updatePayment({
+        payment_id: editPayForm.payment_id, payment_date: editPayForm.payment_date,
+        amount: toNum(editPayForm.amount), principal_part: toNum(editPayForm.principal_part),
+        interest_part: toNum(editPayForm.interest_part), penalty_part: toNum(editPayForm.penalty_part),
+        manual_distribution: true,
+      });
+      toast({ title: "Платёж изменён" });
+      setShowEditPayment(false);
+      const updated = await api.loans.get(detail.id);
+      setDetail(updated);
       load();
     } catch (e) {
       toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
@@ -278,6 +311,7 @@ const Loans = () => {
         orgs={orgs}
         onPayment={() => setShowPayment(true)}
         onEarlyRepay={() => setShowEarly(true)}
+        onEditPayment={openEditPayment}
       />
 
       <LoansActionDialogs
@@ -293,6 +327,11 @@ const Loans = () => {
         earlyForm={earlyForm}
         setEarlyForm={setEarlyForm}
         handleEarlyRepay={handleEarlyRepay}
+        showEditPayment={showEditPayment}
+        setShowEditPayment={setShowEditPayment}
+        editPayForm={editPayForm}
+        setEditPayForm={setEditPayForm}
+        handleEditPayment={handleEditPayment}
       />
     </div>
   );

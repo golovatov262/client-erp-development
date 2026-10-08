@@ -146,6 +146,8 @@ export const api = {
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
+    updatePayment: (data: { payment_id: number; payment_date: string; amount: number; principal_part: number; interest_part: number; penalty_part: number; manual_distribution: boolean }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
   },
 
   loanCollateral: {
