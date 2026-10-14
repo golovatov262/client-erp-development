@@ -46,17 +46,18 @@ def _refresh_row(cur, row_id, principal, interest, paid, due, payment_date, paym
         status = 'overdue' if due < payment_date else 'partial'
     else:
         status = 'overdue' if due < payment_date else 'pending'
+    overdue_days = max(0, (payment_date - due).days)
     cur.execute("""UPDATE loan_schedule SET paid_amount=%s, paid_date=CASE WHEN %s>0 THEN %s ELSE paid_date END,
-        status=%s, payment_id=CASE WHEN %s>0 THEN %s ELSE payment_id END WHERE id=%s""",
-        (paid, paid, payment_date, status, paid, payment_id, row_id))
+        status=%s, overdue_days=%s, payment_id=CASE WHEN %s>0 THEN %s ELSE payment_id END WHERE id=%s""",
+        (paid, paid, payment_date, status, overdue_days, paid, payment_id, row_id))
 
 
-def _recalculate_future_in_place(cur, loan_id, balance, payment_date):
+def _recalculate_future_in_place(cur, loan_id, balance, payment_date, include_current=False):
     """Reduce payment while preserving contractual dates, row IDs and term."""
     cur.execute("""SELECT id,payment_date FROM loan_schedule
         WHERE loan_id=%s AND payment_date>%s AND COALESCE(paid_amount,0)=0
           AND status IN ('pending','overdue','partial') ORDER BY payment_no,id FOR UPDATE""",
-        (loan_id, _month_end(payment_date)))
+        (loan_id, payment_date if include_current else _month_end(payment_date)))
     rows = cur.fetchall()
     if not rows or balance <= EPS:
         return None
@@ -82,12 +83,12 @@ def _recalculate_future_in_place(cur, loan_id, balance, payment_date):
     return monthly
 
 
-def _recalculate_future_reduce_term(cur, loan_id, balance, payment_date):
+def _recalculate_future_reduce_term(cur, loan_id, balance, payment_date, include_current=False):
     """Keep the contractual payment and shorten the remaining schedule."""
     cur.execute("""SELECT id,payment_no,payment_date FROM loan_schedule
         WHERE loan_id=%s AND payment_date>%s AND COALESCE(paid_amount,0)=0
           AND status IN ('pending','overdue','partial') ORDER BY payment_no,id FOR UPDATE""",
-        (loan_id, _month_end(payment_date)))
+        (loan_id, payment_date if include_current else _month_end(payment_date)))
     rows = cur.fetchall()
     if not rows or balance <= EPS:
         return None, None
@@ -184,6 +185,7 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
           AND status NOT IN ('paid','holiday','holiday_pending') ORDER BY payment_no,id FOR UPDATE""",
         (loan_id, _month_end(payment_date)))
     rows = [list(r) for r in cur.fetchall()]
+    had_overdue = any(row[5] < payment_date for row in rows)
 
     # Если текущий период уже закрыт крупным досрочным платежом, начисляем
     # проценты только за дни до следующего перевода на уменьшившийся остаток.
@@ -231,9 +233,11 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
             totals['penalty'] += penalty
             remaining -= penalty
     else:
-        # Global waterfall: all due interest, then all due principal, oldest first.
+        # При просрочке текущий период ещё не наступил: сначала закрываем все
+        # просроченные проценты и основной долг, затем остаток идёт досрочно в ОД.
+        allocation_rows = [row for row in rows if row[5] < payment_date] if had_overdue else rows
         for component, column in (('interest', 3), ('principal', 2)):
-            for row in rows:
+            for row in allocation_rows:
                 if remaining <= EPS:
                     break
                 paid_i, paid_p = _covered_parts(cur, row)
@@ -273,9 +277,9 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
                 AND COALESCE(paid_amount,0)=0""", (loan_id, _month_end(payment_date)))
             cur.execute("UPDATE loans SET end_date=%s,updated_at=NOW() WHERE id=%s", (payment_date, loan_id))
         elif early_strategy == 'reduce_term':
-            new_monthly, new_term = _recalculate_future_reduce_term(cur, loan_id, new_balance, payment_date)
+            new_monthly, new_term = _recalculate_future_reduce_term(cur, loan_id, new_balance, payment_date, had_overdue)
         else:
-            new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date)
+            new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date, had_overdue)
     return {'payment_id': payment_id, 'principal_part': float(principal_total),
             'interest_part': float(totals['interest']), 'penalty_part': float(totals['penalty']),
             'early_principal': float(totals['early_principal']), 'unapplied': float(max(remaining, 0)),

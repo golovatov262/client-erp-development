@@ -44,17 +44,17 @@ def make_long_loan(cur, suffix):
 conn = psycopg2.connect(os.environ['DATABASE_URL'])
 cur = conn.cursor()
 
-# Недоплата: сначала проценты двух доступных периодов, основной долг не меняется.
+# При просрочке текущий период не затрагивается: проценты, затем просроченный ОД.
 loan = make_loan(cur, 'UNDER')
 r = post_loan_payment(cur, loan, 15, date(2026, 10, 7), source='bank', source_ref='test-under')
-assert r['interest_part'] == 15.0 and r['principal_part'] == 0.0 and r['new_balance'] == 300.0, r
+assert r['interest_part'] == 10.0 and r['principal_part'] == 5.0 and r['new_balance'] == 295.0, r
 
 # Переплата: проценты -> плановый ОД -> досрочный ОД; даты и число строк сохраняются.
 loan = make_loan(cur, 'OVER')
 cur.execute("SELECT array_agg(payment_date ORDER BY payment_no),count(*) FROM loan_schedule WHERE loan_id=%s", (loan,))
 dates_before, count_before = cur.fetchone()
 r = post_loan_payment(cur, loan, 230, date(2026, 10, 7), source='bank', source_ref='test-over')
-assert (r['interest_part'], r['principal_part'], r['early_principal'], r['new_balance']) == (20.0, 210.0, 10.0, 90.0), r
+assert (r['interest_part'], r['principal_part'], r['early_principal'], r['new_balance']) == (10.0, 220.0, 120.0, 80.0), r
 cur.execute("SELECT array_agg(payment_date ORDER BY payment_no),count(*) FROM loan_schedule WHERE loan_id=%s", (loan,))
 dates_after, count_after = cur.fetchone()
 assert dates_before == dates_after and count_before == count_after
@@ -73,7 +73,7 @@ r = post_loan_payment(cur, loan, 30, date(2026, 10, 7), source='manual',
                       forced={'interest': 0, 'principal': 25, 'penalty': 5})
 assert (r['principal_part'], r['interest_part'], r['penalty_part']) == (25.0, 0.0, 5.0), r
 r2 = post_loan_payment(cur, loan, 20, date(2026, 10, 8), source='manual')
-assert r2['interest_part'] == 20.0, r2
+assert r2['interest_part'] == 10.0 and r2['principal_part'] == 10.0, r2
 
 # Досрочное погашение с сохранением срока уменьшает платёж и сохраняет строки/даты.
 loan = make_loan(cur, 'EARLY-PAYMENT')
@@ -94,7 +94,7 @@ assert row_count == max_no == r['new_term'] and str(max_date) < '2027-02-28'
 
 # Полное досрочное погашение закрывает договор и убирает ненаступившие периоды.
 loan = make_loan(cur, 'EARLY-FULL')
-r = post_loan_payment(cur, loan, 320, date(2026, 10, 7), source='manual', early_strategy='reduce_term')
+r = post_loan_payment(cur, loan, 310, date(2026, 10, 7), source='manual', early_strategy='reduce_term')
 assert r['new_balance'] == 0.0 and r['unapplied'] == 0.0, r
 cur.execute("SELECT status,end_date FROM loans WHERE id=%s", (loan,))
 assert cur.fetchone() == ('closed', date(2026, 10, 7))
@@ -113,6 +113,14 @@ balance_after_first = Decimal(str(r1['new_balance']))
 r2 = post_loan_payment(cur, loan, 100, date(2026, 10, 21), source='bank', source_ref='actual-days-2')
 expected_second_interest = float((balance_after_first * Decimal('0.12') / Decimal('365')).quantize(Decimal('0.01')))
 assert r2['interest_part'] == expected_second_interest, r2
+
+loan = make_loan(cur, 'OVERDUE-PRIORITY')
+r = post_loan_payment(cur, loan, 150, date(2026, 10, 7), source='bank', source_ref='overdue-priority')
+assert (r['interest_part'], r['principal_part'], r['early_principal']) == (10.0, 140.0, 40.0), r
+cur.execute("SELECT status,paid_amount,overdue_days FROM loan_schedule WHERE loan_id=%s AND payment_no=1", (loan,))
+assert cur.fetchone() == ('paid', Decimal('110.00'), 7)
+cur.execute("SELECT status,paid_amount FROM loan_schedule WHERE loan_id=%s AND payment_no=2", (loan,))
+assert cur.fetchone() == ('pending', Decimal('0.00'))
 
 conn.rollback()
 conn.close()
