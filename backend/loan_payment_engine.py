@@ -136,11 +136,11 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         duplicate = cur.fetchone()
         if duplicate:
             return {'payment_id': duplicate[0], 'duplicate': True}
-    cur.execute("SELECT balance,status FROM loans WHERE id=%s FOR UPDATE", (loan_id,))
+    cur.execute("SELECT balance,status,rate FROM loans WHERE id=%s FOR UPDATE", (loan_id,))
     loan = cur.fetchone()
     if not loan:
         raise ValueError('Договор займа не найден')
-    old_balance, loan_status = money(loan[0]), loan[1]
+    old_balance, loan_status, annual_rate = money(loan[0]), loan[1], Decimal(str(loan[2]))
     if loan_status == 'closed' or old_balance <= EPS:
         raise ValueError('Договор займа закрыт')
 
@@ -159,11 +159,47 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
     remaining = amount
     totals = {'interest': Decimal('0'), 'principal': Decimal('0'), 'penalty': Decimal('0'), 'early_principal': Decimal('0')}
 
+    # При крупном досрочном платеже в текущем периоде проценты начисляются
+    # за фактические дни от предыдущей даты графика, а не за полный месяц.
+    cur.execute("""SELECT s.id,s.payment_no,s.payment_date,s.payment_amount,s.principal_amount,
+        s.interest_amount,COALESCE(s.paid_amount,0) FROM loan_schedule s
+        WHERE s.loan_id=%s AND s.payment_date>=%s AND s.payment_date<=%s
+          AND s.status NOT IN ('paid','holiday','holiday_pending')
+        ORDER BY s.payment_no LIMIT 1 FOR UPDATE""", (loan_id, payment_date, _month_end(payment_date)))
+    current_row = cur.fetchone()
+    if current_row and amount > money(current_row[3]) + EPS and money(current_row[6]) <= EPS:
+        cur.execute("""SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s
+            AND status NOT IN ('paid','holiday','holiday_pending')""", (loan_id, current_row[1]))
+        if cur.fetchone()[0] == 0:
+            cur.execute("SELECT MAX(payment_date) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s", (loan_id, current_row[1]))
+            previous_due = cur.fetchone()[0]
+            if previous_due:
+                actual_days = max(0, (payment_date - previous_due).days)
+                actual_interest = money(old_balance * annual_rate / Decimal('100') * Decimal(actual_days) / Decimal('365'))
+                cur.execute("""UPDATE loan_schedule SET interest_amount=%s,payment_amount=principal_amount+%s
+                    WHERE id=%s""", (actual_interest, actual_interest, current_row[0]))
+
     cur.execute("""SELECT id,payment_no,principal_amount,interest_amount,COALESCE(paid_amount,0),payment_date
         FROM loan_schedule WHERE loan_id=%s AND payment_date<=%s
           AND status NOT IN ('paid','holiday','holiday_pending') ORDER BY payment_no,id FOR UPDATE""",
         (loan_id, _month_end(payment_date)))
     rows = [list(r) for r in cur.fetchall()]
+
+    # Если текущий период уже закрыт крупным досрочным платежом, начисляем
+    # проценты только за дни до следующего перевода на уменьшившийся остаток.
+    if not rows:
+        cur.execute("""SELECT MAX(payment_date) FROM loan_payments WHERE loan_id=%s AND id<>%s
+            AND engine_version='v2' AND payment_type IN ('early_partial','early_full')
+            AND payment_date<%s""", (loan_id, payment_id, payment_date))
+        previous_early_date = cur.fetchone()[0]
+        if previous_early_date:
+            actual_days = (payment_date - previous_early_date).days
+            if actual_days > 0:
+                interim_interest = min(remaining, money(old_balance * annual_rate / Decimal('100') * Decimal(actual_days) / Decimal('365')))
+                if interim_interest > EPS:
+                    _insert_allocation(cur, payment_id, None, 'interest', interim_interest, 'automatic')
+                    totals['interest'] += interim_interest
+                    remaining -= interim_interest
 
     if forced:
         # Forced allocation is explicit, but its interest/principal parts are still

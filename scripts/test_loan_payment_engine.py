@@ -101,6 +101,19 @@ assert cur.fetchone() == ('closed', date(2026, 10, 7))
 cur.execute("SELECT count(*) FROM loan_schedule WHERE loan_id=%s AND payment_date>'2026-10-31'", (loan,))
 assert cur.fetchone()[0] == 0
 
+# Досрочное погашение внутри месяца использует фактические дни, а следующий
+# перевод начисляет проценты только за дни между переводами.
+loan = make_long_loan(cur, 'ACTUAL-DAYS')
+cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110,paid_date='2026-09-30' WHERE loan_id=%s AND payment_no=1", (loan,))
+cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
+r1 = post_loan_payment(cur, loan, 280, date(2026, 10, 20), source='bank', source_ref='actual-days-1')
+expected_first_interest = float((Decimal('500') * Decimal('0.12') * Decimal('20') / Decimal('365')).quantize(Decimal('0.01')))
+assert r1['interest_part'] == expected_first_interest, r1
+balance_after_first = Decimal(str(r1['new_balance']))
+r2 = post_loan_payment(cur, loan, 100, date(2026, 10, 21), source='bank', source_ref='actual-days-2')
+expected_second_interest = float((balance_after_first * Decimal('0.12') / Decimal('365')).quantize(Decimal('0.01')))
+assert r2['interest_part'] == expected_second_interest, r2
+
 conn.rollback()
 conn.close()
 print('OK: unified loan payment engine scenarios passed')
