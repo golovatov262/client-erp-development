@@ -3941,6 +3941,106 @@ def generate_shares_pdf(account, transactions, member_name, org=None):
     doc.build(story)
     return buf.getvalue()
 
+def _loan_reference_docx(org):
+    from docx import Document
+    from docx.shared import Cm, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+    section = doc.sections[0]
+    section.top_margin = Cm(1.8)
+    section.bottom_margin = Cm(1.8)
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2)
+    normal = doc.styles['Normal']
+    normal.font.name = 'Times New Roman'
+    normal.font.size = Pt(11)
+
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    heading.add_run(str(org.get('name') or org.get('short_name') or 'КПК «ЭКСПЕРТ ФИНАНС»')).bold = True
+    contacts = []
+    for label, key in (('Тел.', 'phone'), ('Сайт', 'website'), ('Email', 'email')):
+        if org.get(key):
+            contacts.append('%s: %s' % (label, org[key]))
+    if contacts:
+        line = doc.add_paragraph('   '.join(contacts))
+        line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        line.paragraph_format.space_after = Pt(12)
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.add_run('СПРАВКА').bold = True
+    title.paragraph_format.space_after = Pt(12)
+    return doc
+
+
+def _loan_reference_person(member):
+    if member.get('member_type') == 'FL':
+        name = ' '.join(str(member.get(key) or '') for key in ('last_name', 'first_name', 'middle_name')).strip()
+    else:
+        name = member.get('company_name') or ''
+    passport = ('Паспорт гражданина Российской Федерации %s %s выдан %s %s, код подразделения %s' % (
+        member.get('passport_series') or '____', member.get('passport_number') or '______',
+        fmt_date(member.get('passport_issue_date')) if member.get('passport_issue_date') else '____________',
+        member.get('passport_issued_by') or '_________________________',
+        member.get('passport_dept_code') or '___-___'))
+    return name, passport
+
+
+def _finish_loan_reference_docx(doc, org):
+    from docx.shared import Pt
+
+    doc.add_paragraph('Реквизиты организации').runs[0].bold = True
+    for label, value in (
+        ('Наименование', org.get('name') or org.get('short_name')),
+        ('ИНН', org.get('inn')), ('КПП', org.get('kpp')), ('ОГРН', org.get('ogrn')),
+        ('Расчётный счёт', org.get('rs')), ('Банк', org.get('bank_name')),
+        ('БИК', org.get('bik')), ('Корр. счёт', org.get('ks')),
+    ):
+        if value:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(2)
+            p.add_run('%s: ' % label).bold = True
+            p.add_run(str(value))
+    if org.get('director_fio') or org.get('director_position'):
+        doc.add_paragraph('%s __________________ %s' % (
+            org.get('director_position') or 'Директор', org.get('director_fio') or ''))
+    doc.add_paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'))
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def generate_loan_certificate_docx(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty):
+    doc = _loan_reference_docx(org)
+    member_name, passport = _loan_reference_person(member)
+    doc.add_paragraph('%s ИНН %s сообщает сведения об уплате основного долга и процентов клиентом %s (%s) по договору займа № %s от %s за период с %s по %s:' % (
+        org.get('name') or org.get('short_name') or '', org.get('inn') or '', member_name, passport,
+        loan.get('contract_no') or '', fmt_date(loan.get('start_date')), fmt_date(date_from), fmt_date(date_to)))
+    for label, value in (
+        ('Сумма оплаченного основного долга', total_principal),
+        ('Сумма оплаченных процентов', total_interest),
+        ('Сумма иных платежей (штрафы/пени)', total_penalty),
+        ('Остаток задолженности на дату формирования данной справки', loan.get('balance') or 0),
+    ):
+        p = doc.add_paragraph()
+        p.add_run('%s — ' % label)
+        p.add_run('%s руб.' % fmt_money(value)).bold = True
+    return _finish_loan_reference_docx(doc, org)
+
+
+def generate_loan_closure_docx(loan, member, org, closed_date):
+    doc = _loan_reference_docx(org)
+    member_name, passport = _loan_reference_person(member)
+    today = datetime.now().strftime('%d.%m.%Y')
+    doc.add_paragraph('%s сообщает, что задолженность клиента %s (%s) по договору займа № %s от %s по состоянию на %s полностью погашена, договор закрыт %s.' % (
+        org.get('name') or org.get('short_name') or '', member_name, passport,
+        loan.get('contract_no') or '', fmt_date(loan.get('start_date')), today,
+        fmt_date(closed_date) if closed_date else today))
+    return _finish_loan_reference_docx(doc, org)
+
+
 def generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -4681,6 +4781,8 @@ def handle_export(params, cur):
         date_to = params.get('date_to', '')
         if not date_from or not date_to:
             return {'error': 'Не указан период'}
+        if date_from > date_to:
+            return {'error': 'Дата начала периода позже даты окончания'}
         loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
         if not loan:
             return None
@@ -4697,9 +4799,13 @@ def handle_export(params, cur):
         total_principal = sum(float(p.get('principal_part', 0)) for p in payments)
         total_interest = sum(float(p.get('interest_part', 0)) for p in payments)
         total_penalty = sum(float(p.get('penalty_part', 0)) for p in payments)
-        data = generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty)
-        ct = 'application/pdf'
-        fn = 'certificate_%s_%s_%s.pdf' % (loan.get('contract_no', item_id), date_from, date_to)
+        if format_ == 'docx':
+            data = generate_loan_certificate_docx(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty)
+            ct = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            data = generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty)
+            ct = 'application/pdf'
+        fn = 'certificate_%s_%s_%s.%s' % (loan.get('contract_no', item_id), date_from, date_to, 'docx' if format_ == 'docx' else 'pdf')
 
     elif export_type == 'loan_closure':
         loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
@@ -4719,9 +4825,13 @@ def handle_export(params, cur):
         cur.execute("SELECT MAX(payment_date) FROM loan_payments WHERE loan_id=%s" % item_id)
         cd_row = cur.fetchone()
         closed_date = str(cd_row[0]) if cd_row and cd_row[0] else None
-        data = generate_loan_closure_pdf(loan, member, org, closed_date)
-        ct = 'application/pdf'
-        fn = 'closure_%s.pdf' % loan.get('contract_no', item_id)
+        if format_ == 'docx':
+            data = generate_loan_closure_docx(loan, member, org, closed_date)
+            ct = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            data = generate_loan_closure_pdf(loan, member, org, closed_date)
+            ct = 'application/pdf'
+        fn = 'closure_%s.%s' % (loan.get('contract_no', item_id), 'docx' if format_ == 'docx' else 'pdf')
 
     elif export_type == 'share':
         account = query_one(cur, "SELECT * FROM share_accounts WHERE id = %s" % item_id)

@@ -41,71 +41,65 @@ interface LoansDetailDialogProps {
 const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
   const [certFrom, setCertFrom] = useState(loan.start_date || "");
   const [certTo, setCertTo] = useState(new Date().toISOString().slice(0, 10));
-  const [certLoading, setCertLoading] = useState(false);
-  const [closureLoading, setClosureLoading] = useState(false);
+  const [certLoading, setCertLoading] = useState<"pdf" | "docx" | null>(null);
+  const [closureLoading, setClosureLoading] = useState<"pdf" | "docx" | null>(null);
   const { toast } = useToast();
 
-  const downloadCertificate = async () => {
+  const downloadCertificate = async (format: "pdf" | "docx") => {
     if (!certFrom || !certTo) { toast({ title: "Укажите период", variant: "destructive" }); return; }
-    setCertLoading(true);
+    if (certFrom > certTo) { toast({ title: "Дата начала позже даты окончания", variant: "destructive" }); return; }
+    setCertLoading(format);
     try {
-      await api.export.download("loan_certificate", loan.id, "pdf", { date_from: certFrom, date_to: certTo });
+      await api.export.download("loan_certificate", loan.id, format, { date_from: certFrom, date_to: certTo });
       toast({ title: "Справка скачана" });
     } catch {
       toast({ title: "Ошибка формирования справки", variant: "destructive" });
     } finally {
-      setCertLoading(false);
+      setCertLoading(null);
     }
   };
 
-  const downloadClosure = async () => {
-    setClosureLoading(true);
+  const downloadClosure = async (format: "pdf" | "docx") => {
+    setClosureLoading(format);
     try {
-      await api.export.download("loan_closure", loan.id, "pdf");
+      await api.export.download("loan_closure", loan.id, format);
       toast({ title: "Справка скачана" });
     } catch {
       toast({ title: "Ошибка формирования справки", variant: "destructive" });
     } finally {
-      setClosureLoading(false);
+      setClosureLoading(null);
     }
   };
 
   return (
-    <div className="space-y-3">
-      <Card>
-        <CardContent className="p-4">
-          <div className="text-sm font-medium mb-3">Справка о выплаченных процентах за период</div>
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-            <div className="flex-1">
-              <Label className="text-xs">С</Label>
-              <Input type="date" value={certFrom} onChange={e => setCertFrom(e.target.value)} className="h-8 text-sm" />
-            </div>
-            <div className="flex-1">
-              <Label className="text-xs">По</Label>
-              <Input type="date" value={certTo} onChange={e => setCertTo(e.target.value)} className="h-8 text-sm" />
-            </div>
-            <Button size="sm" onClick={downloadCertificate} disabled={certLoading} className="h-8 gap-1.5">
-              <Icon name={certLoading ? "Loader2" : "Download"} size={14} className={certLoading ? "animate-spin" : ""} />
-              {certLoading ? "Формирование..." : "Скачать PDF"}
-            </Button>
+    <div className="space-y-2">
+      <div className="rounded-md border px-3 py-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-48 flex-1 self-center text-sm font-medium">Справка о выплаченных процентах за период</div>
+          <div className="w-[136px]">
+            <Label className="text-xs">С</Label>
+            <Input type="date" value={certFrom} onChange={e => setCertFrom(e.target.value)} className="h-8 px-2 text-xs" />
           </div>
-        </CardContent>
-      </Card>
+          <div className="w-[136px]">
+            <Label className="text-xs">По</Label>
+            <Input type="date" value={certTo} onChange={e => setCertTo(e.target.value)} className="h-8 px-2 text-xs" />
+          </div>
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="outline" onClick={() => downloadCertificate("pdf")} disabled={!!certLoading} className="h-8 px-3" aria-label="Скачать справку о процентах в PDF">PDF</Button>
+            <Button size="sm" variant="outline" onClick={() => downloadCertificate("docx")} disabled={!!certLoading} className="h-8 px-3" aria-label="Скачать справку о процентах в DOCX">DOCX</Button>
+          </div>
+        </div>
+      </div>
       {loan.status === "closed" && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">Справка о погашении займа</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Подтверждение полного погашения задолженности и закрытия договора</div>
-              </div>
-              <Button size="sm" onClick={downloadClosure} disabled={closureLoading} className="h-8 gap-1.5 shrink-0 ml-4">
-                <Icon name={closureLoading ? "Loader2" : "Download"} size={14} className={closureLoading ? "animate-spin" : ""} />
-                {closureLoading ? "Формирование..." : "Скачать PDF"}
-              </Button>
+        <div className="rounded-md border px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">Справка о погашении займа</div>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" onClick={() => downloadClosure("pdf")} disabled={!!closureLoading} className="h-8 px-3" aria-label="Скачать справку о погашении в PDF">PDF</Button>
+              <Button size="sm" variant="outline" onClick={() => downloadClosure("docx")} disabled={!!closureLoading} className="h-8 px-3" aria-label="Скачать справку о погашении в DOCX">DOCX</Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
     </div>
   );
