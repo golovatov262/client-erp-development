@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
@@ -63,6 +63,7 @@ const Loans = () => {
   const [showEarly, setShowEarly] = useState(false);
   const [earlyPreview, setEarlyPreview] = useState<EarlyRepaymentPreview | null>(null);
   const [calculatingEarly, setCalculatingEarly] = useState(false);
+  const earlyFormVersion = useRef(0);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
   const { isAdmin, isManager } = useAuth();
@@ -157,6 +158,7 @@ const Loans = () => {
   };
 
   const updateEarlyForm = (value: typeof earlyForm) => {
+    earlyFormVersion.current += 1;
     setEarlyForm(value);
     setEarlyPreview(null);
   };
@@ -165,13 +167,14 @@ const Loans = () => {
     if (!detail || !earlyForm.date || (earlyForm.mode === "partial" && !(toNum(earlyForm.amount) > 0))) return;
     setCalculatingEarly(true);
     setEarlyPreview(null);
+    const version = earlyFormVersion.current;
     try {
       const quote = await api.loans.previewEarlyRepayment({
         loan_id: detail.id, payment_date: earlyForm.date,
         repayment_type: earlyForm.repayment_type, mode: earlyForm.mode,
         ...(earlyForm.mode === "partial" ? { amount: toNum(earlyForm.amount) } : {}),
       });
-      setEarlyPreview(quote);
+      if (earlyFormVersion.current === version) setEarlyPreview(quote);
     } catch (e) {
       toast({ title: "Не удалось рассчитать", description: humanizeError(e), variant: "destructive" });
     } finally {
@@ -339,7 +342,7 @@ const Loans = () => {
         isManager={isManager}
         orgs={orgs}
         onPayment={() => setShowPayment(true)}
-        onEarlyRepay={() => { setEarlyPreview(null); setShowEarly(true); }}
+        onEarlyRepay={() => { earlyFormVersion.current += 1; setEarlyPreview(null); setShowEarly(true); }}
         onEditPayment={openEditPayment}
       />
 
