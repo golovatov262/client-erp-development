@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { LoanDetail } from "@/lib/api";
+import { EarlyRepaymentPreview, LoanDetail } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const toNumber = (v: string) => Number(String(v || "0").replace(",", ".")) || 0;
@@ -18,8 +18,11 @@ interface LoansActionDialogsProps {
   handlePayment: () => void;
   showEarly: boolean;
   setShowEarly: (v: boolean) => void;
-  earlyForm: { amount: string; repayment_type: string; date: string };
-  setEarlyForm: (v: { amount: string; repayment_type: string; date: string }) => void;
+  earlyForm: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string };
+  setEarlyForm: (v: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string }) => void;
+  earlyPreview: EarlyRepaymentPreview | null;
+  calculatingEarly: boolean;
+  calculateEarly: () => void;
   handleEarlyRepay: () => void;
   showEditPayment: boolean;
   setShowEditPayment: (v: boolean) => void;
@@ -65,9 +68,19 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
         <DialogHeader><DialogTitle>Досрочное погашение</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="text-sm text-muted-foreground">Текущий остаток: {detail ? fmt(detail.balance) : "—"}</div>
-          <div><Label>Сумма</Label><Input type="number" value={props.earlyForm.amount} onChange={e => props.setEarlyForm({ ...props.earlyForm, amount: e.target.value })} /></div>
-          <div><Label>Дата</Label><Input type="date" value={props.earlyForm.date} onChange={e => props.setEarlyForm({ ...props.earlyForm, date: e.target.value })} /></div>
           <div>
+            <Label>Вид погашения</Label>
+            <Select value={props.earlyForm.mode} onValueChange={(v: "partial" | "full") => props.setEarlyForm({ ...props.earlyForm, mode: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="partial">Частичное — прогноз графика</SelectItem>
+                <SelectItem value="full">Полное — сумма к закрытию</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {props.earlyForm.mode === "partial" && <div><Label>Планируемая сумма</Label><Input type="number" min="0.01" step="0.01" value={props.earlyForm.amount} onChange={e => props.setEarlyForm({ ...props.earlyForm, amount: e.target.value })} /></div>}
+          <div><Label>Дата</Label><Input type="date" value={props.earlyForm.date} onChange={e => props.setEarlyForm({ ...props.earlyForm, date: e.target.value })} /></div>
+          {props.earlyForm.mode === "partial" && <div>
             <Label>После погашения</Label>
             <Select value={props.earlyForm.repayment_type} onValueChange={v => props.setEarlyForm({ ...props.earlyForm, repayment_type: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
@@ -76,12 +89,25 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
                 <SelectItem value="reduce_term">Сохранить платёж, сократить срок</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-            Сумма сначала погасит начисленные проценты. Только остаток, направленный на основной долг, изменит график.
-          </div>
+          </div>}
+          {props.earlyPreview && <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm" aria-live="polite">
+            <div className="font-semibold">{props.earlyPreview.is_full ? "Сумма для полного погашения" : "Прогноз после погашения"}: {fmt(props.earlyPreview.amount)}</div>
+            <div>Основной долг: {fmt(props.earlyPreview.principal_part)} · Проценты: {fmt(props.earlyPreview.interest_part)}</div>
+            {props.earlyPreview.penalty_part > 0 && <div>Пени: {fmt(props.earlyPreview.penalty_part)}</div>}
+            {props.earlyPreview.is_full ? <div>Договор будет закрыт {props.earlyPreview.payment_date.split("-").reverse().join(".")}.</div> : <>
+              <div>Остаток долга: {fmt(props.earlyPreview.new_balance)}</div>
+              {props.earlyForm.repayment_type === "reduce_payment" ?
+                <div>Платёж: {fmt(props.earlyPreview.old_monthly)} → {fmt(props.earlyPreview.new_monthly)}. Срок до {props.earlyPreview.new_end_date.split("-").reverse().join(".")}.</div> :
+                <div>Срок: до {props.earlyPreview.old_end_date.split("-").reverse().join(".")} → до {props.earlyPreview.new_end_date.split("-").reverse().join(".")}. Платёж: {fmt(props.earlyPreview.new_monthly)}.</div>}
+              {props.earlyPreview.next_payment_date && <div>Ближайший платёж по новому графику: {fmt(props.earlyPreview.next_payment_amount || 0)} — {props.earlyPreview.next_payment_date.split("-").reverse().join(".")}.</div>}
+            </>}
+            <div className="text-xs text-muted-foreground">Расчёт актуален для выбранной даты при неизменной задолженности.</div>
+          </div>}
         </div>
-        <DialogFooter><Button onClick={props.handleEarlyRepay} disabled={saving || !props.earlyForm.amount || !props.earlyForm.date}>{saving ? "Проведение…" : "Погасить"}</Button></DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={props.calculateEarly} disabled={saving || props.calculatingEarly || !props.earlyForm.date || (props.earlyForm.mode === "partial" && !(toNumber(props.earlyForm.amount) > 0))}>{props.calculatingEarly ? "Расчёт…" : "Рассчитать"}</Button>
+          <Button onClick={props.handleEarlyRepay} disabled={saving || props.calculatingEarly || !props.earlyPreview}>{saving ? "Проведение…" : "Провести погашение"}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 

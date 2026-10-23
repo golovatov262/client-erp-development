@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { toNum, Loan, LoanDetail, LoanPayment, Member, Organization, humanizeError } from "@/lib/api";
+import api, { toNum, Loan, LoanDetail, LoanPayment, Member, Organization, EarlyRepaymentPreview, humanizeError } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
@@ -61,13 +61,15 @@ const Loans = () => {
   const [detail, setDetail] = useState<LoanDetail | null>(null);
   const [showPayment, setShowPayment] = useState(false);
   const [showEarly, setShowEarly] = useState(false);
+  const [earlyPreview, setEarlyPreview] = useState<EarlyRepaymentPreview | null>(null);
+  const [calculatingEarly, setCalculatingEarly] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
   const { isAdmin, isManager } = useAuth();
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), manual: false, principal: "", interest: "", penalty: "" });
-  const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
+  const [earlyForm, setEarlyForm] = useState({ mode: "partial" as "partial" | "full", amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
   const [showEditPayment, setShowEditPayment] = useState(false);
   const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: true });
   const [exporting, setExporting] = useState(false);
@@ -154,23 +156,50 @@ const Loans = () => {
     }
   };
 
+  const updateEarlyForm = (value: typeof earlyForm) => {
+    setEarlyForm(value);
+    setEarlyPreview(null);
+  };
+
+  const calculateEarly = async () => {
+    if (!detail || !earlyForm.date || (earlyForm.mode === "partial" && !(toNum(earlyForm.amount) > 0))) return;
+    setCalculatingEarly(true);
+    setEarlyPreview(null);
+    try {
+      const quote = await api.loans.previewEarlyRepayment({
+        loan_id: detail.id, payment_date: earlyForm.date,
+        repayment_type: earlyForm.repayment_type, mode: earlyForm.mode,
+        ...(earlyForm.mode === "partial" ? { amount: toNum(earlyForm.amount) } : {}),
+      });
+      setEarlyPreview(quote);
+    } catch (e) {
+      toast({ title: "Не удалось рассчитать", description: humanizeError(e), variant: "destructive" });
+    } finally {
+      setCalculatingEarly(false);
+    }
+  };
+
   const handleEarlyRepay = async () => {
-    if (!detail || !earlyForm.amount) return;
+    if (!detail || !earlyPreview) return;
     setSaving(true);
     try {
       const res = await api.loans.earlyRepayment({
-        loan_id: detail.id, amount: toNum(earlyForm.amount),
+        loan_id: detail.id, amount: earlyPreview.amount,
         repayment_type: earlyForm.repayment_type, payment_date: earlyForm.date,
+        full_repayment: earlyForm.mode === "full",
+        expected_preview: earlyPreview,
       });
       const parts = [`Проценты: ${fmt(res.interest_part || 0)}`, `Основной долг: ${fmt(res.principal_part || 0)}`];
       if (res.new_monthly) parts.push(`Новый платёж: ${fmt(res.new_monthly)}`);
       if (res.new_term) parts.push(`Новый срок: ${res.new_term} мес.`);
       toast({ title: "Досрочное погашение выполнено", description: parts.join(" · ") });
       setShowEarly(false);
+      setEarlyPreview(null);
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();
     } catch (e) {
+      setEarlyPreview(null);
       toast({ title: "Ошибка", description: humanizeError(e), variant: "destructive" });
     } finally {
       setSaving(false);
@@ -310,7 +339,7 @@ const Loans = () => {
         isManager={isManager}
         orgs={orgs}
         onPayment={() => setShowPayment(true)}
-        onEarlyRepay={() => setShowEarly(true)}
+        onEarlyRepay={() => { setEarlyPreview(null); setShowEarly(true); }}
         onEditPayment={openEditPayment}
       />
 
@@ -325,7 +354,10 @@ const Loans = () => {
         showEarly={showEarly}
         setShowEarly={setShowEarly}
         earlyForm={earlyForm}
-        setEarlyForm={setEarlyForm}
+        setEarlyForm={updateEarlyForm}
+        earlyPreview={earlyPreview}
+        calculatingEarly={calculatingEarly}
+        calculateEarly={calculateEarly}
         handleEarlyRepay={handleEarlyRepay}
         showEditPayment={showEditPayment}
         setShowEditPayment={setShowEditPayment}

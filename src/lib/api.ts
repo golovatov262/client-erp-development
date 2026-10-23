@@ -144,8 +144,10 @@ export const api = {
     create: (data: CreateLoanData) => request<{ id: number; schedule: ScheduleItem[]; monthly_payment: number }>("POST", undefined, { entity: "loans", action: "create", ...data }),
     payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
-    earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
+    earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string; full_repayment?: boolean; expected_preview?: EarlyRepaymentPreview }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
+    previewEarlyRepayment: (data: { loan_id: number; payment_date: string; repayment_type: string; mode: "full" | "partial"; amount?: number }) =>
+      request<EarlyRepaymentPreview>("POST", undefined, { entity: "loans", action: "early_repayment_preview", ...data }),
     updatePayment: (data: { payment_id: number; payment_date: string; amount: number; principal_part: number; interest_part: number; penalty_part: number; manual_distribution: boolean }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
   },
@@ -920,6 +922,25 @@ export interface PaymentResult {
   current_payment?: number;
   total_amount?: number;
   options?: Record<string, OverpayOption>;
+}
+
+export interface EarlyRepaymentPreview {
+  amount: number;
+  payment_date: string;
+  repayment_type: string;
+  is_full: boolean;
+  principal_part: number;
+  interest_part: number;
+  penalty_part: number;
+  new_balance: number;
+  old_monthly: number;
+  new_monthly: number;
+  old_end_date: string;
+  new_end_date: string;
+  old_term: number;
+  new_term: number;
+  next_payment_date: string | null;
+  next_payment_amount: number | null;
 }
 
 export interface Saving {
