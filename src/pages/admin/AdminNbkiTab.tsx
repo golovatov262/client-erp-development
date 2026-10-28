@@ -175,7 +175,7 @@ const AdminNbkiTab = () => {
     }
   };
 
-  const exportRegistry = async (targetStatus: "review" | "not_in_crm" | "missing_uid") => {
+  const exportRegistry = async (targetStatus: "review" | "not_in_crm" | "missing_uid" | "readiness") => {
     setExporting(true);
     setError("");
     try {
@@ -204,6 +204,7 @@ const AdminNbkiTab = () => {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => void exportRegistry("missing_uid")} disabled={exporting}>Excel · Без УИД</Button>
+          <Button variant="outline" onClick={() => void exportRegistry("readiness")} disabled={exporting}>Excel · Готовность XML</Button>
           <Button variant="outline" onClick={() => void exportRegistry("review")} disabled={exporting}>Excel · Проверить</Button>
           <Button variant="outline" onClick={() => void exportRegistry("not_in_crm")} disabled={exporting}>Excel · Нет в CRM</Button>
           <Button variant="outline" onClick={() => void load()} disabled={loading}>Обновить</Button>

@@ -262,7 +262,7 @@ export const api = {
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
     eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),
-    exportRegistry: (status: "review" | "not_in_crm" | "missing_uid") => request<{ file_name: string; content_base64: string }>("GET", { entity: "nbki", action: "export_registry", status }),
+    exportRegistry: (status: "review" | "not_in_crm" | "missing_uid" | "readiness") => request<{ file_name: string; content_base64: string }>("GET", { entity: "nbki", action: "export_registry", status }),
     importEvents: (mxlGzipBase64: string, fileName: string) => request<NbkiEventImportResult>("POST", undefined, {
       entity: "nbki", action: "import_events", mxl_gzip_base64: mxlGzipBase64, file_name: fileName,
     }),

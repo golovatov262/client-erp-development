@@ -129,3 +129,30 @@ def make_missing_uid_xlsx(cur, org_id: int) -> bytes:
     output = BytesIO()
     book.save(output)
     return output.getvalue()
+
+
+def make_readiness_xlsx(report: dict) -> bytes:
+    """Export a snapshot of current, non-closed loan data gaps for review."""
+    book = Workbook()
+    sheet = book.active
+    sheet.title = 'Готовность НБКИ'
+    sheet.append(('ID договора CRM', 'Номер договора', 'Статус займа', 'УИД',
+                  'Замечания CRM', 'Блокирующие пункты для XML', 'Готовность XML'))
+    for row in report['rows']:
+        sheet.append((row['loan_id'], row['contract_no'], row['status'], row['uid'],
+                      '; '.join(row['crm_issues']), '; '.join(row['missing_fields']),
+                      'Нет' if not row['xml_ready'] else 'Да'))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='24476A')
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, str):
+                cell.data_type = 's'
+    sheet.freeze_panes = 'C2'
+    sheet.auto_filter.ref = sheet.dimensions
+    for index, width in enumerate((18, 30, 17, 46, 80, 110, 20), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    output = BytesIO()
+    book.save(output)
+    return output.getvalue()

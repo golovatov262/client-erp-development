@@ -31,9 +31,9 @@ try:
 except ImportError:
     from backend.nbki_mxl_import import import_mxl
 try:
-    from nbki_excel import make_registry_xlsx, make_missing_uid_xlsx
+    from nbki_excel import make_registry_xlsx, make_missing_uid_xlsx, make_readiness_xlsx
 except ImportError:
-    from backend.nbki_excel import make_registry_xlsx, make_missing_uid_xlsx
+    from backend.nbki_excel import make_registry_xlsx, make_missing_uid_xlsx, make_readiness_xlsx
 try:
     from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report
 except ImportError:
@@ -9708,9 +9708,10 @@ def handle_nbki(method, params, body, staff, cur, conn):
             return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'export_registry':
         status = params.get('status', 'review')
-        if status not in ('review', 'not_in_crm', 'missing_uid'):
+        if status not in ('review', 'not_in_crm', 'missing_uid', 'readiness'):
             return {'_status': 400, 'error': 'Неверный статус выгрузки'}
         content = (make_missing_uid_xlsx(cur, org_id) if status == 'missing_uid'
+                   else make_readiness_xlsx(readiness_report(cur, org_id)) if status == 'readiness'
                    else make_registry_xlsx(cur, org_id, status))
         return {'file_name': f'nbki_{status}_{date.today().isoformat()}.xlsx',
                 'content_base64': base64.b64encode(content).decode('ascii')}
