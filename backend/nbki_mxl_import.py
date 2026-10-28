@@ -100,6 +100,11 @@ def parse_mxl(raw: bytes) -> dict:
         if any((r['contract_no'], r['nbki_contract_no'], r['role'], _norm(r['subject_name']), r['deal_date'],
                 r['original_amount']) != identity for r in group[1:]):
             raise ValueError('Один УИД имеет разные реквизиты в MXL')
+        if first['role'] == 'guarantor':
+            guarantee_fields = tuple(first['cells'].get(str(col)) for col in (157, 158, 159, 160, 162))
+            if any(tuple(r['cells'].get(str(col)) for col in (157, 158, 159, 160, 162)) != guarantee_fields
+                   for r in group[1:]):
+                raise ValueError('Один УИД поручительства имеет разные суммы или даты в MXL')
         deals[uid] = {**first, 'first_event_time': min(r['event_time'] for r in group),
                       'last_event_time': max(r['event_time'] for r in group)}
     borrower_by_number = defaultdict(set)
@@ -148,9 +153,80 @@ def _match_borrower(cur, org_id: int, deal: dict) -> tuple[int | None, str, str 
     return loan_id, 'matched', None
 
 
+def _same_guarantor_name(source_name: str, existing_name: str | None) -> bool:
+    if not existing_name:
+        return False
+    a, b = _norm(source_name), _norm(existing_name)
+    if a in b or b in a:
+        return True
+    def tokens(value: str) -> set[str]:
+        return set(re.findall(r'[А-ЯA-Z0-9]+', value)) - {'ООО', 'АО', 'ПАО', 'ИП'}
+    return bool(tokens(a)) and tokens(a) == tokens(b)
+
+
+def _sync_guarantee(cur, org_id: int, source_id: int, deal: dict) -> str:
+    cells = deal['cells']
+    if cells.get('162') != deal['uid']:
+        return 'pending'
+    amount = _amount(cells.get('157'))
+    start, end = _date(cells.get('159')), _date(cells.get('160'))
+    currency = 'RUB' if cells.get('158') == 'руб.' else cells.get('158')
+    if amount is None or start is None or end is None or not currency or len(currency) != 3:
+        return 'pending'
+    cur.execute('SELECT id FROM loans WHERE org_id=%s AND contract_no=%s',
+                (org_id, deal['contract_no']))
+    loans = cur.fetchall()
+    if len(loans) != 1:
+        return 'pending'
+    loan_id = loans[0][0]
+    cur.execute("""SELECT id, pledger_name, description, nbki_guarantee_uid,
+                          nbki_guarantee_amount, nbki_guarantee_currency,
+                          nbki_guarantee_start, nbki_guarantee_end
+                   FROM loan_collateral WHERE loan_id=%s AND collateral_type=%s""",
+                (loan_id, 'Поручительство'))
+    collateral = cur.fetchall()
+    named = [item for item in collateral if _same_guarantor_name(deal['subject_name'], item[1])
+             or _same_guarantor_name(deal['subject_name'], item[2])]
+    if len(named) != 1:
+        # A new guarantee is created only when the borrower itself is verified.
+        cur.execute("""SELECT loan_id FROM nbki_event_deals WHERE org_id=%s
+                       AND contract_no=%s AND role='borrower' AND match_status='matched'""",
+                    (org_id, deal['contract_no']))
+        borrower = cur.fetchone()
+        if collateral or not borrower or borrower[0] != loan_id:
+            return 'pending'
+        cur.execute("""INSERT INTO loan_collateral
+            (loan_id,collateral_type,pledger_name,description,nbki_guarantee_uid,
+             nbki_guarantee_amount,nbki_guarantee_currency,nbki_guarantee_start,
+             nbki_guarantee_end,nbki_event_source_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (loan_id, 'Поручительство', deal['subject_name'], 'По отчету событий 1С',
+             deal['uid'], amount, currency, start, end, source_id))
+        return 'created'
+    item = named[0]
+    if any(current is not None and current != incoming for current, incoming in
+           ((item[3], deal['uid']), (item[4], amount), (item[5], currency),
+            (item[6], start), (item[7], end))):
+        return 'pending'
+    if all((item[1], item[3], item[4], item[5], item[6], item[7])):
+        return 'unchanged'
+    cur.execute("""UPDATE loan_collateral SET
+        pledger_name=COALESCE(NULLIF(pledger_name,''),%s),
+        nbki_guarantee_uid=COALESCE(nbki_guarantee_uid,%s),
+        nbki_guarantee_amount=COALESCE(nbki_guarantee_amount,%s),
+        nbki_guarantee_currency=COALESCE(nbki_guarantee_currency,%s),
+        nbki_guarantee_start=COALESCE(nbki_guarantee_start,%s),
+        nbki_guarantee_end=COALESCE(nbki_guarantee_end,%s),
+        nbki_event_source_id=COALESCE(nbki_event_source_id,%s), updated_at=NOW()
+        WHERE id=%s""",
+        (deal['subject_name'], deal['uid'], amount, currency, start, end, source_id, item[0]))
+    return 'updated'
+
+
 def import_mxl(conn, raw: bytes, original_name: str) -> dict:
     source = parse_mxl(raw)
     statuses = Counter()
+    guarantee_results = Counter()
     with conn.cursor() as cur:
         org_id = resolve_source_org_id(cur)
         cur.execute("""INSERT INTO nbki_event_sources
@@ -195,11 +271,17 @@ def import_mxl(conn, raw: bytes, original_name: str) -> dict:
                  deal['deal_date'], deal['original_amount'], loan_id, status, reason,
                  deal['first_event_time'], deal['last_event_time'], source_id))
             statuses[status] += 1
+        for deal in source['deals'].values():
+            if deal['role'] == 'guarantor':
+                guarantee_results[_sync_guarantee(cur, org_id, source_id, deal)] += 1
     return {'source_id': source_id, 'rows': len(source['rows']),
             'borrower_uids': sum(d['role'] == 'borrower' for d in source['deals'].values()),
             'guarantor_uids': sum(d['role'] == 'guarantor' for d in source['deals'].values()),
             'matched': statuses['matched'], 'review': statuses['review'],
             'not_in_crm': statuses['not_in_crm'],
+            'guarantees_updated': guarantee_results['updated'],
+            'guarantees_created': guarantee_results['created'],
+            'guarantees_pending': guarantee_results['pending'],
             'acceptance_basis': 'operator_assumed',
             'first_event_time': source['first_event_time'].isoformat(),
             'last_event_time': source['last_event_time'].isoformat()}

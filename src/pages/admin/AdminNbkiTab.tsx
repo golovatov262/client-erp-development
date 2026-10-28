@@ -48,6 +48,7 @@ const AdminNbkiTab = () => {
   const [xmlFiles, setXmlFiles] = useState<File[]>([]);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
   const [eventFile, setEventFile] = useState<File | null>(null);
   const [eventImportResult, setEventImportResult] = useState<NbkiEventImportResult | null>(null);
@@ -109,6 +110,26 @@ const AdminNbkiTab = () => {
     }
   };
 
+  const exportRegistry = async (targetStatus: "review" | "not_in_crm") => {
+    setExporting(true);
+    setError("");
+    try {
+      const { file_name, content_base64 } = await api.nbki.exportRegistry(targetStatus);
+      const binary = atob(content_base64);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file_name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(humanizeError(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -116,7 +137,11 @@ const AdminNbkiTab = () => {
           <h2 className="text-lg font-semibold">НБКИ · Эксперт Финанс</h2>
           <p className="text-sm text-muted-foreground">Исторические УИД и результаты сопоставления с договорами CRM</p>
         </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>Обновить</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void exportRegistry("review")} disabled={exporting}>Excel · Проверить</Button>
+          <Button variant="outline" onClick={() => void exportRegistry("not_in_crm")} disabled={exporting}>Excel · Нет в CRM</Button>
+          <Button variant="outline" onClick={() => void load()} disabled={loading}>Обновить</Button>
+        </div>
       </div>
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
@@ -147,7 +172,7 @@ const AdminNbkiTab = () => {
           <p className="text-sm text-muted-foreground">События хранятся отдельно от XML. По вашему указанию они считаются принятыми для учета в CRM, но это не подтверждение НБКИ: без квитанции и проверки подписи фактический прием неизвестен. Суммы, даты и платежи в договорах не перезаписываются.</p>
           <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".mxl" onChange={event => setEventFile(event.target.files?.[0] || null)} />
           <Button disabled={!eventFile || importing} onClick={() => void importEventFile()}>{importing ? "Сопоставляем…" : "Импортировать события"}</Button>
-          {eventImportResult && <p role="status" className="text-sm">Обработано {eventImportResult.rows} событий: {eventImportResult.borrower_uids} УИД заемщиков, {eventImportResult.guarantor_uids} УИД поручителей. Сопоставлено {eventImportResult.matched}, требуют проверки {eventImportResult.review}, нет в CRM {eventImportResult.not_in_crm}.</p>}
+          {eventImportResult && <p role="status" className="text-sm">Обработано {eventImportResult.rows} событий: {eventImportResult.borrower_uids} УИД заемщиков, {eventImportResult.guarantor_uids} УИД поручителей. Сопоставлено {eventImportResult.matched}, требуют проверки {eventImportResult.review}, нет в CRM {eventImportResult.not_in_crm}. Поручительства: дополнено {eventImportResult.guarantees_updated}, добавлено {eventImportResult.guarantees_created}, требуют сверки {eventImportResult.guarantees_pending}.</p>}
         </CardContent>
       </Card>
 

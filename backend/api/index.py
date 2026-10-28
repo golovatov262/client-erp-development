@@ -30,6 +30,10 @@ try:
     from nbki_mxl_import import import_mxl
 except ImportError:
     from backend.nbki_mxl_import import import_mxl
+try:
+    from nbki_excel import make_registry_xlsx
+except ImportError:
+    from backend.nbki_excel import make_registry_xlsx
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -8078,6 +8082,8 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         return query_rows(cur, """
             SELECT id, loan_id, collateral_type, pledger_name, description, collateral_value, identifier,
+                   nbki_guarantee_uid, nbki_guarantee_amount, nbki_guarantee_currency,
+                   nbki_guarantee_start, nbki_guarantee_end, nbki_event_source_id,
                    created_at, updated_at
             FROM loan_collateral
             WHERE loan_id=%s
@@ -9664,6 +9670,13 @@ def handle_nbki(method, params, body, staff, cur, conn):
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
+    if action == 'export_registry':
+        status = params.get('status', 'review')
+        if status not in ('review', 'not_in_crm'):
+            return {'_status': 400, 'error': 'Неверный статус выгрузки'}
+        content = make_registry_xlsx(cur, org_id, status)
+        return {'file_name': f'nbki_{status}_{date.today().isoformat()}.xlsx',
+                'content_base64': base64.b64encode(content).decode('ascii')}
     if action == 'import_events':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

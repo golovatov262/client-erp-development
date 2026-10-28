@@ -60,6 +60,9 @@ export type NbkiEventImportResult = {
   review: number;
   not_in_crm: number;
   acceptance_basis: "operator_assumed";
+  guarantees_updated: number;
+  guarantees_created: number;
+  guarantees_pending: number;
 };
 
 export type NbkiDeal = {
@@ -183,6 +186,7 @@ export const api = {
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
     eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),
+    exportRegistry: (status: "review" | "not_in_crm") => request<{ file_name: string; content_base64: string }>("GET", { entity: "nbki", action: "export_registry", status }),
     importEvents: (mxlGzipBase64: string, fileName: string) => request<NbkiEventImportResult>("POST", undefined, {
       entity: "nbki", action: "import_events", mxl_gzip_base64: mxlGzipBase64, file_name: fileName,
     }),
@@ -833,6 +837,12 @@ export interface LoanCollateral {
   description?: string;
   collateral_value?: number;
   identifier?: string;
+  nbki_guarantee_uid?: string | null;
+  nbki_guarantee_amount?: number | null;
+  nbki_guarantee_currency?: string | null;
+  nbki_guarantee_start?: string | null;
+  nbki_guarantee_end?: string | null;
+  nbki_event_source_id?: number | null;
   created_at?: string;
   updated_at?: string;
 }

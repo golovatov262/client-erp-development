@@ -29,6 +29,7 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 const fmt = (n?: number) => n === undefined || n === null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
+const fmtDate = (value?: string | null) => value ? value.slice(0, 10).split("-").reverse().join(".") : "—";
 
 const LoanCollateralTab = ({ loanId }: Props) => {
   const [items, setItems] = useState<LoanCollateral[]>([]);
@@ -203,6 +204,12 @@ const LoanCollateralTab = ({ loanId }: Props) => {
                   {item.pledger_name && <div className="font-medium text-sm">{item.pledger_name}</div>}
                   {item.description && <div className="text-xs text-muted-foreground">{item.description}</div>}
                   {item.identifier && <div className="text-xs text-muted-foreground">Идентификатор: {item.identifier}</div>}
+                  {item.collateral_type === "Поручительство" && item.nbki_guarantee_uid && <div className="space-y-0.5 rounded border px-2 py-1.5 text-xs">
+                    <div>УИД поручительства: <span className="break-all font-mono">{item.nbki_guarantee_uid}</span></div>
+                    {item.nbki_guarantee_amount != null && <div>Размер ответственности: {fmt(item.nbki_guarantee_amount)}</div>}
+                    <div>Срок: {fmtDate(item.nbki_guarantee_start)} — {fmtDate(item.nbki_guarantee_end)}</div>
+                    <div className="text-muted-foreground">Данные отчёта 1С; приём НБКИ по этому файлу не подтверждён квитанцией</div>
+                  </div>}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(item)}>
