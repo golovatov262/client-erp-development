@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiDeal, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiDeal, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,20 @@ const receiptLabel: Record<string, string> = {
   unknown: "Квитанция не загружена",
 };
 
+const toBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return btoa(binary);
+};
+
+const gzipFile = async (file: File): Promise<string> => {
+  const stream = file.stream().pipeThrough(new CompressionStream("gzip"));
+  return toBase64(await new Response(stream).arrayBuffer());
+};
+
 const AdminNbkiTab = () => {
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [deals, setDeals] = useState<NbkiDeal[]>([]);
@@ -27,6 +41,10 @@ const AdminNbkiTab = () => {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [xmlFiles, setXmlFiles] = useState<File[]>([]);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -48,6 +66,24 @@ const AdminNbkiTab = () => {
 
   useEffect(() => { void load(); }, [status, offset]);
 
+  const importFiles = async () => {
+    if (!xmlFiles.length) return;
+    setImporting(true);
+    setError("");
+    setImportResult(null);
+    try {
+      const xml = await Promise.all(xmlFiles.map(gzipFile));
+      const receipts = await Promise.all(receiptFiles.map(async file => toBase64(await file.arrayBuffer())));
+      const result = await api.nbki.importHistorical(xml, receipts);
+      setImportResult(result);
+      await load();
+    } catch (e) {
+      setError(humanizeError(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -59,6 +95,26 @@ const AdminNbkiTab = () => {
       </div>
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Загрузить историю из 1С</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">Выберите исходные XML и расшифрованные ZIP-квитанции к ним. Импорт сопоставит УИД, сохранит события и покажет расхождения. Подпись квитанций проверяется отдельно через CryptoPro.</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm">XML-файлы
+              <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".xml,text/xml,application/xml" multiple onChange={event => setXmlFiles(Array.from(event.target.files || []))} />
+            </label>
+            <label className="space-y-1 text-sm">ZIP-квитанции
+              <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".zip,application/zip" multiple onChange={event => setReceiptFiles(Array.from(event.target.files || []))} />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={!xmlFiles.length || importing} onClick={() => void importFiles()}>{importing ? "Сопоставляем…" : "Импортировать и сопоставить"}</Button>
+            <span className="text-xs text-muted-foreground">Выбрано: {xmlFiles.length} XML, {receiptFiles.length} квитанций</span>
+          </div>
+          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров не найдены в CRM. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from io import BytesIO
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter, defaultdict
@@ -157,8 +158,9 @@ def parse_source_xml(raw: bytes) -> dict:
             "xml_gzip": gzip.compress(raw), "deals": deals, "events": events}
 
 
-def parse_receipt_zip(path: Path) -> dict:
-    with zipfile.ZipFile(path) as archive:
+def parse_receipt_zip(payload: bytes | Path) -> dict:
+    source = payload if isinstance(payload, Path) else BytesIO(payload)
+    with zipfile.ZipFile(source) as archive:
         names = archive.namelist()
         xml_names = [name for name in names if name.lower().endswith(".xml")]
         if len(xml_names) != 1 or xml_names[0] + ".sig" not in names:
@@ -218,12 +220,14 @@ def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | No
     return loan_id, "matched", None
 
 
-def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> dict:
-    files = sorted((parse_source_xml(p.read_bytes()) for p in xml_paths),
+def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[bytes]) -> dict:
+    files = sorted((parse_source_xml(raw) for raw in xml_payloads),
                    key=lambda item: item["document_time"])
     receipts = {}
-    for receipt_path in receipt_paths:
-        item = parse_receipt_zip(receipt_path)
+    for receipt_payload in receipt_payloads:
+        item = parse_receipt_zip(receipt_payload)
+        if item["reg_number"] not in {source["reg_number"] for source in files}:
+            raise ValueError("Квитанция относится к другому XML")
         previous = receipts.get(item["reg_number"])
         if previous is None or item["kind"] > previous["kind"]:
             receipts[item["reg_number"]] = item
@@ -260,10 +264,14 @@ def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> 
                  subjects_count, events_count, receipt_status, events_accepted, events_rejected, receipt_time)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (reg_number) DO UPDATE SET
-                    receipt_status=EXCLUDED.receipt_status,
-                    events_accepted=EXCLUDED.events_accepted,
-                    events_rejected=EXCLUDED.events_rejected,
-                    receipt_time=EXCLUDED.receipt_time
+                    receipt_status=CASE
+                        WHEN nbki_source_files.receipt_status IN ('accepted', 'partial')
+                            THEN nbki_source_files.receipt_status
+                        WHEN EXCLUDED.receipt_status='unknown' THEN nbki_source_files.receipt_status
+                        ELSE EXCLUDED.receipt_status END,
+                    events_accepted=COALESCE(EXCLUDED.events_accepted, nbki_source_files.events_accepted),
+                    events_rejected=COALESCE(EXCLUDED.events_rejected, nbki_source_files.events_rejected),
+                    receipt_time=COALESCE(EXCLUDED.receipt_time, nbki_source_files.receipt_time)
                 RETURNING id""", (org_id, SOURCE_ID, reg, source["schema_version"],
                     source["document_time"], source["xml_sha256"], source["xml_gzip"], source["subjects_count"],
                     source["events_count"], receipt["status"] if receipt else "unknown",
@@ -292,11 +300,16 @@ def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> 
                      last_event_time=CASE WHEN nbki_deals.last_event_time IS NULL
                          OR EXCLUDED.last_event_time > nbki_deals.last_event_time
                          THEN EXCLUDED.last_event_time ELSE nbki_deals.last_event_time END,
-                     last_source_file_id=EXCLUDED.last_source_file_id,
+                     last_source_file_id=CASE WHEN nbki_deals.last_event_time IS NULL
+                         OR EXCLUDED.last_event_time >= nbki_deals.last_event_time
+                         THEN EXCLUDED.last_source_file_id ELSE nbki_deals.last_source_file_id END,
                      loan_id=COALESCE(nbki_deals.loan_id, EXCLUDED.loan_id),
                      match_status=EXCLUDED.match_status, match_reason=EXCLUDED.match_reason,
                      reported_accepted=nbki_deals.reported_accepted OR EXCLUDED.reported_accepted,
                      accepted_file_id=CASE WHEN EXCLUDED.reported_accepted
+                         AND (nbki_deals.accepted_file_id IS NULL OR
+                              (SELECT document_time FROM nbki_source_files WHERE id=nbki_deals.accepted_file_id)
+                              <= (SELECT document_time FROM nbki_source_files WHERE id=EXCLUDED.accepted_file_id))
                          THEN EXCLUDED.accepted_file_id ELSE nbki_deals.accepted_file_id END,
                      updated_at=NOW()
                     RETURNING id""", (org_id, deal.uid, deal.contract_no, deal.subject_type,
@@ -316,7 +329,7 @@ def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> 
                      operation_code, reported_accepted)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (source_file_id, order_num) DO UPDATE SET
-                        reported_accepted=EXCLUDED.reported_accepted""",
+                        reported_accepted=nbki_file_events.reported_accepted OR EXCLUDED.reported_accepted""",
                     (file_id, event["order_num"], deal_ids.get(event["uid"]),
                      event["event_name"], event["event_time"], event["operation_code"],
                      bool(receipt and receipt["kind"] == 2 and receipt["status"] == "accepted")))
@@ -327,6 +340,11 @@ def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> 
             "reported_accepted_deals": len({uid for f in files if receipts.get(f["reg_number"], {}).get("kind") == 2
                                             and receipts[f["reg_number"]]["status"] == "accepted"
                                             for uid in f["deals"]})}
+
+
+def import_documents(conn, xml_paths: list[Path], receipt_paths: list[Path]) -> dict:
+    return import_payloads(conn, [path.read_bytes() for path in xml_paths],
+                           [path.read_bytes() for path in receipt_paths])
 
 
 def main() -> None:

@@ -45,6 +45,15 @@ export type NbkiDeal = {
 };
 
 export type NbkiDealsPage = { total: number; rows: NbkiDeal[] };
+export type NbkiImportResult = {
+  success: boolean;
+  files: number;
+  unique_deals: number;
+  matched: number;
+  review: number;
+  not_in_crm: number;
+  reported_accepted_deals: number;
+};
 
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
@@ -139,6 +148,9 @@ export const api = {
   nbki: {
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
+    importHistorical: (xml: string[], receipts: string[]) => request<NbkiImportResult>("POST", undefined, {
+      entity: "nbki", action: "import", xml_gzip_base64: xml, receipt_zip_base64: receipts,
+    }),
   },
   integrationSecrets: {
     list: () => request<IntegrationSecretStatus[]>("GET", { entity: "integration_secrets" }),

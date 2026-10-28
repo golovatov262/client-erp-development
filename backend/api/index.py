@@ -6,9 +6,11 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
 import base64
+import binascii
 import hashlib
 import secrets
 import ssl
+import zlib
 import tempfile
 from io import BytesIO
 import urllib.request
@@ -20,6 +22,10 @@ try:
     from loan_payment_engine import post_loan_payment
 except ImportError:
     from backend.loan_payment_engine import post_loan_payment
+try:
+    from nbki_import import import_payloads
+except ImportError:
+    from backend.nbki_import import import_payloads
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9633,16 +9639,48 @@ def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
     return {'error': 'Неизвестное действие'}
 
 
-def handle_nbki(params, staff, cur):
+def handle_nbki(method, params, body, staff, cur, conn):
     """Read-only view of historical NBKI import and contract reconciliation."""
     if staff.get('role') != 'admin':
         return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
-    action = params.get('action', 'summary')
+    action = params.get('action') or body.get('action', 'summary')
     cur.execute('SELECT id FROM organizations WHERE inn=%s', ('4307012081',))
     org = cur.fetchone()
     if not org:
         return {'error': 'Организация Эксперт Финанс не найдена'}
     org_id = org[0]
+    if action == 'import':
+        if method != 'POST':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        try:
+            xml_items = body.get('xml_gzip_base64') or []
+            receipt_items = body.get('receipt_zip_base64') or []
+            if not isinstance(xml_items, list) or not 1 <= len(xml_items) <= 10:
+                raise ValueError('Выберите от 1 до 10 XML-файлов')
+            if not isinstance(receipt_items, list) or len(receipt_items) > 20:
+                raise ValueError('Слишком много квитанций')
+            xml_payloads = []
+            for item in xml_items:
+                packed = base64.b64decode(item, validate=True)
+                if len(packed) > 2 * 1024 * 1024:
+                    raise ValueError('Сжатый XML превышает 2 МБ')
+                decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                raw = decoder.decompress(packed, 25 * 1024 * 1024 + 1)
+                if len(raw) > 25 * 1024 * 1024 or not decoder.eof or decoder.unused_data:
+                    raise ValueError('XML превышает 25 МБ или поврежден')
+                xml_payloads.append(raw)
+            receipts = []
+            for item in receipt_items:
+                raw = base64.b64decode(item, validate=True)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise ValueError('Квитанция превышает 2 МБ')
+                receipts.append(raw)
+            result = import_payloads(conn, xml_payloads, receipts)
+            conn.commit()
+            return {'success': True, **result}
+        except (ValueError, TypeError, zlib.error, binascii.Error) as exc:
+            conn.rollback()
+            return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'summary':
         cur.execute("""SELECT COUNT(*),
             COUNT(*) FILTER (WHERE match_status='matched'),
@@ -9775,7 +9813,7 @@ def handler(event, context):
         elif entity == 'integration_secrets':
             result = handle_integration_secrets(method, body, staff, cur, conn)
         elif entity == 'nbki':
-            result = handle_nbki(params, staff, cur)
+            result = handle_nbki(method, params, body, staff, cur, conn)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         elif entity == 'agents':
