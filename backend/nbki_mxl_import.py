@@ -172,11 +172,12 @@ def import_mxl(conn, raw: bytes, original_name: str) -> dict:
                  row['contract_no'], row['nbki_contract_no'], row['uid'], row['subject_name'], Json(row['cells'])))
         for uid, deal in source['deals'].items():
             loan_id, status, reason = _match_borrower(cur, org_id, deal)
-            cur.execute('SELECT contract_no, nbki_contract_no, role, subject_name, loan_id FROM nbki_event_deals WHERE org_id=%s AND uid=%s',
+            cur.execute('SELECT contract_no, nbki_contract_no, role, subject_name, loan_id, deal_date, original_amount FROM nbki_event_deals WHERE org_id=%s AND uid=%s',
                         (org_id, uid))
             existing = cur.fetchone()
             if existing and (existing[0] != deal['contract_no'] or existing[1] != deal['nbki_contract_no'] or
                              existing[2] != deal['role'] or _norm(existing[3]) != _norm(deal['subject_name']) or
+                             existing[5] != deal['deal_date'] or existing[6] != deal['original_amount'] or
                              (existing[4] is not None and loan_id is not None and existing[4] != loan_id)):
                 raise ValueError('УИД уже связан с другими реквизитами в прежнем MXL')
             cur.execute("""INSERT INTO nbki_event_deals
