@@ -13,11 +13,15 @@ import re
 import subprocess
 from pathlib import Path
 
+from nbki_validate_xml import validate
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('xml', type=Path, help='Уже проверенный XML ГУТДФ')
     parser.add_argument('--sha256', required=True, help='SHA-256 неизменяемого XML из CRM')
+    parser.add_argument('--schema-zip', required=True, type=Path,
+                        help='Официальный архив XSD 5.1 Банка России')
     parser.add_argument('--thumbprint', required=True, help='Отпечаток локального сертификата')
     parser.add_argument('--cryptcp', default='cryptcp', help='Путь к утилите cryptcp')
     args = parser.parse_args()
@@ -35,6 +39,10 @@ def main() -> None:
     digest = hashlib.sha256(content).hexdigest()
     if digest.lower() != args.sha256.lower():
         parser.error('SHA-256 файла не совпадает с журналом CRM; подпись отменена')
+    try:
+        validate(xml, args.schema_zip)
+    except ValueError as exc:
+        parser.error(f'XML не прошел проверку XSD/структуры: {exc}')
     signature = xml.with_name(xml.name + '.p7s')
     if signature.exists():
         parser.error('Подпись уже существует; удалите или переместите ее вручную после проверки')

@@ -94,7 +94,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         issues.append('Есть УИД с неподтвержденным сопоставлением')
     matched_uids = {uid for uid,status,_ in all_matches if status == 'matched'}
     if len(matched_uids) != 1:
-        issues.append('Нет единственного подтвержденного УИД договора')
+        issues.append('Нет единственного сопоставленного УИД договора')
     if any(_norm(subject) != _norm(name) for _,status,subject in all_matches if status == 'matched'):
         issues.append('Имя заемщика расходится с историческим источником')
     if data['balance'] is None or data['balance'] < 0:

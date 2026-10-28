@@ -80,6 +80,7 @@ MXL-статус `operator_assumed` не превращается в подтв�
 `https://cbr.ru/Content/Document/File/185178/tech_5_1_19112025.zip`,
 SHA-256 `f1d82275ffc4df9ade469e5ce365639cd83b0398429999d2b9d738ba9b8dc36e`.
 Для отдельного, уже сформированного XML доступен валидатор:
+На машине проверки нужен пакет Python `lxml` (`python -m pip install lxml`).
 
 ```bash
 python scripts/nbki_validate_xml.py /secure/export/file.xml \
@@ -102,6 +103,7 @@ python scripts/nbki_validate_xml.py /secure/export/file.xml \
 ```bash
 python scripts/nbki_local_sign.py /secure/export/file.xml \
   --sha256 <64-символьный-хеш-из-CRM> \
+  --schema-zip /secure/reference/tech_5_1_19112025.zip \
   --thumbprint <отпечаток-локального-сертификата>
 ```
 
