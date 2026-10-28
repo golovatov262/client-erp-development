@@ -45,7 +45,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'registration_address','inn','member_updated_at')
     data = dict(zip(keys, row))
     cur.execute("""SELECT uid,match_status,subject_name FROM nbki_deals
-        WHERE org_id=%s AND (loan_id=%s OR contract_no=%s)""",
+        WHERE org_id=%s AND deal_role='borrower'
+        AND (loan_id=%s OR contract_no=%s)""",
         (org_id, loan_id, data['contract_no']))
     xml_matches = cur.fetchall()
     cur.execute("""SELECT uid,match_status,subject_name,assumed_accepted

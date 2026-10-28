@@ -9765,7 +9765,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
             COUNT(*) FILTER (WHERE match_status='review'),
             COUNT(*) FILTER (WHERE match_status='not_in_crm'),
             COUNT(*) FILTER (WHERE reported_accepted),
-            COUNT(*) FILTER (WHERE reported_accepted AND match_status='matched')
+            COUNT(*) FILTER (WHERE reported_accepted AND match_status='matched'),
+            COUNT(*) FILTER (WHERE deal_role='guarantor')
             FROM nbki_deals WHERE org_id=%s""", (org_id,))
         row = cur.fetchone()
         cur.execute("""SELECT reg_number, schema_version, document_time, subjects_count,
@@ -9787,7 +9788,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
         event_rows, event_files = cur.fetchone()
         return {'total': row[0], 'matched': row[1], 'review': row[2],
                 'not_in_crm': row[3], 'reported_accepted': row[4],
-                'accepted_and_matched': row[5], 'files': files,
+                'accepted_and_matched': row[5], 'guarantors': row[6], 'files': files,
                 'event_uids': event_counts[0], 'event_borrower_uids': event_counts[1],
                 'event_guarantor_uids': event_counts[2], 'event_matched': event_counts[3],
                 'event_review': event_counts[4], 'event_not_in_crm': event_counts[5],
@@ -9815,7 +9816,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return {'total': total, 'rows': [dict(zip(columns, (serialize(v) for v in item))) for item in cur.fetchall()]}
     if action == 'deals':
         status = params.get('status', 'all')
-        if status not in ('all', 'matched', 'review', 'not_in_crm', 'unmatched'):
+        if status not in ('all', 'matched', 'review', 'not_in_crm', 'unmatched', 'guarantor'):
             return {'error': 'Неверный статус'}
         limit = min(max(int(params.get('limit', 100)), 1), 200)
         offset = max(int(params.get('offset', 0)), 0)
@@ -9826,13 +9827,13 @@ def handle_nbki(method, params, body, staff, cur, conn):
             values.append(status)
         cur.execute('SELECT COUNT(*) FROM nbki_deals d WHERE ' + where, values)
         total = cur.fetchone()[0]
-        cur.execute("""SELECT d.id, d.contract_no, d.uid, d.subject_type, d.subject_name,
+        cur.execute("""SELECT d.id, d.contract_no, d.uid, d.subject_type, d.deal_role, d.subject_name,
             d.deal_date, d.original_amount, d.loan_id, d.match_status, d.match_reason,
             d.reported_accepted, d.last_event_time, f.reg_number AS accepted_file
             FROM nbki_deals d LEFT JOIN nbki_source_files f ON f.id=d.accepted_file_id
             WHERE """ + where + " ORDER BY d.match_status, d.contract_no LIMIT %s OFFSET %s",
             values + [limit, offset])
-        columns = ('id', 'contract_no', 'uid', 'subject_type', 'subject_name', 'deal_date',
+        columns = ('id', 'contract_no', 'uid', 'subject_type', 'deal_role', 'subject_name', 'deal_date',
                    'original_amount', 'loan_id', 'match_status', 'match_reason',
                    'reported_accepted', 'last_event_time', 'accepted_file')
         rows = [dict(zip(columns, (serialize(v) for v in item))) for item in cur.fetchall()]

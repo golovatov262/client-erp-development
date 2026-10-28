@@ -60,6 +60,7 @@ class Deal:
     uid: str
     contract_no: str
     subject_type: str
+    role: str
     subject_name: str | None
     subject_inn: str | None
     birth_date: date | None
@@ -73,7 +74,7 @@ class Deal:
     event_count: int = 0
 
     def identity(self) -> tuple:
-        return (self.contract_no, self.subject_type, _norm(self.subject_name),
+        return (self.contract_no, self.subject_type, self.role, _norm(self.subject_name),
                 self.subject_inn, self.birth_date, self.deal_date, self.original_amount)
 
 
@@ -128,9 +129,13 @@ def parse_source_xml(raw: bytes) -> dict:
             if not uid or not number:
                 raise ValueError("В событии договора отсутствует УИД или номер")
             deal_block = event.find("FL_18_Deal" if is_fl else "UL_11_Deal")
+            role_code = _text(deal_block, "role")
+            if role_code not in ('1', '2'):
+                raise ValueError('Неизвестная роль участника сделки в XML')
+            role = 'borrower' if role_code == '1' else 'guarantor'
             amount_block = event.find("FL_19_Amount" if is_fl else "UL_12_Amount")
             when = _datetime(event.attrib.get("eventDateTime"))
-            current = Deal(uid, number, "FL" if is_fl else "UL", name, inn, birth,
+            current = Deal(uid, number, "FL" if is_fl else "UL", role, name, inn, birth,
                            _date(_text(uid_block, "openDate")), _amount(_text(amount_block, "sum")),
                            _text(amount_block, "currency"), _text(deal_block, "code"),
                            _text(deal_block, "kindCode"), _text(deal_block, "purposeCode"), when, 1)
@@ -188,6 +193,8 @@ def parse_receipt_zip(payload: bytes | Path) -> dict:
 
 
 def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | None]:
+    if deal.role == 'guarantor':
+        return None, 'guarantor', 'УИД поручителя: договор поручительства не является займом CRM'
     cur.execute("""SELECT l.id, l.amount, l.start_date, m.member_type, m.inn,
                           m.birth_date, m.last_name, m.first_name, m.middle_name, m.company_name
                    FROM loans l JOIN members m ON m.id=l.member_id
@@ -301,11 +308,11 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                 if existing and existing[2] and loan_id and existing[2] != loan_id:
                     raise ValueError("УИД уже связан с другим договором CRM")
                 cur.execute("""INSERT INTO nbki_deals
-                    (org_id, uid, contract_no, subject_type, subject_name, subject_inn, birth_date,
+                    (org_id, uid, contract_no, subject_type, deal_role, subject_name, subject_inn, birth_date,
                      deal_date, original_amount, currency, deal_code, kind_code, purpose_code,
                      last_event_time, last_source_file_id, loan_id, match_status, match_reason,
                      reported_accepted, accepted_file_id)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (org_id, uid) DO UPDATE SET
                      last_event_time=CASE WHEN nbki_deals.last_event_time IS NULL
                          OR EXCLUDED.last_event_time > nbki_deals.last_event_time
@@ -314,6 +321,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                          OR EXCLUDED.last_event_time >= nbki_deals.last_event_time
                          THEN EXCLUDED.last_source_file_id ELSE nbki_deals.last_source_file_id END,
                      loan_id=COALESCE(nbki_deals.loan_id, EXCLUDED.loan_id),
+                     deal_role=EXCLUDED.deal_role,
                      match_status=EXCLUDED.match_status, match_reason=EXCLUDED.match_reason,
                      reported_accepted=nbki_deals.reported_accepted OR EXCLUDED.reported_accepted,
                      accepted_file_id=CASE WHEN EXCLUDED.reported_accepted
@@ -322,7 +330,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                               <= (SELECT document_time FROM nbki_source_files WHERE id=EXCLUDED.accepted_file_id))
                          THEN EXCLUDED.accepted_file_id ELSE nbki_deals.accepted_file_id END,
                      updated_at=NOW()
-                    RETURNING id""", (org_id, deal.uid, deal.contract_no, deal.subject_type,
+                    RETURNING id""", (org_id, deal.uid, deal.contract_no, deal.subject_type, deal.role,
                         deal.subject_name, deal.subject_inn, deal.birth_date, deal.deal_date,
                         deal.original_amount, deal.currency, deal.deal_code, deal.kind_code,
                         deal.purpose_code, deal.last_event_time, file_id, loan_id, status, reason,
@@ -346,7 +354,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
     counts = Counter(statuses.values())
     return {"files": len(files), "unique_deals": len(seen_uid),
             "matched": counts["matched"], "review": counts["review"],
-            "not_in_crm": counts["not_in_crm"],
+            "not_in_crm": counts["not_in_crm"], "guarantors": counts["guarantor"],
             "reported_accepted_deals": len({uid for f in files if receipts.get(f["reg_number"], {}).get("kind") == 2
                                             and receipts[f["reg_number"]]["status"] == "accepted"
                                             for uid in f["deals"]})}

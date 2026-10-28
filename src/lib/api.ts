@@ -23,6 +23,7 @@ export type NbkiSummary = {
   matched: number;
   review: number;
   not_in_crm: number;
+  guarantors: number;
   reported_accepted: number;
   accepted_and_matched: number;
   files: NbkiFile[];
@@ -70,6 +71,7 @@ export type NbkiDeal = {
   contract_no: string;
   uid: string;
   subject_type: "FL" | "UL";
+  deal_role: "borrower" | "guarantor";
   subject_name: string | null;
   deal_date: string | null;
   original_amount: number | null;
@@ -89,6 +91,7 @@ export type NbkiImportResult = {
   matched: number;
   review: number;
   not_in_crm: number;
+  guarantors: number;
   reported_accepted_deals: number;
 };
 

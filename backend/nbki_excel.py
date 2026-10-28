@@ -94,7 +94,8 @@ def make_missing_uid_xlsx(cur, org_id: int) -> bytes:
         l.status,l.start_date,l.amount,
         COALESCE((SELECT STRING_AGG(d.uid || ' [' || d.match_status ||
             COALESCE(': ' || d.match_reason,'') || ']', '; ' ORDER BY d.uid)
-            FROM nbki_deals d WHERE d.org_id=l.org_id AND d.contract_no=l.contract_no),'') AS xml_candidates,
+            FROM nbki_deals d WHERE d.org_id=l.org_id AND d.contract_no=l.contract_no
+            AND d.deal_role='borrower'),'') AS xml_candidates,
         COALESCE((SELECT STRING_AGG(d.uid || ' [' || d.match_status ||
             COALESCE(': ' || d.match_reason,'') || ']', '; ' ORDER BY d.uid)
             FROM nbki_event_deals d WHERE d.org_id=l.org_id AND d.contract_no=l.contract_no

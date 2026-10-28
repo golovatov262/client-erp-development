@@ -9,6 +9,7 @@ const statuses = [
   { value: "matched", label: "Сопоставлены" },
   { value: "review", label: "Проверить" },
   { value: "not_in_crm", label: "Нет в CRM" },
+  { value: "guarantor", label: "Поручители" },
 ];
 
 const receiptLabel: Record<string, string> = {
@@ -227,7 +228,7 @@ const AdminNbkiTab = () => {
             <Button disabled={!xmlFiles.length || importing} onClick={() => void importFiles()}>{importing ? "Сопоставляем…" : "Импортировать и сопоставить"}</Button>
             <span className="text-xs text-muted-foreground">Выбрано: {xmlFiles.length} XML, {receiptFiles.length} квитанций</span>
           </div>
-          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров не найдены в CRM. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
+          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров заемщиков не найдены в CRM, {importResult.guarantors} поручителей. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
         </CardContent>
       </Card>
 
@@ -286,7 +287,7 @@ const AdminNbkiTab = () => {
           ["УИД в реестре", summary?.total ?? 0],
           ["Сопоставлены с CRM", summary?.matched ?? 0],
           ["Нужна проверка", summary?.review ?? 0],
-          ["Не найдены в CRM", summary?.not_in_crm ?? 0],
+          ["Нет займа в CRM", summary?.not_in_crm ?? 0],
         ].map(([label, value]) => (
           <Card key={label}><CardContent className="pt-5"><div className="text-2xl font-semibold">{value}</div><div className="text-sm text-muted-foreground">{label}</div></CardContent></Card>
         ))}
@@ -320,11 +321,11 @@ const AdminNbkiTab = () => {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[850px] text-sm">
-              <thead><tr className="border-b text-left text-muted-foreground"><th className="p-2">Договор</th><th className="p-2">Заемщик</th><th className="p-2">УИД</th><th className="p-2">CRM</th><th className="p-2">Прием НБКИ</th></tr></thead>
+              <thead><tr className="border-b text-left text-muted-foreground"><th className="p-2">Договор</th><th className="p-2">Участник</th><th className="p-2">УИД</th><th className="p-2">CRM</th><th className="p-2">Прием НБКИ</th></tr></thead>
               <tbody>
                 {deals.map(deal => <tr key={deal.id} className="border-b align-top">
                   <td className="p-2 font-medium">{deal.contract_no}<div className="text-xs text-muted-foreground">{deal.deal_date || "Дата не указана"}</div></td>
-                  <td className="p-2">{deal.subject_name || "—"}</td>
+                  <td className="p-2">{deal.subject_name || "—"}<div className="text-xs text-muted-foreground">{deal.deal_role === 'guarantor' ? 'Поручитель' : 'Заемщик'}</div></td>
                   <td className="break-all p-2 font-mono text-xs">{deal.uid}</td>
                   <td className="p-2">{deal.loan_id ? `Займ №${deal.loan_id}` : deal.match_reason || "Не сопоставлен"}</td>
                   <td className="p-2">{deal.reported_accepted ? "Принят по квитанции" : "Нет квитанции о приеме"}</td>
