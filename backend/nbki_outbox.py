@@ -142,7 +142,23 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
         draft_id = cur.fetchone()[0]
     return {'id': draft_id, 'snapshot_sha256': digest,
             'contract_no': result['contract_no'], 'checks': result['checks'],
-            'submittable': False}
+            'submittable': False, 'created': bool(inserted)}
+
+
+def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
+    cur.execute('SELECT id FROM loans WHERE org_id=%s ORDER BY id', (org_id,))
+    loan_ids = [row[0] for row in cur.fetchall()]
+    if len(loan_ids) > 500:
+        raise ValueError('Для пакетного черновика выберите не более 500 займов')
+    created = 0
+    with_issues = 0
+    for loan_id in loan_ids:
+        result = create_draft(cur, org_id, loan_id, user_id)
+        created += bool(result['created'])
+        with_issues += bool(result['checks']['crm_issues'])
+    return {'total': len(loan_ids), 'created': created,
+            'unchanged': len(loan_ids) - created, 'with_crm_issues': with_issues,
+            'submittable': 0}
 
 
 def list_drafts(cur, org_id: int) -> list[dict]:

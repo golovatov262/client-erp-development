@@ -205,6 +205,9 @@ export const api = {
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
       entity: "nbki", action: "create_draft", loan_id: loanId,
     }),
+    createAllDrafts: () => request<{ total: number; created: number; unchanged: number; with_crm_issues: number; submittable: number }>("POST", undefined, {
+      entity: "nbki", action: "create_drafts_all",
+    }),
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
     eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),

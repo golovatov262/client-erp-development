@@ -56,6 +56,7 @@ const AdminNbkiTab = () => {
   const [inspection, setInspection] = useState<NbkiInspection | null>(null);
   const [drafts, setDrafts] = useState<NbkiDraft[]>([]);
   const [outboxLoading, setOutboxLoading] = useState(false);
+  const [bulkResult, setBulkResult] = useState("");
 
   const refreshOutbox = async () => {
     try { setDrafts((await api.nbki.outbox()).rows); }
@@ -75,6 +76,17 @@ const AdminNbkiTab = () => {
         await refreshOutbox();
       }
       setInspection(await api.nbki.inspectLoan(id));
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setOutboxLoading(false); }
+  };
+
+  const createAll = async () => {
+    setOutboxLoading(true);
+    setError("");
+    try {
+      const result = await api.nbki.createAllDrafts();
+      setBulkResult(`Проверено ${result.total} займов: создано ${result.created} снимков, ${result.unchanged} без изменений, ${result.with_crm_issues} с замечаниями CRM. К отправке: 0.`);
+      await refreshOutbox();
     } catch (e) { setError(humanizeError(e)); }
     finally { setOutboxLoading(false); }
   };
@@ -180,7 +192,9 @@ const AdminNbkiTab = () => {
             <input className="w-40 rounded-md border p-2 text-sm" type="number" min="1" placeholder="ID займа CRM" value={loanId} onChange={event => setLoanId(event.target.value)} />
             <Button variant="outline" disabled={outboxLoading} onClick={() => void inspect(false)}>Проверить</Button>
             <Button disabled={outboxLoading} onClick={() => void inspect(true)}>Сохранить черновик</Button>
+            <Button variant="outline" disabled={outboxLoading} onClick={() => void createAll()}>Черновики всех займов</Button>
           </div>
+          {bulkResult && <p role="status" className="text-sm">{bulkResult}</p>}
           {inspection && <div className="rounded-md border p-3 text-sm">
             <div className="font-medium">{inspection.contract_no} · УИД {inspection.uid || "не подтвержден"}</div>
             <div className="mt-1">{inspection.checks.crm_issues.length ? inspection.checks.crm_issues.join("; ") : "Базовые данные CRM заполнены"}</div>
