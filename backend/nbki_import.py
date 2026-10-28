@@ -245,11 +245,17 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
 
     statuses: dict[str, str] = {}
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM organizations WHERE inn=%s", (SOURCE_INN,))
+        cur.execute("""SELECT o.id, COUNT(l.id) AS loan_count
+                       FROM organizations o LEFT JOIN loans l ON l.org_id=o.id
+                       WHERE o.inn=%s GROUP BY o.id""", (SOURCE_INN,))
         orgs = cur.fetchall()
-        if len(orgs) != 1:
-            raise ValueError("Не найдена ровно одна организация с ИНН источника")
-        org_id = orgs[0][0]
+        active_orgs = [org_id for org_id, loan_count in orgs if loan_count > 0]
+        if len(orgs) == 1:
+            org_id = orgs[0][0]
+        elif len(active_orgs) == 1:
+            org_id = active_orgs[0]
+        else:
+            raise ValueError("Нельзя однозначно определить организацию источника по ИНН и договорам")
         for source in files:
             reg = source["reg_number"]
             receipt = receipts.get(reg)
