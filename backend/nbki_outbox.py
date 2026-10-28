@@ -34,7 +34,8 @@ def summarize_changes(before: dict, after: dict) -> dict:
                              ('member', {'member_updated_at'})):
         previous = before.get(section) or {}
         current = after.get(section) or {}
-        fields = sorted(key for key in set(previous) | set(current)
+        # Schema expansion in a newer snapshot is not a borrower event.
+        fields = sorted(key for key in set(previous) & set(current)
                         if key not in ignored and previous.get(key) != current.get(key))
         if fields:
             result[section + '_fields'] = fields
@@ -116,7 +117,8 @@ def source_readiness(snapshot: dict, issues: list[str], changes: dict | None = N
 
 
 def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
-    cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,l.start_date,
+    cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,
+        l.schedule_type,l.monthly_payment,l.start_date,
         l.end_date,l.balance,l.status,l.updated_at,m.id,m.member_type,m.last_name,
         m.first_name,m.middle_name,m.company_name,m.birth_date,m.birth_place,
         m.passport_series,m.passport_number,m.passport_issue_date,m.passport_issued_by,
@@ -126,7 +128,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     row = cur.fetchone()
     if row is None:
         raise ValueError('Договор не найден в организации источника')
-    keys = ('id','contract_no','amount','rate','term_months','start_date','end_date',
+    keys = ('id','contract_no','amount','rate','term_months','schedule_type',
+            'monthly_payment','start_date','end_date',
             'balance','status','updated_at','member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
@@ -193,6 +196,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         issues.append('Некорректный остаток займа')
     snapshot = {
         'loan': {key: data[key] for key in ('id','contract_no','amount','rate','term_months',
+            'schedule_type','monthly_payment',
             'start_date','end_date','balance','status','updated_at')},
         'member': {key: data[key] for key in ('member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',

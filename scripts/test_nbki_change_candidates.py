@@ -29,6 +29,11 @@ class ChangeSummaryTests(unittest.TestCase):
         after['collateral'][0]['updated_at'] = '2026-10-02'
         self.assertEqual(summarize_changes(self.before, after), {})
 
+    def test_newly_tracked_snapshot_field_is_not_a_business_change(self):
+        after = copy.deepcopy(self.before)
+        after['loan']['monthly_payment'] = '250'
+        self.assertEqual(summarize_changes(self.before, after), {})
+
     def test_payment_and_balance_changes_are_reported(self):
         after = copy.deepcopy(self.before)
         after['loan']['balance'] = '900'
