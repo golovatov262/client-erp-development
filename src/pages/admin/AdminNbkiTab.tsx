@@ -148,7 +148,7 @@ const AdminNbkiTab = () => {
     }
   };
 
-  const exportRegistry = async (targetStatus: "review" | "not_in_crm") => {
+  const exportRegistry = async (targetStatus: "review" | "not_in_crm" | "missing_uid") => {
     setExporting(true);
     setError("");
     try {
@@ -176,6 +176,7 @@ const AdminNbkiTab = () => {
           <p className="text-sm text-muted-foreground">Исторические УИД и результаты сопоставления с договорами CRM</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void exportRegistry("missing_uid")} disabled={exporting}>Excel · Без УИД</Button>
           <Button variant="outline" onClick={() => void exportRegistry("review")} disabled={exporting}>Excel · Проверить</Button>
           <Button variant="outline" onClick={() => void exportRegistry("not_in_crm")} disabled={exporting}>Excel · Нет в CRM</Button>
           <Button variant="outline" onClick={() => void load()} disabled={loading}>Обновить</Button>
