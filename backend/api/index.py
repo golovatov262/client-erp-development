@@ -34,6 +34,10 @@ try:
     from nbki_excel import make_registry_xlsx
 except ImportError:
     from backend.nbki_excel import make_registry_xlsx
+try:
+    from nbki_outbox import inspect_loan, create_draft, list_drafts
+except ImportError:
+    from backend.nbki_outbox import inspect_loan, create_draft, list_drafts
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9670,6 +9674,24 @@ def handle_nbki(method, params, body, staff, cur, conn):
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
+    if action == 'outbox':
+        return {'rows': list_drafts(cur, org_id)}
+    if action in ('inspect_loan', 'create_draft'):
+        if action == 'create_draft' and method != 'POST':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        try:
+            loan_id = int(body.get('loan_id') if method == 'POST' else params.get('loan_id'))
+            if loan_id <= 0:
+                raise ValueError('Неверный идентификатор договора')
+            if action == 'inspect_loan':
+                inspected = inspect_loan(cur, org_id, loan_id)
+                return {key: inspected[key] for key in ('loan_id', 'contract_no', 'uid', 'checks')}
+            result = create_draft(cur, org_id, loan_id, staff.get('id'))
+            conn.commit()
+            return result
+        except (ValueError, TypeError) as exc:
+            conn.rollback()
+            return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'export_registry':
         status = params.get('status', 'review')
         if status not in ('review', 'not_in_crm'):

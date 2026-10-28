@@ -92,6 +92,23 @@ export type NbkiImportResult = {
   reported_accepted_deals: number;
 };
 
+export type NbkiDraft = {
+  id: number;
+  loan_id: number;
+  contract_no: string;
+  snapshot_sha256: string;
+  checks: { crm_issues: string[]; gutdf_xsd_validated: boolean; nbki_business_rules_validated: boolean; submittable: boolean };
+  status: "blocked" | "draft";
+  created_at: string;
+};
+
+export type NbkiInspection = {
+  loan_id: number;
+  contract_no: string;
+  uid: string | null;
+  checks: NbkiDraft["checks"];
+};
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -183,6 +200,11 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 export const api = {
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
   nbki: {
+    outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
+    inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
+    createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
+      entity: "nbki", action: "create_draft", loan_id: loanId,
+    }),
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
     eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),

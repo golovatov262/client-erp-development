@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiDeal, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +52,32 @@ const AdminNbkiTab = () => {
   const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
   const [eventFile, setEventFile] = useState<File | null>(null);
   const [eventImportResult, setEventImportResult] = useState<NbkiEventImportResult | null>(null);
+  const [loanId, setLoanId] = useState("");
+  const [inspection, setInspection] = useState<NbkiInspection | null>(null);
+  const [drafts, setDrafts] = useState<NbkiDraft[]>([]);
+  const [outboxLoading, setOutboxLoading] = useState(false);
+
+  const refreshOutbox = async () => {
+    try { setDrafts((await api.nbki.outbox()).rows); }
+    catch (e) { setError(humanizeError(e)); }
+  };
+
+  useEffect(() => { void refreshOutbox(); }, []);
+
+  const inspect = async (save: boolean) => {
+    const id = Number(loanId);
+    if (!Number.isInteger(id) || id <= 0) { setError("Укажите номер займа CRM (ID)"); return; }
+    setOutboxLoading(true);
+    setError("");
+    try {
+      if (save) {
+        await api.nbki.createDraft(id);
+        await refreshOutbox();
+      }
+      setInspection(await api.nbki.inspectLoan(id));
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setOutboxLoading(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -145,6 +171,30 @@ const AdminNbkiTab = () => {
       </div>
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Черновики будущей выгрузки</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">Проверка реквизитов и фиксация снимка договора. Это ещё не XML ГУТДФ: схема и правила НБКИ не подтверждены, файл для отправки здесь не формируется.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="w-40 rounded-md border p-2 text-sm" type="number" min="1" placeholder="ID займа CRM" value={loanId} onChange={event => setLoanId(event.target.value)} />
+            <Button variant="outline" disabled={outboxLoading} onClick={() => void inspect(false)}>Проверить</Button>
+            <Button disabled={outboxLoading} onClick={() => void inspect(true)}>Сохранить черновик</Button>
+          </div>
+          {inspection && <div className="rounded-md border p-3 text-sm">
+            <div className="font-medium">{inspection.contract_no} · УИД {inspection.uid || "не подтвержден"}</div>
+            <div className="mt-1">{inspection.checks.crm_issues.length ? inspection.checks.crm_issues.join("; ") : "Базовые данные CRM заполнены"}</div>
+            <div className="mt-1 text-muted-foreground">Проверка XSD и правил НБКИ ещё не выполнена; отправка заблокирована.</div>
+          </div>}
+          <div className="max-h-60 overflow-y-auto text-sm">
+            {drafts.map(draft => <div key={draft.id} className="flex flex-wrap justify-between gap-2 border-b py-2">
+              <span>#{draft.id} · {draft.contract_no} · займ CRM №{draft.loan_id}</span>
+              <span className="text-muted-foreground">Заблокирован · {draft.checks.crm_issues.length} замечаний CRM</span>
+            </div>)}
+            {!drafts.length && <p className="text-muted-foreground">Черновиков пока нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Загрузить историю из 1С</CardTitle></CardHeader>
