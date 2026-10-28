@@ -54,6 +54,67 @@ def summarize_changes(before: dict, after: dict) -> dict:
     return result
 
 
+def event_hints(change_summary: dict | None) -> list[dict]:
+    """Route changes to review queues, never assert a final GUTDF event code."""
+    if not change_summary:
+        return []
+    hints = []
+    mapping = (
+        ('payments', 'payment', 'Платёж или изменение записи платежа'),
+        ('schedule', 'schedule', 'Изменение графика или исполнения'),
+        ('collateral', 'security', 'Изменение обеспечения'),
+        ('loan_fields', 'loan_terms', 'Изменение условий или состояния займа'),
+        ('member_fields', 'identity', 'Изменение сведений о заёмщике'),
+        ('uid_changed', 'uid', 'Изменение УИД: требуется отдельная сверка'),
+    )
+    for key, category, label in mapping:
+        if change_summary.get(key):
+            hints.append({'category': category, 'label': label,
+                          'gutdf_event_code': None, 'requires_review': True})
+    return hints
+
+
+def source_readiness(snapshot: dict, issues: list[str], changes: dict | None = None) -> dict:
+    """Field coverage, distinct from XSD and NBKI business-rule validation."""
+    loan = snapshot['loan']
+    member = snapshot['member']
+    missing = []
+    if not snapshot['uid']:
+        missing.append('Подтверждённый УИД договора')
+    if not loan.get('contract_no'):
+        missing.append('Номер договора')
+    if not loan.get('start_date'):
+        missing.append('Дата заключения договора')
+    if not loan.get('end_date'):
+        missing.append('Дата окончания договора')
+    if loan.get('amount') is None:
+        missing.append('Первоначальная сумма займа')
+    if member.get('member_type') == 'FL':
+        for key, label in (('last_name', 'Фамилия'), ('first_name', 'Имя'),
+                           ('birth_date', 'Дата рождения'),
+                           ('passport_series', 'Серия паспорта'),
+                           ('passport_number', 'Номер паспорта'),
+                           ('passport_issue_date', 'Дата выдачи паспорта'),
+                           ('passport_issued_by', 'Кем выдан паспорт')):
+            if not member.get(key):
+                missing.append(label)
+    if not member.get('inn'):
+        missing.append('ИНН заёмщика')
+    # These values cannot be inferred reliably from a current balance or schedule.
+    missing.extend((
+        'Дата и время фактического события по правилам ГУТДФ',
+        'Код вида, назначения и условий сделки для применимого события',
+        'Подтверждённый расчёт полной стоимости займа и среднемесячного платежа',
+        'Детализация текущей, срочной и просроченной задолженности на дату события',
+        'Коды соблюдения размера и срока платежа',
+        'Проверка обязательных блоков и условных полей выбранного события',
+    ))
+    return {'crm_issues': issues, 'missing_fields': missing,
+            'event_hints': event_hints(changes),
+            'event_code_confirmed': False, 'xsd_validated': False,
+            'business_rules_validated': False, 'xml_ready': False}
+
+
 def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,l.start_date,
         l.end_date,l.balance,l.status,l.updated_at,m.id,m.member_type,m.last_name,
@@ -150,8 +211,27 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
               'gutdf_xsd_validated': False,
               'nbki_business_rules_validated': False,
               'receipt_confirmed': False, 'submittable': False}
+    readiness = source_readiness(snapshot, issues)
     return {'loan_id': loan_id, 'contract_no': data['contract_no'],
-            'uid': snapshot['uid'], 'checks': checks, 'snapshot': snapshot}
+            'uid': snapshot['uid'], 'checks': checks, 'readiness': readiness,
+            'snapshot': snapshot}
+
+
+def readiness_report(cur, org_id: int) -> dict:
+    cur.execute("""SELECT id FROM loans WHERE org_id=%s
+        AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
+    loan_ids = [row[0] for row in cur.fetchall()]
+    rows = []
+    for loan_id in loan_ids:
+        result = inspect_loan(cur, org_id, loan_id)
+        rows.append({'loan_id': loan_id, 'contract_no': result['contract_no'],
+                     'uid': result['uid'], 'status': result['snapshot']['loan']['status'],
+                     'crm_issues': result['checks']['crm_issues'],
+                     'missing_fields': result['readiness']['missing_fields'],
+                     'xml_ready': False})
+    return {'total': len(rows), 'with_uid': sum(bool(row['uid']) for row in rows),
+            'with_crm_issues': sum(bool(row['crm_issues']) for row in rows),
+            'xml_ready': 0, 'rows': rows}
 
 
 def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
@@ -193,6 +273,7 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
             candidate_created = cur.fetchone() is not None
     return {'id': draft_id, 'snapshot_sha256': digest,
             'contract_no': result['contract_no'], 'checks': result['checks'],
+            'readiness': result['readiness'],
             'submittable': False, 'created': bool(inserted),
             'change_candidate_created': candidate_created}
 

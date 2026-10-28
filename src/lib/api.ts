@@ -129,6 +129,33 @@ export type NbkiInspection = {
   contract_no: string;
   uid: string | null;
   checks: NbkiDraft["checks"];
+  readiness: {
+    crm_issues: string[];
+    missing_fields: string[];
+    event_hints: { category: string; label: string; gutdf_event_code: null; requires_review: boolean }[];
+    event_code_confirmed: boolean;
+    xsd_validated: boolean;
+    business_rules_validated: boolean;
+    xml_ready: boolean;
+  };
+};
+
+export type NbkiReadinessRow = {
+  loan_id: number;
+  contract_no: string;
+  uid: string | null;
+  status: "active" | "overdue" | "holiday";
+  crm_issues: string[];
+  missing_fields: string[];
+  xml_ready: boolean;
+};
+
+export type NbkiReadinessReport = {
+  total: number;
+  with_uid: number;
+  with_crm_issues: number;
+  xml_ready: number;
+  rows: NbkiReadinessRow[];
 };
 
 function getStaffToken(): string {
@@ -224,6 +251,7 @@ export const api = {
   nbki: {
     outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
     changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
+    readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
       entity: "nbki", action: "create_draft", loan_id: loanId,

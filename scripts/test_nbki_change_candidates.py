@@ -3,7 +3,7 @@
 import copy
 import unittest
 
-from backend.nbki_outbox import summarize_changes
+from backend.nbki_outbox import event_hints, source_readiness, summarize_changes
 
 
 class ChangeSummaryTests(unittest.TestCase):
@@ -46,6 +46,20 @@ class ChangeSummaryTests(unittest.TestCase):
             'schedule': {'added_ids': [], 'removed_ids': [], 'changed_ids': ['20']},
             'collateral': {'added_ids': [], 'removed_ids': ['30'], 'changed_ids': []},
         })
+
+    def test_hints_do_not_assign_regulatory_codes(self):
+        hints = event_hints({'payments': {'added_ids': ['11']},
+                             'loan_fields': ['balance']})
+        self.assertEqual([hint['category'] for hint in hints], ['payment', 'loan_terms'])
+        self.assertTrue(all(hint['gutdf_event_code'] is None for hint in hints))
+
+    def test_readiness_never_claims_xml_ready(self):
+        snapshot = copy.deepcopy(self.before)
+        snapshot['uid'] = None
+        readiness = source_readiness(snapshot, ['Нет УИД'], {'payments': True})
+        self.assertFalse(readiness['xml_ready'])
+        self.assertIn('Подтверждённый УИД договора', readiness['missing_fields'])
+        self.assertEqual(readiness['event_hints'][0]['category'], 'payment')
 
 
 if __name__ == '__main__':

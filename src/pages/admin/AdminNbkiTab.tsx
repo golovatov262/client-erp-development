@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiReadinessReport, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +67,8 @@ const AdminNbkiTab = () => {
   const [drafts, setDrafts] = useState<NbkiDraft[]>([]);
   const [changeCandidates, setChangeCandidates] = useState<NbkiChangeCandidate[]>([]);
   const [changeCandidateTotal, setChangeCandidateTotal] = useState(0);
+  const [readinessReport, setReadinessReport] = useState<NbkiReadinessReport | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
   const [outboxLoading, setOutboxLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState("");
 
@@ -81,6 +83,14 @@ const AdminNbkiTab = () => {
   };
 
   useEffect(() => { void refreshOutbox(); }, []);
+
+  const loadReadiness = async () => {
+    setReadinessLoading(true);
+    setError("");
+    try { setReadinessReport(await api.nbki.readinessReport()); }
+    catch (e) { setError(humanizeError(e)); }
+    finally { setReadinessLoading(false); }
+  };
 
   const inspect = async (save: boolean) => {
     const id = Number(loanId);
@@ -217,6 +227,8 @@ const AdminNbkiTab = () => {
             <div className="font-medium">{inspection.contract_no} · УИД {inspection.uid || "не подтвержден"}</div>
             <div className="mt-1">{inspection.checks.crm_issues.length ? inspection.checks.crm_issues.join("; ") : "Базовые данные CRM заполнены"}</div>
             <div className="mt-1 text-muted-foreground">Проверка XSD и правил НБКИ ещё не выполнена; отправка заблокирована.</div>
+            <div className="mt-2 font-medium">Не хватает для XML: {inspection.readiness.missing_fields.length}</div>
+            <ul className="ml-5 list-disc text-muted-foreground">{inspection.readiness.missing_fields.map(field => <li key={field}>{field}</li>)}</ul>
           </div>}
           <div className="max-h-60 overflow-y-auto text-sm">
             {drafts.map(draft => <div key={draft.id} className="flex flex-wrap justify-between gap-2 border-b py-2">
@@ -225,6 +237,23 @@ const AdminNbkiTab = () => {
             </div>)}
             {!drafts.length && <p className="text-muted-foreground">Черновиков пока нет.</p>}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Готовность исходных данных</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">Отчёт по активным, просроченным и договорам на каникулах. Отсутствующие расчётные показатели не заменяются предположениями из графика или старого XML.</p>
+          <Button variant="outline" disabled={readinessLoading} onClick={() => void loadReadiness()}>{readinessLoading ? "Проверяем…" : "Проверить все договоры"}</Button>
+          {readinessReport && <>
+            <p className="text-sm">Договоров: {readinessReport.total} · с УИД: {readinessReport.with_uid} · с замечаниями CRM: {readinessReport.with_crm_issues} · готовых XML: {readinessReport.xml_ready}</p>
+            <div className="max-h-72 overflow-y-auto text-sm">
+              {readinessReport.rows.map(row => <details key={row.loan_id} className="border-b py-2">
+                <summary className="cursor-pointer">{row.contract_no} · {row.status} · {row.uid ? "УИД есть" : "без УИД"} · пробелов {row.missing_fields.length}</summary>
+                <ul className="ml-5 mt-2 list-disc text-muted-foreground">{row.missing_fields.map(field => <li key={field}>{field}</li>)}</ul>
+              </details>)}
+            </div>
+          </>}
         </CardContent>
       </Card>
 
