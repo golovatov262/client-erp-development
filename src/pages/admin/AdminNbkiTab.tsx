@@ -230,6 +230,11 @@ const AdminNbkiTab = () => {
             <div className="mt-1 text-muted-foreground">Проверка XSD и правил НБКИ ещё не выполнена; отправка заблокирована.</div>
             <div className="mt-2 font-medium">Не хватает для XML: {inspection.readiness.missing_fields.length}</div>
             <ul className="ml-5 list-disc text-muted-foreground">{inspection.readiness.missing_fields.map(field => <li key={field}>{field}</li>)}</ul>
+            {inspection.historical_context && <details className="mt-3 border-t pt-2">
+              <summary className="cursor-pointer font-medium">Последний исторический XML 1С · {inspection.historical_context.reg_number}</summary>
+              <p className="mt-1 text-muted-foreground">Событие {inspection.historical_context.event_name}, {inspection.historical_context.event_time || "время не указано"}; квитанция: {receiptLabel[inspection.historical_context.receipt_status] || inspection.historical_context.receipt_status}; подпись {inspection.historical_context.receipt_signature_verified ? "проверена" : "не проверена"}. Значения ниже — только для сравнения, не текущие данные CRM.</p>
+              <div className="mt-2 grid gap-1 sm:grid-cols-2">{Object.entries(inspection.historical_context.values).filter(([, value]) => value).map(([key, value]) => <div key={key}><span className="text-muted-foreground">{key}: </span>{value}</div>)}</div>
+            </details>}
           </div>}
           <div className="max-h-60 overflow-y-auto text-sm">
             {drafts.map(draft => <div key={draft.id} className="flex flex-wrap justify-between gap-2 border-b py-2">

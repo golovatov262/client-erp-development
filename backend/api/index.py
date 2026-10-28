@@ -35,9 +35,9 @@ try:
 except ImportError:
     from backend.nbki_excel import make_registry_xlsx, make_missing_uid_xlsx, make_readiness_xlsx
 try:
-    from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report
+    from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report, historical_context
 except ImportError:
-    from backend.nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report
+    from backend.nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report, historical_context
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9699,7 +9699,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
                 raise ValueError('Неверный идентификатор договора')
             if action == 'inspect_loan':
                 inspected = inspect_loan(cur, org_id, loan_id)
-                return {key: inspected[key] for key in ('loan_id', 'contract_no', 'uid', 'checks', 'readiness')}
+                return {**{key: inspected[key] for key in ('loan_id', 'contract_no', 'uid', 'checks', 'readiness')},
+                        'historical_context': historical_context(cur, org_id, inspected['uid'])}
             result = create_draft(cur, org_id, loan_id, staff.get('id'))
             conn.commit()
             return result

@@ -138,6 +138,15 @@ export type NbkiInspection = {
     business_rules_validated: boolean;
     xml_ready: boolean;
   };
+  historical_context: {
+    reg_number: string;
+    document_time: string | null;
+    receipt_status: string;
+    receipt_signature_verified: boolean;
+    event_name: string;
+    event_time: string | null;
+    values: Record<string, string | null>;
+  } | null;
 };
 
 export type NbkiReadinessRow = {

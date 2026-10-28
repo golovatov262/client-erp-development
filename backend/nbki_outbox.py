@@ -7,7 +7,9 @@ particular, assumed MXL acceptance is never treated as a verified receipt.
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -114,6 +116,62 @@ def source_readiness(snapshot: dict, issues: list[str], changes: dict | None = N
             'event_hints': event_hints(changes),
             'event_code_confirmed': False, 'xsd_validated': False,
             'business_rules_validated': False, 'xml_ready': False}
+
+
+def extract_historical_indicators(raw: bytes, uid: str) -> dict | None:
+    """Read a prior 1C event as comparison context, not as current CRM facts."""
+    if len(raw) > 25 * 1024 * 1024 or b'<!DOCTYPE' in raw.upper():
+        raise ValueError('Недопустимый исторический XML')
+    root = ET.fromstring(raw)
+    found = []
+    for subject in root.findall('./Data/Subject_FL'):
+        for event in subject.findall('./Events/*'):
+            uid_node = event.find('./FL_17_DealUid/uid')
+            if uid_node is None or (uid_node.text or '').strip() != uid:
+                continue
+            paths = {
+                'deal_code': './FL_18_Deal/code',
+                'kind_code': './FL_18_Deal/kindCode',
+                'purpose_code': './FL_18_Deal/purposeCode',
+                'total_cost_percent': './FL_22_TotalCost/maxPercentCost',
+                'total_cost_amount': './FL_22_TotalCost/maxCost',
+                'regulatory_monthly_payment': './FL_29_MonthlyPayment/sum',
+                'debt_total': './FL_25_26_27_28_Group/FL_25_Debt/debtSum',
+                'debt_principal': './FL_25_26_27_28_Group/FL_25_Debt/debtMainSum',
+                'debt_interest': './FL_25_26_27_28_Group/FL_25_Debt/debtPercentSum',
+                'overdue_total': './FL_25_26_27_28_Group/FL_27_DebtOverdue/debtOverdueSum',
+                'payment_size_code': './FL_25_26_27_28_Group/FL_28_Payment/sizeCode',
+                'payment_schedule_code': './FL_25_26_27_28_Group/FL_28_Payment/scheduleCode',
+            }
+            values = {}
+            for key, path in paths.items():
+                node = event.find(path)
+                values[key] = (node.text or '').strip() or None if node is not None else None
+            found.append({'event_name': event.tag,
+                          'event_time': event.attrib.get('eventDateTime'),
+                          'values': values})
+    return max(found, key=lambda item: item['event_time'] or '') if found else None
+
+
+def historical_context(cur, org_id: int, uid: str | None) -> dict | None:
+    if not uid:
+        return None
+    cur.execute("""SELECT f.reg_number,f.document_time,f.receipt_status,
+        f.receipt_signature_verified,f.xml_gzip
+        FROM nbki_source_files f JOIN nbki_file_deals fd ON fd.source_file_id=f.id
+        JOIN nbki_deals d ON d.id=fd.deal_id
+        WHERE d.org_id=%s AND d.uid=%s AND d.deal_role='borrower'
+        ORDER BY f.document_time DESC NULLS LAST,f.id DESC LIMIT 10""", (org_id, uid))
+    contexts = []
+    for reg_number, document_time, receipt_status, signature_verified, packed in cur.fetchall():
+        raw = gzip.decompress(bytes(packed))
+        item = extract_historical_indicators(raw, uid)
+        if item:
+            contexts.append({**item, 'reg_number': reg_number,
+                             'document_time': document_time.isoformat() if document_time else None,
+                             'receipt_status': receipt_status,
+                             'receipt_signature_verified': signature_verified})
+    return max(contexts, key=lambda item: item['event_time'] or '') if contexts else None
 
 
 def inspect_loan(cur, org_id: int, loan_id: int) -> dict:

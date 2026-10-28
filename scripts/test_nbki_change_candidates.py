@@ -3,7 +3,8 @@
 import copy
 import unittest
 
-from backend.nbki_outbox import event_hints, source_readiness, summarize_changes
+from backend.nbki_outbox import (event_hints, extract_historical_indicators,
+                                 source_readiness, summarize_changes)
 
 
 class ChangeSummaryTests(unittest.TestCase):
@@ -65,6 +66,20 @@ class ChangeSummaryTests(unittest.TestCase):
         self.assertFalse(readiness['xml_ready'])
         self.assertIn('Подтверждённый УИД договора', readiness['missing_fields'])
         self.assertEqual(readiness['event_hints'][0]['category'], 'payment')
+
+    def test_historical_indicator_extraction_keeps_only_matching_uid(self):
+        raw = (b'<Document><Data><Subject_FL><Events>'
+               b'<FL_Event_2_3 eventDateTime="2026-10-06T10:00:00+03:00">'
+               b'<FL_17_DealUid><uid>uid-1</uid></FL_17_DealUid>'
+               b'<FL_22_TotalCost><maxPercentCost>16.4</maxPercentCost></FL_22_TotalCost>'
+               b'<FL_25_26_27_28_Group><FL_25_Debt><debtSum>900.00</debtSum>'
+               b'</FL_25_Debt></FL_25_26_27_28_Group></FL_Event_2_3>'
+               b'</Events></Subject_FL></Data></Document>')
+        result = extract_historical_indicators(raw, 'uid-1')
+        self.assertEqual(result['values']['total_cost_percent'], '16.4')
+        self.assertEqual(result['values']['debt_total'], '900.00')
+        self.assertIsNone(result['values']['payment_size_code'])
+        self.assertIsNone(extract_historical_indicators(raw, 'other-uid'))
 
 
 if __name__ == '__main__':
