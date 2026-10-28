@@ -35,9 +35,9 @@ try:
 except ImportError:
     from backend.nbki_excel import make_registry_xlsx, make_missing_uid_xlsx
 try:
-    from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts
+    from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates
 except ImportError:
-    from backend.nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts
+    from backend.nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9676,6 +9676,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return {'_status': 409, 'error': str(exc)}
     if action == 'outbox':
         return {'rows': list_drafts(cur, org_id)}
+    if action == 'change_candidates':
+        return list_change_candidates(cur, org_id)
     if action == 'create_drafts_all':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

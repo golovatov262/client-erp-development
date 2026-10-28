@@ -27,6 +27,33 @@ def _json_default(value):
     raise TypeError(type(value).__name__)
 
 
+def summarize_changes(before: dict, after: dict) -> dict:
+    """Describe CRM changes without assigning a regulatory GUTDF event type."""
+    result = {}
+    for section, ignored in (('loan', {'updated_at'}),
+                             ('member', {'member_updated_at'})):
+        previous = before.get(section) or {}
+        current = after.get(section) or {}
+        fields = sorted(key for key in set(previous) | set(current)
+                        if key not in ignored and previous.get(key) != current.get(key))
+        if fields:
+            result[section + '_fields'] = fields
+    if before.get('uid') != after.get('uid'):
+        result['uid_changed'] = True
+    for section in ('payments', 'schedule', 'collateral'):
+        previous = {str(item['id']): item for item in before.get(section, [])}
+        current = {str(item['id']): item for item in after.get(section, [])}
+        added = sorted(set(current) - set(previous), key=int)
+        removed = sorted(set(previous) - set(current), key=int)
+        changed = sorted((key for key in set(previous) & set(current)
+                          if {k: v for k, v in previous[key].items() if k != 'updated_at'}
+                          != {k: v for k, v in current[key].items() if k != 'updated_at'}), key=int)
+        if added or removed or changed:
+            result[section] = {'added_ids': added, 'removed_ids': removed,
+                               'changed_ids': changed}
+    return result
+
+
 def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,l.start_date,
         l.end_date,l.balance,l.status,l.updated_at,m.id,m.member_type,m.last_name,
@@ -128,18 +155,24 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
 
 
 def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
+    cur.execute('SELECT pg_advisory_xact_lock(%s,%s)', (org_id, loan_id))
+    cur.execute("""SELECT id,snapshot FROM nbki_outbox_drafts
+        WHERE org_id=%s AND loan_id=%s AND status<>'excluded'
+        ORDER BY created_at DESC,id DESC LIMIT 1""", (org_id, loan_id))
+    previous = cur.fetchone()
     result = inspect_loan(cur, org_id, loan_id)
     if result['snapshot']['loan']['status'] not in ('active', 'overdue', 'holiday'):
         raise ValueError('Закрытый договор исключен из исходящей выгрузки НБКИ')
     encoded = json.dumps(result['snapshot'], default=_json_default,
                          ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+    snapshot = json.loads(encoded)
     cur.execute("""INSERT INTO nbki_outbox_drafts
         (org_id,loan_id,snapshot_sha256,snapshot,checks,created_by)
         VALUES (%s,%s,%s,%s,%s,%s)
         ON CONFLICT (org_id,loan_id,snapshot_sha256) DO NOTHING
         RETURNING id""", (org_id, loan_id, digest,
-                          Json(json.loads(encoded)), Json(result['checks']), user_id))
+                          Json(snapshot), Json(result['checks']), user_id))
     inserted = cur.fetchone()
     if inserted:
         draft_id = inserted[0]
@@ -147,9 +180,21 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
         cur.execute("""SELECT id FROM nbki_outbox_drafts WHERE org_id=%s
             AND loan_id=%s AND snapshot_sha256=%s""", (org_id, loan_id, digest))
         draft_id = cur.fetchone()[0]
+    candidate_created = False
+    if inserted and previous and result['uid']:
+        changes = summarize_changes(previous[1], snapshot)
+        if changes:
+            cur.execute("""INSERT INTO nbki_change_candidates
+                (org_id,loan_id,uid,from_draft_id,to_draft_id,change_summary)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (org_id,loan_id,from_draft_id,to_draft_id) DO NOTHING
+                RETURNING id""", (org_id, loan_id, result['uid'], previous[0],
+                                  draft_id, Json(changes)))
+            candidate_created = cur.fetchone() is not None
     return {'id': draft_id, 'snapshot_sha256': digest,
             'contract_no': result['contract_no'], 'checks': result['checks'],
-            'submittable': False, 'created': bool(inserted)}
+            'submittable': False, 'created': bool(inserted),
+            'change_candidate_created': candidate_created}
 
 
 def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
@@ -160,18 +205,37 @@ def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
         raise ValueError('Для пакетного черновика выберите не более 500 займов')
     created = 0
     with_issues = 0
+    change_candidates = 0
     for loan_id in loan_ids:
         result = create_draft(cur, org_id, loan_id, user_id)
         created += bool(result['created'])
         with_issues += bool(result['checks']['crm_issues'])
+        change_candidates += bool(result['change_candidate_created'])
     return {'total': len(loan_ids), 'created': created,
             'unchanged': len(loan_ids) - created, 'with_crm_issues': with_issues,
-            'submittable': 0}
+            'change_candidates': change_candidates, 'submittable': 0}
+
+
+def list_change_candidates(cur, org_id: int) -> dict:
+    cur.execute("""SELECT COUNT(*) FROM nbki_change_candidates c
+        JOIN loans l ON l.id=c.loan_id WHERE c.org_id=%s
+        AND l.status IN ('active','overdue','holiday')""", (org_id,))
+    total = cur.fetchone()[0]
+    cur.execute("""SELECT c.id,c.loan_id,l.contract_no,c.uid,c.change_summary,
+        c.status,c.created_at,c.from_draft_id,c.to_draft_id
+        FROM nbki_change_candidates c JOIN loans l ON l.id=c.loan_id
+        WHERE c.org_id=%s AND l.status IN ('active','overdue','holiday')
+        ORDER BY c.created_at DESC,c.id DESC LIMIT 100""", (org_id,))
+    keys = ('id','loan_id','contract_no','uid','change_summary','status',
+            'created_at','from_draft_id','to_draft_id')
+    return {'total': total, 'rows': [{**dict(zip(keys, row)),
+            'created_at': row[6].isoformat()} for row in cur.fetchall()]}
 
 
 def list_drafts(cur, org_id: int) -> list[dict]:
     cur.execute("""SELECT d.id,d.loan_id,l.contract_no,d.snapshot_sha256,
-        d.checks,d.status,d.created_at FROM nbki_outbox_drafts d
+        d.checks,CASE WHEN l.status='closed' THEN 'excluded' ELSE d.status END,
+        d.created_at FROM nbki_outbox_drafts d
         JOIN loans l ON l.id=d.loan_id WHERE d.org_id=%s
         ORDER BY d.created_at DESC,d.id DESC LIMIT 100""", (org_id,))
     keys = ('id','loan_id','contract_no','snapshot_sha256','checks','status','created_at')

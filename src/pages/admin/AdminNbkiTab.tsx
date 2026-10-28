@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,15 @@ const receiptLabel: Record<string, string> = {
   received: "Файл получен",
   rejected: "Отклонён",
   unknown: "Квитанция не загружена",
+};
+
+const changeLabels: Record<string, string> = {
+  loan_fields: "договор",
+  member_fields: "заёмщик",
+  uid_changed: "УИД",
+  payments: "платежи",
+  schedule: "график",
+  collateral: "обеспечение",
 };
 
 const toBase64 = (buffer: ArrayBuffer): string => {
@@ -56,11 +65,18 @@ const AdminNbkiTab = () => {
   const [loanId, setLoanId] = useState("");
   const [inspection, setInspection] = useState<NbkiInspection | null>(null);
   const [drafts, setDrafts] = useState<NbkiDraft[]>([]);
+  const [changeCandidates, setChangeCandidates] = useState<NbkiChangeCandidate[]>([]);
+  const [changeCandidateTotal, setChangeCandidateTotal] = useState(0);
   const [outboxLoading, setOutboxLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState("");
 
   const refreshOutbox = async () => {
-    try { setDrafts((await api.nbki.outbox()).rows); }
+    try {
+      const [outbox, candidates] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates()]);
+      setDrafts(outbox.rows);
+      setChangeCandidates(candidates.rows);
+      setChangeCandidateTotal(candidates.total);
+    }
     catch (e) { setError(humanizeError(e)); }
   };
 
@@ -86,7 +102,7 @@ const AdminNbkiTab = () => {
     setError("");
     try {
       const result = await api.nbki.createAllDrafts();
-      setBulkResult(`Проверено ${result.total} действующих займов (активные, просроченные, каникулы): создано ${result.created} снимков, ${result.unchanged} без изменений, ${result.with_crm_issues} с замечаниями CRM. К отправке: 0.`);
+      setBulkResult(`Проверено ${result.total} действующих займов (активные, просроченные, каникулы): создано ${result.created} снимков, ${result.unchanged} без изменений, ${result.with_crm_issues} с замечаниями CRM. Новых кандидатов изменений: ${result.change_candidates}. К отправке: 0.`);
       await refreshOutbox();
     } catch (e) { setError(humanizeError(e)); }
     finally { setOutboxLoading(false); }
@@ -208,6 +224,20 @@ const AdminNbkiTab = () => {
               <span className="text-muted-foreground">{draft.status === 'excluded' ? 'Исключён: договор закрыт' : `Заблокирован · ${draft.checks.crm_issues.length} замечаний CRM`}</span>
             </div>)}
             {!drafts.length && <p className="text-muted-foreground">Черновиков пока нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Изменения CRM для НБКИ · {changeCandidateTotal}</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">При сохранении нового снимка сопоставленного договора фиксируются отличия от предыдущего: реквизиты, платежи, график и обеспечение. Это кандидаты на события, а не готовые файлы ГУТДФ; тип события и корректность данных ещё нужно определить.</p>
+          <div className="max-h-60 overflow-y-auto text-sm">
+            {changeCandidates.map(candidate => <div key={candidate.id} className="flex flex-wrap justify-between gap-2 border-b py-2">
+              <span>{candidate.contract_no} · УИД {candidate.uid} · {Object.keys(candidate.change_summary).map(key => changeLabels[key] || key).join(", ")}</span>
+              <span className="text-muted-foreground">{new Date(candidate.created_at).toLocaleString("ru-RU")} · ожидает определения события</span>
+            </div>)}
+            {!changeCandidates.length && <p className="text-muted-foreground">Изменений после исходных снимков пока нет.</p>}
           </div>
         </CardContent>
       </Card>

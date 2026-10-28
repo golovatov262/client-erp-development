@@ -105,6 +105,25 @@ export type NbkiDraft = {
   created_at: string;
 };
 
+export type NbkiChangeCandidate = {
+  id: number;
+  loan_id: number;
+  contract_no: string;
+  uid: string;
+  change_summary: {
+    loan_fields?: string[];
+    member_fields?: string[];
+    uid_changed?: boolean;
+    payments?: { added_ids: string[]; removed_ids: string[]; changed_ids: string[] };
+    schedule?: { added_ids: string[]; removed_ids: string[]; changed_ids: string[] };
+    collateral?: { added_ids: string[]; removed_ids: string[]; changed_ids: string[] };
+  };
+  status: "pending_mapping";
+  created_at: string;
+  from_draft_id: number;
+  to_draft_id: number;
+};
+
 export type NbkiInspection = {
   loan_id: number;
   contract_no: string;
@@ -204,11 +223,12 @@ export const api = {
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
   nbki: {
     outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
+    changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
       entity: "nbki", action: "create_draft", loan_id: loanId,
     }),
-    createAllDrafts: () => request<{ total: number; created: number; unchanged: number; with_crm_issues: number; submittable: number }>("POST", undefined, {
+    createAllDrafts: () => request<{ total: number; created: number; unchanged: number; with_crm_issues: number; change_candidates: number; submittable: number }>("POST", undefined, {
       entity: "nbki", action: "create_drafts_all",
     }),
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
