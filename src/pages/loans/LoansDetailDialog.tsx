@@ -210,6 +210,11 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
             <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
 
+        {detail.nbki_uid && <div className="rounded-md border px-3 py-2 text-sm">
+          <span className="text-muted-foreground">УИД НБКИ: </span><span className="break-all font-mono">{detail.nbki_uid}</span>
+          <div className="text-xs text-muted-foreground">{detail.nbki_acceptance_basis === "operator_assumed" ? "События учтены по указанию; квитанция НБКИ отсутствует" : detail.nbki_acceptance_basis === "ticket2_unverified" ? "Есть квитанция НБКИ; подпись не проверена" : "Нет квитанции о приеме"}</div>
+        </div>}
+
         {(isAdmin || isManager) && (
           (detail.status === "active" || detail.status === "overdue") && <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>

@@ -26,6 +26,10 @@ try:
     from nbki_import import import_payloads, resolve_source_org_id
 except ImportError:
     from backend.nbki_import import import_payloads, resolve_source_org_id
+try:
+    from nbki_mxl_import import import_mxl
+except ImportError:
+    from backend.nbki_mxl_import import import_mxl
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -753,6 +757,18 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % loan['org_id'])
                 loan['org_name'] = org_row['name'] if org_row else ''
                 loan['org_short_name'] = org_row['short_name'] if org_row else ''
+            cur.execute("""SELECT e.uid, CASE WHEN x.reported_accepted THEN 'ticket2_unverified'
+                                      ELSE 'operator_assumed' END
+                           FROM nbki_event_deals e LEFT JOIN nbki_deals x
+                             ON x.org_id=e.org_id AND x.uid=e.uid
+                           WHERE e.loan_id=%s AND e.role='borrower' AND e.match_status='matched'
+                           ORDER BY e.last_event_time DESC LIMIT 1""", (loan['id'],))
+            nbki_row = cur.fetchone()
+            if not nbki_row:
+                cur.execute("SELECT uid, CASE WHEN reported_accepted THEN 'ticket2_unverified' ELSE 'no_receipt' END FROM nbki_deals WHERE loan_id=%s", (loan['id'],))
+                nbki_row = cur.fetchone()
+            loan['nbki_uid'] = nbki_row[0] if nbki_row else None
+            loan['nbki_acceptance_basis'] = nbki_row[1] if nbki_row else None
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
             loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
             return loan
@@ -9640,7 +9656,7 @@ def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
 
 
 def handle_nbki(method, params, body, staff, cur, conn):
-    """Read-only view of historical NBKI import and contract reconciliation."""
+    """Historical NBKI imports and contract reconciliation."""
     if staff.get('role') != 'admin':
         return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
     action = params.get('action') or body.get('action', 'summary')
@@ -9648,6 +9664,23 @@ def handle_nbki(method, params, body, staff, cur, conn):
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
+    if action == 'import_events':
+        if method != 'POST':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        try:
+            packed = base64.b64decode(body.get('mxl_gzip_base64', ''), validate=True)
+            if len(packed) > 4 * 1024 * 1024:
+                raise ValueError('Сжатый MXL превышает 4 МБ')
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            raw = decoder.decompress(packed, 20 * 1024 * 1024 + 1)
+            if len(raw) > 20 * 1024 * 1024 or not decoder.eof or decoder.unused_data:
+                raise ValueError('MXL превышает 20 МБ или поврежден')
+            result = import_mxl(conn, raw, str(body.get('file_name', 'events.mxl')))
+            conn.commit()
+            return {'success': True, **result}
+        except (ValueError, TypeError, zlib.error, binascii.Error) as exc:
+            conn.rollback()
+            return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'import':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}
@@ -9696,9 +9729,44 @@ def handle_nbki(method, params, body, staff, cur, conn):
         files = [dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
                            'events_count', 'receipt_status', 'events_accepted', 'events_rejected',
                            'receipt_signature_verified'), (serialize(v) for v in item))) for item in cur.fetchall()]
+        cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE role='borrower'),
+            COUNT(*) FILTER (WHERE role='guarantor'),
+            COUNT(*) FILTER (WHERE role='borrower' AND match_status='matched'),
+            COUNT(*) FILTER (WHERE role='borrower' AND match_status='review'),
+            COUNT(*) FILTER (WHERE role='borrower' AND match_status='not_in_crm')
+            FROM nbki_event_deals WHERE org_id=%s""", (org_id,))
+        event_counts = cur.fetchone()
+        cur.execute("""SELECT COALESCE(SUM(row_count),0), COUNT(*) FROM nbki_event_sources
+                       WHERE org_id=%s""", (org_id,))
+        event_rows, event_files = cur.fetchone()
         return {'total': row[0], 'matched': row[1], 'review': row[2],
                 'not_in_crm': row[3], 'reported_accepted': row[4],
-                'accepted_and_matched': row[5], 'files': files}
+                'accepted_and_matched': row[5], 'files': files,
+                'event_uids': event_counts[0], 'event_borrower_uids': event_counts[1],
+                'event_guarantor_uids': event_counts[2], 'event_matched': event_counts[3],
+                'event_review': event_counts[4], 'event_not_in_crm': event_counts[5],
+                'event_rows': event_rows, 'event_files': event_files}
+    if action == 'event_deals':
+        status = params.get('status', 'all')
+        if status not in ('all', 'matched', 'review', 'not_in_crm', 'guarantor'):
+            return {'_status': 400, 'error': 'Неверный статус'}
+        limit = min(max(int(params.get('limit', 100)), 1), 200)
+        offset = max(int(params.get('offset', 0)), 0)
+        where = 'org_id=%s'
+        values = [org_id]
+        if status != 'all':
+            where += ' AND match_status=%s'
+            values.append(status)
+        cur.execute('SELECT COUNT(*) FROM nbki_event_deals WHERE ' + where, values)
+        total = cur.fetchone()[0]
+        cur.execute("""SELECT uid,contract_no,nbki_contract_no,role,subject_name,
+            deal_date,original_amount,loan_id,match_status,match_reason,
+            first_event_time,last_event_time FROM nbki_event_deals WHERE """ + where +
+            ' ORDER BY match_status,contract_no LIMIT %s OFFSET %s', values + [limit, offset])
+        columns = ('uid','contract_no','nbki_contract_no','role','subject_name',
+                   'deal_date','original_amount','loan_id','match_status','match_reason',
+                   'first_event_time','last_event_time')
+        return {'total': total, 'rows': [dict(zip(columns, (serialize(v) for v in item))) for item in cur.fetchall()]}
     if action == 'deals':
         status = params.get('status', 'all')
         if status not in ('all', 'matched', 'review', 'not_in_crm', 'unmatched'):

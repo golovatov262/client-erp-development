@@ -26,6 +26,40 @@ export type NbkiSummary = {
   reported_accepted: number;
   accepted_and_matched: number;
   files: NbkiFile[];
+  event_uids: number;
+  event_borrower_uids: number;
+  event_guarantor_uids: number;
+  event_matched: number;
+  event_review: number;
+  event_not_in_crm: number;
+  event_rows: number;
+  event_files: number;
+};
+
+export type NbkiEventDeal = {
+  uid: string;
+  contract_no: string;
+  nbki_contract_no: string;
+  role: "borrower" | "guarantor";
+  subject_name: string;
+  deal_date: string | null;
+  original_amount: number | null;
+  loan_id: number | null;
+  match_status: string;
+  match_reason: string | null;
+  first_event_time: string;
+  last_event_time: string;
+};
+export type NbkiEventDealsPage = { total: number; rows: NbkiEventDeal[] };
+export type NbkiEventImportResult = {
+  success: boolean;
+  rows: number;
+  borrower_uids: number;
+  guarantor_uids: number;
+  matched: number;
+  review: number;
+  not_in_crm: number;
+  acceptance_basis: "operator_assumed";
 };
 
 export type NbkiDeal = {
@@ -148,6 +182,10 @@ export const api = {
   nbki: {
     summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
     deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
+    eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),
+    importEvents: (mxlGzipBase64: string, fileName: string) => request<NbkiEventImportResult>("POST", undefined, {
+      entity: "nbki", action: "import_events", mxl_gzip_base64: mxlGzipBase64, file_name: fileName,
+    }),
     importHistorical: (xml: string[], receipts: string[]) => request<NbkiImportResult>("POST", undefined, {
       entity: "nbki", action: "import", xml_gzip_base64: xml, receipt_zip_base64: receipts,
     }),
@@ -783,6 +821,8 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+  nbki_uid?: string | null;
+  nbki_acceptance_basis?: "ticket2_unverified" | "operator_assumed" | "no_receipt" | null;
 }
 
 export interface LoanCollateral {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiDeal, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiDeal, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,10 @@ const gzipFile = async (file: File): Promise<string> => {
 const AdminNbkiTab = () => {
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [deals, setDeals] = useState<NbkiDeal[]>([]);
+  const [eventDeals, setEventDeals] = useState<NbkiEventDeal[]>([]);
+  const [eventTotal, setEventTotal] = useState(0);
+  const [eventStatus, setEventStatus] = useState("all");
+  const [eventOffset, setEventOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [status, setStatus] = useState("all");
   const [offset, setOffset] = useState(0);
@@ -45,18 +49,23 @@ const AdminNbkiTab = () => {
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
+  const [eventFile, setEventFile] = useState<File | null>(null);
+  const [eventImportResult, setEventImportResult] = useState<NbkiEventImportResult | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [nextSummary, nextDeals] = await Promise.all([
+      const [nextSummary, nextDeals, nextEventDeals] = await Promise.all([
         api.nbki.summary(),
         api.nbki.deals(status, offset),
+        api.nbki.eventDeals(eventStatus, eventOffset),
       ]);
       setSummary(nextSummary);
       setDeals(nextDeals.rows);
       setTotal(nextDeals.total);
+      setEventDeals(nextEventDeals.rows);
+      setEventTotal(nextEventDeals.total);
     } catch (e) {
       setError(humanizeError(e));
     } finally {
@@ -64,7 +73,7 @@ const AdminNbkiTab = () => {
     }
   };
 
-  useEffect(() => { void load(); }, [status, offset]);
+  useEffect(() => { void load(); }, [status, offset, eventStatus, eventOffset]);
 
   const importFiles = async () => {
     if (!xmlFiles.length) return;
@@ -76,6 +85,22 @@ const AdminNbkiTab = () => {
       const receipts = await Promise.all(receiptFiles.map(async file => toBase64(await file.arrayBuffer())));
       const result = await api.nbki.importHistorical(xml, receipts);
       setImportResult(result);
+      await load();
+    } catch (e) {
+      setError(humanizeError(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const importEventFile = async () => {
+    if (!eventFile) return;
+    setImporting(true);
+    setError("");
+    setEventImportResult(null);
+    try {
+      const result = await api.nbki.importEvents(await gzipFile(eventFile), eventFile.name);
+      setEventImportResult(result);
       await load();
     } catch (e) {
       setError(humanizeError(e));
@@ -113,6 +138,56 @@ const AdminNbkiTab = () => {
             <span className="text-xs text-muted-foreground">Выбрано: {xmlFiles.length} XML, {receiptFiles.length} квитанций</span>
           </div>
           {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров не найдены в CRM. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">События 1С (MXL)</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">События хранятся отдельно от XML. По вашему указанию они считаются принятыми для учета в CRM, но это не подтверждение НБКИ: без квитанции и проверки подписи фактический прием неизвестен. Суммы, даты и платежи в договорах не перезаписываются.</p>
+          <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".mxl" onChange={event => setEventFile(event.target.files?.[0] || null)} />
+          <Button disabled={!eventFile || importing} onClick={() => void importEventFile()}>{importing ? "Сопоставляем…" : "Импортировать события"}</Button>
+          {eventImportResult && <p role="status" className="text-sm">Обработано {eventImportResult.rows} событий: {eventImportResult.borrower_uids} УИД заемщиков, {eventImportResult.guarantor_uids} УИД поручителей. Сопоставлено {eventImportResult.matched}, требуют проверки {eventImportResult.review}, нет в CRM {eventImportResult.not_in_crm}.</p>}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ["События 1С", summary?.event_rows ?? 0],
+          ["УИД заемщиков", summary?.event_borrower_uids ?? 0],
+          ["Сопоставлены с CRM", summary?.event_matched ?? 0],
+          ["УИД поручителей", summary?.event_guarantor_uids ?? 0],
+        ].map(([label, value]) => (
+          <Card key={label}><CardContent className="pt-5"><div className="text-2xl font-semibold">{value}</div><div className="text-sm text-muted-foreground">{label}</div></CardContent></Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">УИД из событий 1С</CardTitle></CardHeader>
+        <CardContent>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {[
+              ["all", "Все"], ["matched", "Сопоставлены"], ["review", "Проверить"],
+              ["not_in_crm", "Нет в CRM"], ["guarantor", "Поручители"],
+            ].map(([value, label]) => <Button key={value} size="sm" variant={eventStatus === value ? "default" : "outline"} onClick={() => { setEventStatus(value); setEventOffset(0); }}>{label}</Button>)}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] text-sm">
+              <thead><tr className="border-b text-left text-muted-foreground"><th className="p-2">Договор</th><th className="p-2">Участник</th><th className="p-2">УИД</th><th className="p-2">CRM</th><th className="p-2">Приём</th></tr></thead>
+              <tbody>{eventDeals.map(deal => <tr key={deal.uid} className="border-b align-top">
+                <td className="p-2 font-medium">{deal.contract_no}<div className="text-xs text-muted-foreground">{deal.deal_date || "Дата не указана"}</div></td>
+                <td className="p-2">{deal.subject_name}<div className="text-xs text-muted-foreground">{deal.role === "guarantor" ? "Поручитель" : "Заемщик"}</div></td>
+                <td className="break-all p-2 font-mono text-xs">{deal.uid}</td>
+                <td className="p-2">{deal.loan_id ? `Займ №${deal.loan_id}` : deal.match_reason || "Не сопоставлен"}</td>
+                <td className="p-2">По указанию, без квитанции</td>
+              </tr>)}</tbody>
+            </table>
+            {!loading && !eventDeals.length && <p className="py-6 text-center text-sm text-muted-foreground">Нет записей</p>}
+          </div>
+          <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+            <span>{eventTotal ? `${eventOffset + 1}–${Math.min(eventOffset + eventDeals.length, eventTotal)} из ${eventTotal}` : "0 УИД"}</span>
+            <div className="flex gap-2"><Button size="sm" variant="outline" disabled={eventOffset === 0 || loading} onClick={() => setEventOffset(Math.max(0, eventOffset - 100))}>Назад</Button><Button size="sm" variant="outline" disabled={eventOffset + 100 >= eventTotal || loading} onClick={() => setEventOffset(eventOffset + 100)}>Далее</Button></div>
+          </div>
         </CardContent>
       </Card>
 
