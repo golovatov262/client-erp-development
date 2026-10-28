@@ -8554,7 +8554,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -9633,6 +9633,62 @@ def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
     return {'error': 'Неизвестное действие'}
 
 
+def handle_nbki(params, staff, cur):
+    """Read-only view of historical NBKI import and contract reconciliation."""
+    if staff.get('role') != 'admin':
+        return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
+    action = params.get('action', 'summary')
+    cur.execute('SELECT id FROM organizations WHERE inn=%s', ('4307012081',))
+    org = cur.fetchone()
+    if not org:
+        return {'error': 'Организация Эксперт Финанс не найдена'}
+    org_id = org[0]
+    if action == 'summary':
+        cur.execute("""SELECT COUNT(*),
+            COUNT(*) FILTER (WHERE match_status='matched'),
+            COUNT(*) FILTER (WHERE match_status='review'),
+            COUNT(*) FILTER (WHERE match_status='not_in_crm'),
+            COUNT(*) FILTER (WHERE reported_accepted),
+            COUNT(*) FILTER (WHERE reported_accepted AND match_status='matched')
+            FROM nbki_deals WHERE org_id=%s""", (org_id,))
+        row = cur.fetchone()
+        cur.execute("""SELECT reg_number, schema_version, document_time, subjects_count,
+            events_count, receipt_status, events_accepted, events_rejected,
+            receipt_signature_verified FROM nbki_source_files
+            WHERE org_id=%s ORDER BY document_time DESC""", (org_id,))
+        files = [dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
+                           'events_count', 'receipt_status', 'events_accepted', 'events_rejected',
+                           'receipt_signature_verified'), (serialize(v) for v in item))) for item in cur.fetchall()]
+        return {'total': row[0], 'matched': row[1], 'review': row[2],
+                'not_in_crm': row[3], 'reported_accepted': row[4],
+                'accepted_and_matched': row[5], 'files': files}
+    if action == 'deals':
+        status = params.get('status', 'all')
+        if status not in ('all', 'matched', 'review', 'not_in_crm', 'unmatched'):
+            return {'error': 'Неверный статус'}
+        limit = min(max(int(params.get('limit', 100)), 1), 200)
+        offset = max(int(params.get('offset', 0)), 0)
+        where = 'd.org_id=%s'
+        values = [org_id]
+        if status != 'all':
+            where += ' AND d.match_status=%s'
+            values.append(status)
+        cur.execute('SELECT COUNT(*) FROM nbki_deals d WHERE ' + where, values)
+        total = cur.fetchone()[0]
+        cur.execute("""SELECT d.id, d.contract_no, d.uid, d.subject_type, d.subject_name,
+            d.deal_date, d.original_amount, d.loan_id, d.match_status, d.match_reason,
+            d.reported_accepted, d.last_event_time, f.reg_number AS accepted_file
+            FROM nbki_deals d LEFT JOIN nbki_source_files f ON f.id=d.accepted_file_id
+            WHERE """ + where + " ORDER BY d.match_status, d.contract_no LIMIT %s OFFSET %s",
+            values + [limit, offset])
+        columns = ('id', 'contract_no', 'uid', 'subject_type', 'subject_name', 'deal_date',
+                   'original_amount', 'loan_id', 'match_status', 'match_reason',
+                   'reported_accepted', 'last_event_time', 'accepted_file')
+        rows = [dict(zip(columns, (serialize(v) for v in item))) for item in cur.fetchall()]
+        return {'total': total, 'rows': rows}
+    return {'error': 'Неизвестное действие'}
+
+
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
@@ -9718,6 +9774,8 @@ def handler(event, context):
             result = handle_api_keys(method, params, body, staff, cur, conn)
         elif entity == 'integration_secrets':
             result = handle_integration_secrets(method, body, staff, cur, conn)
+        elif entity == 'nbki':
+            result = handle_nbki(params, staff, cur)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         elif entity == 'agents':

@@ -6,6 +6,46 @@ const API_URL = new URL(funcUrls.api, window.location.origin).toString();
 
 type Params = Record<string, string | number | undefined>;
 
+export type NbkiFile = {
+  reg_number: string;
+  schema_version: string;
+  document_time: string | null;
+  subjects_count: number;
+  events_count: number;
+  receipt_status: string;
+  events_accepted: number | null;
+  events_rejected: number | null;
+  receipt_signature_verified: boolean;
+};
+
+export type NbkiSummary = {
+  total: number;
+  matched: number;
+  review: number;
+  not_in_crm: number;
+  reported_accepted: number;
+  accepted_and_matched: number;
+  files: NbkiFile[];
+};
+
+export type NbkiDeal = {
+  id: number;
+  contract_no: string;
+  uid: string;
+  subject_type: "FL" | "UL";
+  subject_name: string | null;
+  deal_date: string | null;
+  original_amount: number | null;
+  loan_id: number | null;
+  match_status: string;
+  match_reason: string | null;
+  reported_accepted: boolean;
+  last_event_time: string | null;
+  accepted_file: string | null;
+};
+
+export type NbkiDealsPage = { total: number; rows: NbkiDeal[] };
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -96,6 +136,10 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 
 export const api = {
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
+  nbki: {
+    summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
+    deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
+  },
   integrationSecrets: {
     list: () => request<IntegrationSecretStatus[]>("GET", { entity: "integration_secrets" }),
     save: (values: Record<string,string>) => request<{success:boolean;changed:string[]}>("PUT", { entity: "integration_secrets" }, { entity: "integration_secrets", values }),

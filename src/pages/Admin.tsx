@@ -14,6 +14,7 @@ import AdminOrganizations from "./admin/AdminOrganizations";
 import AdminNotifications from "./admin/AdminNotifications";
 import AdminApiKeys from "./admin/AdminApiKeys";
 import AdminIntegrations from "./admin/AdminIntegrations";
+import AdminNbkiTab from "./admin/AdminNbkiTab";
 
 type UserRow = StaffUser & { [key: string]: unknown };
 
@@ -142,6 +143,7 @@ const Admin = () => {
           <TabsTrigger value="notifications">Уведомления</TabsTrigger>
           <TabsTrigger value="api_keys">API-ключи</TabsTrigger>
           <TabsTrigger value="integrations">Интеграции</TabsTrigger>
+          <TabsTrigger value="nbki">НБКИ</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -184,6 +186,7 @@ const Admin = () => {
           <AdminApiKeys />
         </TabsContent>
         <TabsContent value="integrations"><AdminIntegrations /></TabsContent>
+        <TabsContent value="nbki"><AdminNbkiTab /></TabsContent>
       </Tabs>
 
       <Dialog open={showPwChange} onOpenChange={setShowPwChange}>
