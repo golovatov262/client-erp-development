@@ -23,9 +23,9 @@ try:
 except ImportError:
     from backend.loan_payment_engine import post_loan_payment
 try:
-    from nbki_import import import_payloads
+    from nbki_import import import_payloads, resolve_source_org_id
 except ImportError:
-    from backend.nbki_import import import_payloads
+    from backend.nbki_import import import_payloads, resolve_source_org_id
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9644,11 +9644,10 @@ def handle_nbki(method, params, body, staff, cur, conn):
     if staff.get('role') != 'admin':
         return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
     action = params.get('action') or body.get('action', 'summary')
-    cur.execute('SELECT id FROM organizations WHERE inn=%s', ('4307012081',))
-    org = cur.fetchone()
-    if not org:
-        return {'error': 'Организация Эксперт Финанс не найдена'}
-    org_id = org[0]
+    try:
+        org_id = resolve_source_org_id(cur)
+    except ValueError as exc:
+        return {'_status': 409, 'error': str(exc)}
     if action == 'import':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

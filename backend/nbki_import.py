@@ -220,6 +220,20 @@ def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | No
     return loan_id, "matched", None
 
 
+def resolve_source_org_id(cur) -> int:
+    """Resolve the source to its sole organization with loans if INN is duplicated."""
+    cur.execute("""SELECT o.id, COUNT(l.id) AS loan_count
+                   FROM organizations o LEFT JOIN loans l ON l.org_id=o.id
+                   WHERE o.inn=%s GROUP BY o.id""", (SOURCE_INN,))
+    orgs = cur.fetchall()
+    active_orgs = [org_id for org_id, loan_count in orgs if loan_count > 0]
+    if len(orgs) == 1:
+        return orgs[0][0]
+    if len(active_orgs) == 1:
+        return active_orgs[0]
+    raise ValueError("Нельзя однозначно определить организацию источника по ИНН и договорам")
+
+
 def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[bytes]) -> dict:
     files = sorted((parse_source_xml(raw) for raw in xml_payloads),
                    key=lambda item: item["document_time"])
@@ -245,17 +259,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
 
     statuses: dict[str, str] = {}
     with conn.cursor() as cur:
-        cur.execute("""SELECT o.id, COUNT(l.id) AS loan_count
-                       FROM organizations o LEFT JOIN loans l ON l.org_id=o.id
-                       WHERE o.inn=%s GROUP BY o.id""", (SOURCE_INN,))
-        orgs = cur.fetchall()
-        active_orgs = [org_id for org_id, loan_count in orgs if loan_count > 0]
-        if len(orgs) == 1:
-            org_id = orgs[0][0]
-        elif len(active_orgs) == 1:
-            org_id = active_orgs[0]
-        else:
-            raise ValueError("Нельзя однозначно определить организацию источника по ИНН и договорам")
+        org_id = resolve_source_org_id(cur)
         for source in files:
             reg = source["reg_number"]
             receipt = receipts.get(reg)
