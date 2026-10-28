@@ -76,6 +76,9 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     name = (' '.join(filter(None, (data['last_name'],data['first_name'],data['middle_name'])))
             if data['member_type'] == 'FL' else data['company_name'])
     issues = []
+    eligible = data['status'] in ('active', 'overdue', 'holiday')
+    if not eligible:
+        issues.append('Закрытый договор исключен из исходящей выгрузки')
     if not data['contract_no'] or not data['amount'] or not data['start_date'] or not data['end_date']:
         issues.append('Неполные реквизиты договора')
     if not name or not data['inn']:
@@ -115,7 +118,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     }
     # Full GUTDF event mapping, XSD and NBKI business rules are deliberately
     # not claimed as passed merely because the CRM fields above are present.
-    checks = {'crm_issues': issues, 'gutdf_xsd_validated': False,
+    checks = {'crm_issues': issues, 'scope_eligible': eligible,
+              'gutdf_xsd_validated': False,
               'nbki_business_rules_validated': False,
               'receipt_confirmed': False, 'submittable': False}
     return {'loan_id': loan_id, 'contract_no': data['contract_no'],
@@ -124,6 +128,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
 
 def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
     result = inspect_loan(cur, org_id, loan_id)
+    if result['snapshot']['loan']['status'] not in ('active', 'overdue', 'holiday'):
+        raise ValueError('Закрытый договор исключен из исходящей выгрузки НБКИ')
     encoded = json.dumps(result['snapshot'], default=_json_default,
                          ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
@@ -146,7 +152,8 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
 
 
 def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
-    cur.execute('SELECT id FROM loans WHERE org_id=%s ORDER BY id', (org_id,))
+    cur.execute("""SELECT id FROM loans WHERE org_id=%s
+        AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
     loan_ids = [row[0] for row in cur.fetchall()]
     if len(loan_ids) > 500:
         raise ValueError('Для пакетного черновика выберите не более 500 займов')

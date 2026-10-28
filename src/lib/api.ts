@@ -97,8 +97,8 @@ export type NbkiDraft = {
   loan_id: number;
   contract_no: string;
   snapshot_sha256: string;
-  checks: { crm_issues: string[]; gutdf_xsd_validated: boolean; nbki_business_rules_validated: boolean; submittable: boolean };
-  status: "blocked" | "draft";
+  checks: { crm_issues: string[]; scope_eligible?: boolean; gutdf_xsd_validated: boolean; nbki_business_rules_validated: boolean; submittable: boolean };
+  status: "blocked" | "draft" | "excluded";
   created_at: string;
 };
 

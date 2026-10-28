@@ -85,7 +85,7 @@ const AdminNbkiTab = () => {
     setError("");
     try {
       const result = await api.nbki.createAllDrafts();
-      setBulkResult(`Проверено ${result.total} займов: создано ${result.created} снимков, ${result.unchanged} без изменений, ${result.with_crm_issues} с замечаниями CRM. К отправке: 0.`);
+      setBulkResult(`Проверено ${result.total} действующих займов (активные, просроченные, каникулы): создано ${result.created} снимков, ${result.unchanged} без изменений, ${result.with_crm_issues} с замечаниями CRM. К отправке: 0.`);
       await refreshOutbox();
     } catch (e) { setError(humanizeError(e)); }
     finally { setOutboxLoading(false); }
@@ -203,7 +203,7 @@ const AdminNbkiTab = () => {
           <div className="max-h-60 overflow-y-auto text-sm">
             {drafts.map(draft => <div key={draft.id} className="flex flex-wrap justify-between gap-2 border-b py-2">
               <span>#{draft.id} · {draft.contract_no} · займ CRM №{draft.loan_id}<span className="ml-2 font-mono text-xs text-muted-foreground" title={draft.snapshot_sha256}>SHA-256 {draft.snapshot_sha256.slice(0, 12)}…</span></span>
-              <span className="text-muted-foreground">Заблокирован · {draft.checks.crm_issues.length} замечаний CRM</span>
+              <span className="text-muted-foreground">{draft.status === 'excluded' ? 'Исключён: договор закрыт' : `Заблокирован · ${draft.checks.crm_issues.length} замечаний CRM`}</span>
             </div>)}
             {!drafts.length && <p className="text-muted-foreground">Черновиков пока нет.</p>}
           </div>
