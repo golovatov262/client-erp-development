@@ -371,7 +371,7 @@ export type NbkiCrmEvents = {
       interest: string | null; penalty: string | null };
     original_principal: string; current_principal: string;
     components_match: boolean; has_posting_snapshot: boolean;
-    export_candidate: boolean;
+    source_complete: boolean;
   }[];
 };
 

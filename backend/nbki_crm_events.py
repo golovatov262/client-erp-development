@@ -57,6 +57,6 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
             'current_principal': str(current_balance),
             'components_match': components_match,
             'has_posting_snapshot': bool(digest),
-            'export_candidate': bool(uid and occurred_at and components_match),
+            'source_complete': bool(uid and occurred_at and components_match),
         })
     return {'total': total, 'rows': rows}
