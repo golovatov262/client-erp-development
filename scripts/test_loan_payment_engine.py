@@ -61,6 +61,18 @@ assert dates_before == dates_after and count_before == count_after
 cur.execute("SELECT sum(penalty_part) FROM loan_payments WHERE loan_id=%s", (loan,))
 assert cur.fetchone()[0] == 0
 
+# В последнем периоде автоматический платёж покрывает начисленную пеню
+# после процентов, до основного долга; исторические строки не меняются.
+loan = make_loan(cur, 'FINAL-PENALTY')
+cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110 WHERE loan_id=%s AND payment_no<3", (loan,))
+cur.execute("UPDATE loans SET balance=100 WHERE id=%s", (loan,))
+r = post_loan_payment(cur, loan, 131, date(2026, 11, 30), source='bank', source_ref='final-penalty')
+assert (r['interest_part'], r['penalty_part'], r['principal_part'], r['new_balance']) == (10.0, 21.0, 100.0, 0.0), r
+cur.execute("SELECT paid_amount,status FROM loan_schedule WHERE loan_id=%s AND payment_no=3", (loan,))
+assert cur.fetchone() == (Decimal('110.00'), 'paid')
+cur.execute("SELECT evidence->'after'->>'paid_penalty_to_date' FROM nbki_payment_posting_snapshots WHERE payment_id=%s", (r['payment_id'],))
+assert cur.fetchone()[0] == '21.00'
+
 # Идемпотентность банковской операции.
 again = post_loan_payment(cur, loan, 230, date(2026, 10, 7), source='bank', source_ref='test-over')
 assert again.get('duplicate') is True

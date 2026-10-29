@@ -202,7 +202,8 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
           AND s.status NOT IN ('paid','holiday','holiday_pending')
         ORDER BY s.payment_no LIMIT 1 FOR UPDATE""", (loan_id, payment_date, _month_end(payment_date)))
     current_row = cur.fetchone()
-    if current_row and amount > money(current_row[3]) + EPS and money(current_row[6]) <= EPS:
+    if (current_row and payment_date < current_row[2] and
+            amount > money(current_row[3]) + EPS and money(current_row[6]) <= EPS):
         cur.execute("""SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s
             AND status NOT IN ('paid','holiday','holiday_pending')""", (loan_id, current_row[1]))
         if cur.fetchone()[0] == 0:
@@ -270,7 +271,27 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         # При просрочке текущий период ещё не наступил: сначала закрываем все
         # просроченные проценты и основной долг, затем остаток идёт досрочно в ОД.
         allocation_rows = [row for row in rows if row[5] < payment_date] if had_overdue else rows
+        cur.execute("""SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s
+            AND status NOT IN ('holiday','holiday_pending')""", (loan_id,))
+        final_no = cur.fetchone()[0]
+        final_period_reached = any(row[1] == final_no for row in allocation_rows)
         for component, column in (('interest', 3), ('principal', 2)):
+            if component == 'principal' and final_period_reached and remaining > EPS:
+                # Penalties accrue in schedule rows but become payable only with
+                # the final scheduled installment. They are not paid_amount.
+                cur.execute("""SELECT COALESCE(SUM(penalty_amount),0)
+                    FROM loan_schedule WHERE loan_id=%s""", (loan_id,))
+                assessed_penalty = money(cur.fetchone()[0])
+                cur.execute("""SELECT COALESCE(SUM(penalty_part),0)
+                    FROM loan_payments WHERE loan_id=%s""", (loan_id,))
+                paid_penalty = money(cur.fetchone()[0])
+                if paid_penalty > assessed_penalty + CENT:
+                    raise ValueError('Оплаченная пеня превышает начисленную по графику')
+                take_penalty = min(remaining, max(Decimal('0'), assessed_penalty - paid_penalty))
+                if take_penalty > EPS:
+                    _insert_allocation(cur, payment_id, None, 'penalty', take_penalty, mode)
+                    totals['penalty'] += take_penalty
+                    remaining -= take_penalty
             for row in allocation_rows:
                 if remaining <= EPS:
                     break
