@@ -39,9 +39,9 @@ def source_block(source: dict, credit_info_date: str) -> ET.Element:
     block = _add(source_node, 'FL_46_UL_36_OrgSource')
     _add(block, 'sourceCode', source['source_code'])
     _add(block, 'sourceRegistrationFact_1')
-    _add(block, 'fullName', source['name'])
+    _add(block, 'fullName', source['name'].upper())
     if source.get('short_name'):
-        _add(block, 'shortName', source['short_name'])
+        _add(block, 'shortName', source['short_name'].upper())
     _add(block, 'sourceDateStart', source['registration_date'])
     _add(block, 'regNum', source['registration_number'])
     tax = _add(block, 'TaxNum_group_FL_46_UL_36_OrgSource')
