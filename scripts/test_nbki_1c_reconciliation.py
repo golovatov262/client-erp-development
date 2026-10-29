@@ -125,6 +125,8 @@ class ReconciliationTests(unittest.TestCase):
             result = list_payment_candidates(cur, 2)
         self.assertEqual(result['total'], 1)
         self.assertIsNone(result['rows'][0]['gutdf_event_code'])
+        self.assertEqual(result['rows'][0]['event_code_candidate'], '2.3')
+        self.assertFalse(result['rows'][0]['event_code_confirmed'])
         self.assertFalse(result['rows'][0]['xml_ready'])
         self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
         self.assertEqual(result['rows'][0]['accounting_snapshot']['status'], 'checked')

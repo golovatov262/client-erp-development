@@ -239,6 +239,8 @@ export type NbkiPaymentCandidates = {
     payment_type: string;
     payment_source: string;
     candidate_reason: string;
+    event_code_candidate: "2.3";
+    event_code_candidate_basis: string;
     crm_issues: string[];
     missing_fields: string[];
     accounting_snapshot: {

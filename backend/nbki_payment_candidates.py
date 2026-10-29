@@ -60,6 +60,10 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'interest': str(interest or 0), 'penalty': str(penalty or 0),
                      'payment_type': payment_type, 'payment_source': payment_source,
                      'candidate_reason': 'Платёж CRM после последнего события 1С',
+                     'event_code_candidate': '2.3',
+                     'event_code_candidate_basis': ('Раздел 5 приложения 3 к Положению Банка России '
+                         '№ 758-П: изменились сведения об исполнении обязательства субъектом. '
+                         'Требуется подтвердить фактическое время платежа и состав блоков.'),
                      'crm_issues': inspection['checks']['crm_issues'],
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
