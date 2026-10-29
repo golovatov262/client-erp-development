@@ -280,6 +280,17 @@ export type NbkiPaymentCandidates = {
       remaining_interest_candidate: string | null;
       issues: string[];
     };
+    smp_candidate: {
+      status: "candidate_from_crm_schedule" | "unavailable" | "review";
+      basis: string; months_uncapped: number | null; months_cap48: number | null;
+      remaining_schedule_payments: string | null;
+      overdue_principal_interest: string | null; penalty_candidate: string | null;
+      value_without_penalty_uncapped: number | null;
+      value_with_penalty_uncapped: number | null;
+      value_without_penalty_cap48: number | null;
+      value_with_penalty_cap48: number | null;
+      principal_reconciled: boolean; issues: string[];
+    };
     allocation_audit: {
       payment_id: number;
       status: "checked" | "review" | "unavailable";

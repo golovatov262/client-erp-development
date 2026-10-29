@@ -14,11 +14,13 @@ try:
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from nbki_event23_readiness import assess_event23
     from nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from nbki_smp import preview_smp
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
     from backend.nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from backend.nbki_smp import preview_smp
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -74,6 +76,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             cur, loan_id, payment_id, payment_date,
             latest_payment=crm_debt['later_payments'] == 0,
             principal_checked=accounting.get('status') == 'checked')
+        smp_candidate = preview_smp(cur, loan_id, payment_date, crm_debt)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt)
@@ -99,6 +102,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'accounting_snapshot': accounting,
                      'crm_debt_reconstruction': crm_debt,
                      'interest_candidate': interest_candidate,
+                     'smp_candidate': smp_candidate,
                      'allocation_audit': allocation_audit,
                      'psk_candidate': ({'percent': str(psk_percent),
                                         'amount': str(psk_amount),
