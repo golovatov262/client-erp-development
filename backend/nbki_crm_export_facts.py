@@ -9,9 +9,13 @@ from __future__ import annotations
 from decimal import Decimal
 
 try:
-    from nbki_accounting_snapshot import build_accounting_snapshot
+    from nbki_accounting_snapshot import (build_accounting_snapshot,
+                                          audit_payment_allocations)
+    from nbki_crm_debt import split_posting_snapshot_debt
 except ImportError:
-    from backend.nbki_accounting_snapshot import build_accounting_snapshot
+    from backend.nbki_accounting_snapshot import (build_accounting_snapshot,
+                                                  audit_payment_allocations)
+    from backend.nbki_crm_debt import split_posting_snapshot_debt
 
 
 def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
@@ -60,6 +64,14 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
     frozen = cur.fetchone()
     if frozen and digest and frozen[0].strip() != digest.strip():
         raise ValueError('Контрольная сумма события и снимка платежа расходится')
+    cur.execute("""SELECT a.id,a.schedule_id,a.component,a.amount,
+        a.allocation_mode,s.loan_id FROM loan_payment_allocations a
+        LEFT JOIN loan_schedule s ON s.id=a.schedule_id
+        WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
+    allocation = audit_payment_allocations(target, cur.fetchall(), loan_id)
+    debt_at_posting = (split_posting_snapshot_debt(
+        frozen[1], frozen[0].strip(), loan_id, payment_id, target[1])
+        if frozen else None)
     cur.execute("""SELECT psk_percent,psk_amount,calculated_on,
         verification_status FROM loan_psk_calculations WHERE loan_id=%s""",
         (loan_id,))
@@ -121,5 +133,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
                     'penalty': str(target[5]), 'unapplied': str(unapplied),
                     'cumulative': cumulative, 'engine_version': target[6]},
         'accounting': accounting,
+        'allocation': allocation,
+        'debt_at_posting': debt_at_posting,
         'posting_snapshot_sha256': frozen[0].strip() if frozen else None,
     }
