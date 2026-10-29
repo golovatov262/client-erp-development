@@ -4,6 +4,11 @@ from decimal import Decimal, ROUND_HALF_UP
 import re
 from zoneinfo import ZoneInfo
 
+try:
+    from nbki_payment_posting_snapshot import capture_loan_state, store_payment_snapshot
+except ImportError:
+    from backend.nbki_payment_posting_snapshot import capture_loan_state, store_payment_snapshot
+
 CENT = Decimal('0.01')
 EPS = Decimal('0.005')
 MOSCOW = ZoneInfo('Europe/Moscow')
@@ -169,6 +174,7 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
     old_balance, loan_status, annual_rate = money(loan[0]), loan[1], Decimal(str(loan[2]))
     if loan_status == 'closed' or old_balance <= EPS:
         raise ValueError('Договор займа закрыт')
+    nbki_state_before = capture_loan_state(cur, loan_id)
 
     mode = 'manual' if forced else 'automatic'
     if forced:
@@ -308,6 +314,9 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
             new_monthly, new_term = _recalculate_future_reduce_term(cur, loan_id, new_balance, payment_date, had_overdue)
         else:
             new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date, had_overdue)
+    nbki_state_after = capture_loan_state(cur, loan_id)
+    store_payment_snapshot(cur, payment_id, loan_id, payment_date,
+                           nbki_state_before, nbki_state_after)
     return {'payment_id': payment_id, 'principal_part': float(principal_total),
             'interest_part': float(totals['interest']), 'penalty_part': float(totals['penalty']),
             'early_principal': float(totals['early_principal']), 'unapplied': float(max(remaining, 0)),

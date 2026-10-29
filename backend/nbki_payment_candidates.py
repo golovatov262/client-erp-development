@@ -21,10 +21,12 @@ def list_payment_candidates(cur, org_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,f.uid,f.event_time,f.source_id,
         f.source_row_num,p.id,p.payment_date,p.amount,p.principal_part,
         p.interest_part,p.penalty_part,p.payment_type,p.source,
-        p.nbki_event_occurred_at,p.nbki_recorded_at,p.nbki_event_time_basis
+        p.nbki_event_occurred_at,p.nbki_recorded_at,p.nbki_event_time_basis,
+        ps.evidence_sha256,ps.captured_at
         FROM nbki_1c_loan_facts f
         JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
         JOIN loan_payments p ON p.loan_id=l.id
+        LEFT JOIN nbki_payment_posting_snapshots ps ON ps.payment_id=p.id
         WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
           AND p.payment_date>f.event_time::date AND p.payment_date<=CURRENT_DATE
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
@@ -37,7 +39,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
     for (loan_id, contract_no, uid, event_time, source_id, row_num,
          payment_id, payment_date, amount, principal, interest, penalty,
          payment_type, payment_source, event_occurred_at, recorded_at,
-         event_time_basis) in cur.fetchall():
+         event_time_basis, posting_snapshot_sha256, posting_captured_at) in cur.fetchall():
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
         inspection = inspections[loan_id]
@@ -68,6 +70,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'event_occurred_at_msk': event_occurred_at.astimezone(MOSCOW).isoformat() if event_occurred_at else None,
                      'crm_recorded_at_msk': recorded_at.astimezone(MOSCOW).isoformat() if recorded_at else None,
                      'event_time_basis': event_time_basis,
+                     'posting_snapshot_sha256': posting_snapshot_sha256.strip() if posting_snapshot_sha256 else None,
+                     'posting_snapshot_captured_at_msk': posting_captured_at.astimezone(MOSCOW).isoformat() if posting_captured_at else None,
                      'candidate_reason': 'Платёж CRM после последнего события 1С',
                      'event_code_candidate': '2.3',
                      'event_code_candidate_basis': ('Раздел 5 приложения 3 к Положению Банка России '

@@ -241,6 +241,8 @@ export type NbkiPaymentCandidates = {
     event_occurred_at_msk: string | null;
     crm_recorded_at_msk: string | null;
     event_time_basis: string | null;
+    posting_snapshot_sha256: string | null;
+    posting_snapshot_captured_at_msk: string | null;
     candidate_reason: string;
     event_code_candidate: "2.3";
     event_code_candidate_basis: string;

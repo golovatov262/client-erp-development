@@ -78,6 +78,11 @@ cur.execute("""SELECT nbki_event_occurred_at AT TIME ZONE 'Europe/Moscow',
     FROM loan_payments WHERE id=%s""", (r['payment_id'],))
 event_time, event_basis, recorded = cur.fetchone()
 assert str(event_time) == '2026-10-07 10:30:15' and event_basis == 'operator_entered' and recorded
+cur.execute("""SELECT evidence_sha256,evidence->'before'->'loan'->>'balance',
+    evidence->'after'->'loan'->>'balance' FROM nbki_payment_posting_snapshots
+    WHERE payment_id=%s""", (r['payment_id'],))
+evidence_hash, balance_before, balance_after = cur.fetchone()
+assert len(evidence_hash) == 64 and balance_before == '300.00' and balance_after == '275.00'
 r2 = post_loan_payment(cur, loan, 20, date(2026, 10, 8), source='manual')
 assert r2['interest_part'] == 10.0 and r2['principal_part'] == 10.0, r2
 cur.execute("SELECT nbki_event_occurred_at,nbki_recorded_at IS NOT NULL FROM loan_payments WHERE id=%s", (r2['payment_id'],))
