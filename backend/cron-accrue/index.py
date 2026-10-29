@@ -304,13 +304,35 @@ def check_overdue_loans(cur, check_date):
 
 PENALTY_DAILY_RATE = Decimal('0.000547')
 
+
+def remaining_principal_for_penalty(principal, interest, paid,
+                                    allocated_principal=0, allocated_total=0):
+    """Use exact CRM allocations when present, legacy inference otherwise."""
+    principal = Decimal(str(principal or 0))
+    interest = Decimal(str(interest or 0))
+    paid = Decimal(str(paid or 0))
+    allocated_principal = Decimal(str(allocated_principal or 0))
+    allocated_total = Decimal(str(allocated_total or 0))
+    if allocated_total > paid or allocated_principal > allocated_total:
+        raise ValueError('Распределения платежа превышают оплаченную сумму строки')
+    legacy_paid = max(Decimal('0'), paid - allocated_total)
+    legacy_principal = max(Decimal('0'), legacy_paid - interest)
+    covered = min(principal, legacy_principal) + allocated_principal
+    return max(Decimal('0'), principal - covered)
+
 def accrue_penalties(cur, check_date):
     today = check_date if isinstance(check_date, date) else date.fromisoformat(str(check_date))
     cur.execute("""
         SELECT ls.id, ls.loan_id, ls.principal_amount, ls.interest_amount,
-               COALESCE(ls.paid_amount, 0), ls.penalty_amount, ls.payment_date
+               COALESCE(ls.paid_amount, 0), ls.penalty_amount, ls.payment_date,
+               COALESCE(a.principal,0), COALESCE(a.total,0)
         FROM loan_schedule ls
         JOIN loans l ON l.id = ls.loan_id
+        LEFT JOIN LATERAL (
+            SELECT SUM(amount) FILTER (WHERE component='principal') AS principal,
+                   SUM(amount) AS total
+            FROM loan_payment_allocations WHERE schedule_id=ls.id
+        ) a ON true
         WHERE ls.status = 'overdue'
           AND l.status = 'overdue'
           AND l.status != 'holiday'
@@ -325,16 +347,13 @@ def accrue_penalties(cur, check_date):
     updated = 0
 
     for row in rows:
-        ls_id, loan_id, principal, interest, paid, current_penalty, _pd = row
-        principal = Decimal(str(principal))
-        interest = Decimal(str(interest))
-        paid = Decimal(str(paid))
+        ls_id, loan_id, principal, interest, paid, current_penalty, _pd, allocated_principal, allocated_total = row
         current_penalty = Decimal(str(current_penalty)) if current_penalty else Decimal('0')
 
         # Пеня не входит в состав "оплаченного" по промежуточным периодам (требуется
         # к уплате только вместе с последним платежом графика).
-        paid_principal = max(Decimal('0'), paid - interest)
-        overdue_principal = principal - min(paid_principal, principal)
+        overdue_principal = remaining_principal_for_penalty(
+            principal, interest, paid, allocated_principal, allocated_total)
         if overdue_principal <= 0:
             continue
 
