@@ -12,9 +12,11 @@ MOSCOW = ZoneInfo('Europe/Moscow')
 try:
     from nbki_outbox import inspect_loan
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
+    from nbki_event23_readiness import assess_event23
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
+    from backend.nbki_event23_readiness import assess_event23
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -60,6 +62,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             LEFT JOIN loan_schedule s ON s.id=a.schedule_id
             WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
         allocation_audit = audit_payment_allocations(payment, cur.fetchall(), loan_id)
+        event23 = assess_event23(inspection, accounting, allocation_audit,
+                                event_occurred_at, posting_snapshot_sha256)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -81,6 +85,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
                      'allocation_audit': allocation_audit,
+                     'event23_readiness': event23,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})
     return {'total': len(rows), 'rows': rows,

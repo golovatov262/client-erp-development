@@ -269,6 +269,21 @@ export type NbkiPaymentCandidates = {
       allocations: { id: number; schedule_id: number | null;
         component: string; amount: string; mode: string }[];
     };
+    event23_readiness: {
+      event_code_candidate: "2.3";
+      xsd_version: "5.1";
+      xsd_archive_sha256: string;
+      blocks: { name: string; xsd_required: boolean;
+        status: "source_present" | "partial" | "review"; note: string }[];
+      blockers: string[];
+      debt_evidence: {
+        principal_after_crm: string | null;
+        interest_debt: null; other_debt: null; total_debt: null;
+        due_debt: null; overdue_debt: null;
+        cumulative_payments_crm: Record<string, string | null> | null;
+      };
+      xml_ready: false;
+    };
     gutdf_event_code: null;
     event_code_confirmed: false;
     xml_ready: false;
