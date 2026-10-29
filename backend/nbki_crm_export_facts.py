@@ -98,6 +98,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
                   if all(item[index] is not None for item in prior)}
     return {
         'event_id': event_id, 'event_code': '2.3', 'payment_id': payment_id,
+        'loan_id': loan_id,
         'event_occurred_at': occurred_at.isoformat() if occurred_at else None,
         'uid': uids[0], 'contract_no': contract_no,
         'source': {'org_id': org_id, 'inn': org_inn, 'ogrn': org_ogrn,

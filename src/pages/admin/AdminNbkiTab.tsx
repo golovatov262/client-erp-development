@@ -75,6 +75,7 @@ const AdminNbkiTab = () => {
   const [reconciliation, setReconciliation] = useState<NbkiReconciliationReport | null>(null);
   const [paymentCandidates, setPaymentCandidates] = useState<NbkiPaymentCandidates | null>(null);
   const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
+  const [buildingEventId, setBuildingEventId] = useState<number | null>(null);
 
   const refreshOutbox = async () => {
     try {
@@ -220,6 +221,23 @@ const AdminNbkiTab = () => {
     }
   };
 
+  const downloadEvent23 = async (eventId: number) => {
+    setBuildingEventId(eventId);
+    setError("");
+    try {
+      const { file_name, content_base64 } = await api.nbki.event23Xml(eventId);
+      const binary = atob(content_base64);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/xml;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file_name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setBuildingEventId(null); }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -247,6 +265,9 @@ const AdminNbkiTab = () => {
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
               <div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.components_match ? "части платежа сходятся" : "проверить части платежа"}</div>
+              <Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.uid || !event.event_occurred_at || buildingEventId !== null}>
+                {buildingEventId === event.id ? "Формирую XML…" : "Сформировать XML 2.3"}
+              </Button>
             </div>)}
             {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Новых событий после запуска журнала пока нет.</p>}
           </div>
