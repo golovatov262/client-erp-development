@@ -1128,6 +1128,13 @@ export interface LoanDetail extends Loan {
     note: string;
     confirmed_at: string;
   } | null;
+  nbki_terms?: {
+    deal_code: string | null;
+    kind_code: string | null;
+    purpose_code: string | null;
+    valid_from: string;
+    basis: string;
+  } | null;
   psk_calculation?: {
     percent: number;
     amount: number;

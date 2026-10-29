@@ -220,6 +220,11 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <div className="text-xs text-muted-foreground mt-1">{detail.nbki_purpose_confirmation.note}</div>
         </div>}
 
+        {detail.nbki_terms && <div className="rounded-md border px-3 py-2 text-sm">
+          <div className="font-medium">Коды сделки НБКИ: тип {detail.nbki_terms.deal_code ?? "—"} · вид займа {detail.nbki_terms.kind_code ?? "—"} · цель {detail.nbki_terms.purpose_code ?? "—"}</div>
+          <div className="mt-1 text-xs text-muted-foreground">Источник классификации: {detail.nbki_terms.basis.startsWith("operator_") ? "уточнение владельца" : "разовый перенос из исторической выгрузки"}. Денежные показатели берутся из CRM.</div>
+        </div>}
+
         {detail.nbki_uid && <div className="rounded-md border px-3 py-2 text-sm">
           <span className="text-muted-foreground">УИД НБКИ: </span><span className="break-all font-mono">{detail.nbki_uid}</span>
           <div className="text-xs text-muted-foreground">{detail.nbki_acceptance_basis === "operator_assumed" ? "События учтены по указанию; квитанция НБКИ отсутствует" : detail.nbki_acceptance_basis === "ticket2_unverified" ? "Есть квитанция НБКИ; подпись не проверена" : "Нет квитанции о приеме"}</div>

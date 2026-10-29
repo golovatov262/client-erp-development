@@ -809,6 +809,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             purpose_row = cur.fetchone()
             loan['nbki_purpose_confirmation'] = (dict(zip(('purpose','basis','note','confirmed_at'),
                 (serialize(value) for value in purpose_row))) if purpose_row else None)
+            cur.execute("""SELECT deal_code,kind_code,purpose_code,valid_from,basis
+                FROM nbki_loan_terms_versions WHERE loan_id=%s
+                  AND valid_from<=now() AND (valid_until IS NULL OR valid_until>now())
+                ORDER BY valid_from DESC,id DESC LIMIT 1""", (loan['id'],))
+            nbki_terms_row = cur.fetchone()
+            loan['nbki_terms'] = (dict(zip(('deal_code','kind_code','purpose_code',
+                'valid_from','basis'), (serialize(value) for value in nbki_terms_row)))
+                if nbki_terms_row else None)
             if staff and staff.get('role') in ('admin', 'manager'):
                 loan['nbki_1c_facts'] = get_loan_facts(cur, loan['id'], loan.get('org_id'))
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
