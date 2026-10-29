@@ -58,17 +58,18 @@ def fl_title(subject: dict) -> ET.Element:
     title = ET.Element('Title')
     group = _add(title, 'FL_1_4_Group')
     name = _add(group, 'FL_1_Name')
-    _add(name, 'lastName', subject['last_name'])
-    _add(name, 'firstName', subject['first_name'])
+    # XSD 5.1 light-string fields for personal names disallow lowercase letters.
+    _add(name, 'lastName', subject['last_name'].upper())
+    _add(name, 'firstName', subject['first_name'].upper())
     if subject.get('middle_name'):
-        _add(name, 'middleName', subject['middle_name'])
+        _add(name, 'middleName', subject['middle_name'].upper())
     doc = _add(group, 'FL_4_Doc')
     _add(doc, 'countryCode', '643')
     _add(doc, 'docCode', '21')
     _add(doc, 'docSeries', subject['passport_series'])
     _add(doc, 'docNum', subject['passport_number'])
     _add(doc, 'issueDate', subject['passport_issue_date'])
-    _add(doc, 'docIssuer', subject['passport_issued_by'])
+    _add(doc, 'docIssuer', subject['passport_issued_by'].upper())
     if subject.get('passport_dept_code'):
         _add(doc, 'deptCode', subject['passport_dept_code'])
     _add(doc, 'foreignerCode', '3')
