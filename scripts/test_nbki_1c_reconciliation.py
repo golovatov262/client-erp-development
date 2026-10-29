@@ -131,6 +131,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertFalse(result['rows'][0]['xml_ready'])
         self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
         self.assertEqual(result['rows'][0]['accounting_snapshot']['status'], 'checked')
+        self.assertEqual(result['rows'][0]['accounting_snapshot']['cumulative_crm_payments']['amount'], '28888.97')
         self.assertEqual(result['rows'][0]['allocation_audit']['status'], 'checked')
 
     def test_principal_snapshot_checks_payment_parts(self):
@@ -142,6 +143,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(result['principal_before'], '960')
         self.assertEqual(result['principal_after'], '860')
         self.assertEqual(result['status'], 'review')
+        self.assertEqual(result['cumulative_crm_payments']['amount'], '300')
         self.assertIn('Сумма частей платежа', result['issues'][0])
 
     def test_v2_allocation_audit_detects_unapplied(self):

@@ -77,6 +77,18 @@ def build_accounting_snapshot(original_amount: Decimal | None,
         components_total = principal + interest + penalty
         if abs(components_total - amount) > CENT:
             issues.append('Сумма частей платежа не равна сумме платежа CRM')
+    cumulative = {}
+    for key, position in (('amount', 2), ('principal', 3),
+                          ('interest', 4), ('penalty', 5)):
+        values = [row[position] for row in ordered[:index + 1]]
+        cumulative[key] = (str(sum(values, Decimal('0')))
+                           if all(value is not None for value in values) else None)
+    if any(value is None for value in cumulative.values()):
+        issues.append('Нельзя рассчитать накопленные суммы по неполному журналу CRM')
+    elif abs(Decimal(cumulative['amount']) - sum(
+            (Decimal(cumulative[key]) for key in ('principal', 'interest', 'penalty')),
+            Decimal('0'))) > CENT:
+        issues.append('Накопленные части платежей не равны накопленной сумме CRM')
     is_latest_payment = index == len(ordered) - 1
     if is_latest_payment and principal_after is not None and current_balance is not None:
         if abs(principal_after - current_balance) > CENT:
@@ -85,6 +97,7 @@ def build_accounting_snapshot(original_amount: Decimal | None,
             'principal_before': str(principal_before) if principal_before is not None else None,
             'principal_after': str(principal_after) if principal_after is not None else None,
             'components_total': str(components_total) if components_total is not None else None,
+            'cumulative_crm_payments': cumulative,
             'current_balance_checked': is_latest_payment and current_balance is not None,
             'current_balance': str(current_balance) if is_latest_payment and current_balance is not None else None,
             'issues': issues, 'status': 'checked' if not issues else 'review',

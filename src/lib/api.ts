@@ -251,6 +251,8 @@ export type NbkiPaymentCandidates = {
       principal_before: string | null;
       principal_after: string | null;
       components_total: string | null;
+      cumulative_crm_payments: { amount: string | null; principal: string | null;
+        interest: string | null; penalty: string | null };
       current_balance_checked: boolean;
       current_balance: string | null;
       issues: string[];
