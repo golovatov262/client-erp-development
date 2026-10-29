@@ -5,10 +5,20 @@ This queue does not assign a GUTDF event, produce XML, or prove NBKI receipt.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MOSCOW = ZoneInfo('Europe/Moscow')
+CRM_FIXED_HOLIDAYS = {
+    (1, day) for day in range(1, 9)
+} | {(2, 23), (3, 8), (5, 1), (5, 9), (6, 12), (11, 4)}
+
+
+def crm_effective_due_date(due: date) -> date:
+    """Mirror the currently deployed loan cron's fixed-holiday transfer rule."""
+    while due.weekday() >= 5 or (due.month, due.day) in CRM_FIXED_HOLIDAYS:
+        due += timedelta(days=1)
+    return due
 
 try:
     from nbki_outbox import inspect_loan
@@ -164,8 +174,9 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             'current_paid_amount': str(paid or 0),
             'same_day_crm_payment_count': same_day_payments,
             'overdue_transition_review_date': (
-                (due + timedelta(days=1)).isoformat()
-                if due < today_msk and status == 'overdue' and (paid or 0) < amount
+                (crm_effective_due_date(due) + timedelta(days=1)).isoformat()
+                if crm_effective_due_date(due) < today_msk
+                and status == 'overdue' and (paid or 0) < amount
                 else None),
             'crm_schedule_issues': [issue for issue in
                 inspections[loan_id]['checks']['crm_issues']

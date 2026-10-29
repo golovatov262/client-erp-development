@@ -4,12 +4,17 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from backend.nbki_1c_reconciliation import apply_crm_decision, apply_global_crm_policy, compare_fact, parse_money
-from backend.nbki_payment_candidates import list_payment_candidates
+from backend.nbki_payment_candidates import crm_effective_due_date, list_payment_candidates
 from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
 from scripts.record_nbki_crm_payment_decisions import validate_targets
 
 
 class ReconciliationTests(unittest.TestCase):
+    def test_due_date_uses_crm_workday_transfer(self):
+        self.assertEqual(crm_effective_due_date(date(2026, 10, 1)), date(2026, 10, 1))
+        self.assertEqual(crm_effective_due_date(date(2026, 10, 31)), date(2026, 11, 2))
+        self.assertEqual(crm_effective_due_date(date(2026, 11, 4)), date(2026, 11, 5))
+
     def test_russian_amount(self):
         self.assertEqual(parse_money('35\u00a0000,00'), Decimal('35000.00'))
 
