@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS nbki_source_settings (
 INSERT INTO nbki_source_settings
     (org_id,source_id,source_code,registration_date,registration_number,creditor_code)
 SELECT id,'QY01GG000001','3',DATE '2008-11-20','1084307001041','3'
-FROM organizations WHERE inn='4307012081'
+FROM organizations WHERE inn='4307012081' AND NULLIF(trim(name),'') IS NOT NULL
 ON CONFLICT (org_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS nbki_loan_terms_versions (
