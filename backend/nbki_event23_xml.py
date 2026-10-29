@@ -107,7 +107,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
 
     amount = _add(event, 'FL_19_Amount')
     _add(amount, 'sum', _money(loan['original_principal']))
-    _add(amount, 'currency', '643')
+    _add(amount, 'currency', 'RUB')
     _add(amount, 'calcDate', payment['date'])
     security = _add(event, 'FL_19_1_AmountInfo')
     _add(security, 'securityFact_0')
@@ -149,7 +149,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         d = _add(group, 'FL_25_Debt')
         for key, value in (('debtSum', total), ('debtMainSum', due_main + overdue_main),
                            ('debtPercentSum', due_interest + overdue_interest),
-                           ('debtOtherSum', penalty), ('currency', '643')):
+                           ('debtOtherSum', penalty), ('currency', 'RUB')):
             _add(d, key, _money(value))
     if due_main + due_interest + penalty:
         d = _add(group, 'FL_26_DebtDue')
@@ -185,7 +185,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                        ('totalMainSum', payment['cumulative']['principal']),
                        ('totalPercentSum', payment['cumulative']['interest']),
                        ('totalOtherSum', payment['cumulative']['penalty']), ('date', payment['date']),
-                       ('sizeCode', '-'), ('scheduleCode', '-'), ('payCurrency', '643')):
+                       ('sizeCode', '-'), ('scheduleCode', '-'), ('payCurrency', 'RUB')):
         _add(p, key, value if value == '-' or key == 'date' else _money(value))
 
     if smp and smp.get('value_without_penalty_uncapped') is not None:
@@ -202,7 +202,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _add(accounting_block, 'supportExist_0')
     _add(accounting_block, 'calcDate', calc_date)
     _add(accounting_block, 'unaccountedSum', '0.00')
-    _add(accounting_block, 'unaccountedCurrency', '643')
+    _add(accounting_block, 'unaccountedCurrency', 'RUB')
     participation = _add(event, 'FL_56_Participation')
     _add(participation, 'role', '1')
     _add(participation, 'kindCode', terms['kind_code'])
