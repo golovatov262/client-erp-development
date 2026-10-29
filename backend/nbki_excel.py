@@ -156,3 +156,39 @@ def make_readiness_xlsx(report: dict) -> bytes:
     output = BytesIO()
     book.save(output)
     return output.getvalue()
+
+
+def make_1c_reconciliation_xlsx(report: dict) -> bytes:
+    """Export review signals with source date/row and untouched CRM values."""
+    book = Workbook()
+    sheet = book.active
+    sheet.title = 'Сверка 1С и CRM'
+    sheet.append(('ID CRM', 'Договор', 'УИД', 'Дата события 1С', 'Строка 1С',
+                  'Показатель', 'Дата платежа', 'Значение 1С', 'Значение CRM',
+                  'Результат', 'Пояснение', 'Решение менеджера', 'Комментарий'))
+    labels = {'contract_end_date': 'Дата окончания договора',
+              'last_payment': 'Последний платеж ФЛ_28.2'}
+    statuses = {'same': 'Совпадает', 'review': 'Проверить',
+                'missing_in_crm': 'Не найдено в CRM'}
+    for row in report['rows']:
+        for check in row['checks']:
+            sheet.append((row['loan_id'], row['contract_no'], row['uid'],
+                          row['event_time'], row['source_row_num'],
+                          labels.get(check['field'], check['field']),
+                          check.get('payment_date'), check['source'], check['crm'],
+                          statuses[check['status']], check['note'], None, None))
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='24476A')
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, str):
+                cell.data_type = 's'
+    sheet.freeze_panes = 'D2'
+    sheet.auto_filter.ref = sheet.dimensions
+    for index, width in enumerate((12, 29, 46, 22, 13, 30, 18, 19, 19,
+                                   20, 85, 27, 45), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    output = BytesIO()
+    book.save(output)
+    return output.getvalue()

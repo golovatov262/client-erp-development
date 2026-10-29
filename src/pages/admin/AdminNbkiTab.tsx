@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiReadinessReport, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,7 @@ const AdminNbkiTab = () => {
   const [outboxLoading, setOutboxLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState("");
   const [factsResult, setFactsResult] = useState("");
+  const [reconciliation, setReconciliation] = useState<NbkiReconciliationReport | null>(null);
 
   const refreshOutbox = async () => {
     try {
@@ -102,6 +103,14 @@ const AdminNbkiTab = () => {
       await loadReadiness();
     } catch (e) { setError(humanizeError(e)); }
     finally { setImporting(false); }
+  };
+
+  const loadReconciliation = async () => {
+    setReadinessLoading(true);
+    setError("");
+    try { setReconciliation(await api.nbki.reconciliationReport()); }
+    catch (e) { setError(humanizeError(e)); }
+    finally { setReadinessLoading(false); }
   };
 
   const inspect = async (save: boolean) => {
@@ -187,7 +196,7 @@ const AdminNbkiTab = () => {
     }
   };
 
-  const exportRegistry = async (targetStatus: "review" | "not_in_crm" | "missing_uid" | "readiness") => {
+  const exportRegistry = async (targetStatus: "review" | "not_in_crm" | "missing_uid" | "readiness" | "reconciliation") => {
     setExporting(true);
     setError("");
     try {
@@ -217,6 +226,7 @@ const AdminNbkiTab = () => {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => void exportRegistry("missing_uid")} disabled={exporting}>Excel · Без УИД</Button>
           <Button variant="outline" onClick={() => void exportRegistry("readiness")} disabled={exporting}>Excel · Готовность XML</Button>
+          <Button variant="outline" onClick={() => void exportRegistry("reconciliation")} disabled={exporting}>Excel · Сверка 1С / CRM</Button>
           <Button variant="outline" onClick={() => void exportRegistry("review")} disabled={exporting}>Excel · Проверить</Button>
           <Button variant="outline" onClick={() => void exportRegistry("not_in_crm")} disabled={exporting}>Excel · Нет в CRM</Button>
           <Button variant="outline" onClick={() => void load()} disabled={loading}>Обновить</Button>
@@ -319,6 +329,15 @@ const AdminNbkiTab = () => {
             <Button variant="outline" disabled={importing} onClick={() => void sync1CFacts()}>Перенести показатели 1С в карточки</Button>
           </div>
           {factsResult && <p role="status" className="text-sm">{factsResult}</p>}
+          <Button variant="outline" disabled={readinessLoading} onClick={() => void loadReconciliation()}>Сверить с CRM</Button>
+          {reconciliation && <div className="rounded-md border p-3 text-sm">
+            <p>Сопоставлено {reconciliation.total_loans} договоров; по {reconciliation.review_loans} есть вопросы для проверки. Это не исправляет учётные данные и не подтверждает приём НБКИ.</p>
+            <div className="mt-2 max-h-56 overflow-y-auto">
+              {reconciliation.rows.filter(row => row.checks.some(check => check.status !== "same")).map(row => <div key={row.loan_id} className="border-t py-2">
+                <span className="font-medium">{row.contract_no}</span> · событие {row.event_time.slice(0, 10)} · {row.checks.filter(check => check.status !== "same").map(check => check.field === "last_payment" ? "платёж" : "дата окончания").join(", ")}
+              </div>)}
+            </div>
+          </div>}
           {eventImportResult && <p role="status" className="text-sm">Обработано {eventImportResult.rows} событий: {eventImportResult.borrower_uids} УИД заемщиков, {eventImportResult.guarantor_uids} УИД поручителей. Сопоставлено {eventImportResult.matched}, требуют проверки {eventImportResult.review}, нет в CRM {eventImportResult.not_in_crm}. Поручительства: дополнено {eventImportResult.guarantees_updated}, добавлено {eventImportResult.guarantees_created}, требуют сверки {eventImportResult.guarantees_pending}.</p>}
         </CardContent>
       </Card>
