@@ -70,10 +70,18 @@ assert cur.fetchone()[0] == 1
 # Принудительное распределение сохраняется точно и не портит следующий автоплатёж.
 loan = make_loan(cur, 'FORCED')
 r = post_loan_payment(cur, loan, 30, date(2026, 10, 7), source='manual',
-                      forced={'interest': 0, 'principal': 25, 'penalty': 5})
+                      forced={'interest': 0, 'principal': 25, 'penalty': 5},
+                      event_time_msk='10:30:15')
 assert (r['principal_part'], r['interest_part'], r['penalty_part']) == (25.0, 0.0, 5.0), r
+cur.execute("""SELECT nbki_event_occurred_at AT TIME ZONE 'Europe/Moscow',
+    nbki_event_time_basis,nbki_recorded_at IS NOT NULL
+    FROM loan_payments WHERE id=%s""", (r['payment_id'],))
+event_time, event_basis, recorded = cur.fetchone()
+assert str(event_time) == '2026-10-07 10:30:15' and event_basis == 'operator_entered' and recorded
 r2 = post_loan_payment(cur, loan, 20, date(2026, 10, 8), source='manual')
 assert r2['interest_part'] == 10.0 and r2['principal_part'] == 10.0, r2
+cur.execute("SELECT nbki_event_occurred_at,nbki_recorded_at IS NOT NULL FROM loan_payments WHERE id=%s", (r2['payment_id'],))
+assert cur.fetchone() == (None, True)
 
 # Досрочное погашение с сохранением срока уменьшает платёж и сохраняет строки/даты.
 loan = make_loan(cur, 'EARLY-PAYMENT')
