@@ -202,7 +202,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _add(accounting_block, 'supportExist_0')
     _add(accounting_block, 'calcDate', calc_date)
     _add(accounting_block, 'unaccountedSum', '0.00')
-    _add(accounting_block, 'currency', '643')
+    _add(accounting_block, 'unaccountedCurrency', '643')
     participation = _add(event, 'FL_56_Participation')
     _add(participation, 'role', '1')
     _add(participation, 'kindCode', terms['kind_code'])
