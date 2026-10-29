@@ -24,11 +24,13 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         f.source_row_num,p.id,p.payment_date,p.amount,p.principal_part,
         p.interest_part,p.penalty_part,p.payment_type,p.source,
         p.nbki_event_occurred_at,p.nbki_recorded_at,p.nbki_event_time_basis,
-        ps.evidence_sha256,ps.captured_at
+        ps.evidence_sha256,ps.captured_at,
+        cf.psk_percent,cf.psk_amount,cf.calculated_on,cf.status
         FROM nbki_1c_loan_facts f
         JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
         JOIN loan_payments p ON p.loan_id=l.id
         LEFT JOIN nbki_payment_posting_snapshots ps ON ps.payment_id=p.id
+        LEFT JOIN nbki_contract_cost_facts cf ON cf.loan_id=l.id AND cf.org_id=l.org_id AND cf.uid=f.uid
         WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
           AND p.payment_date>f.event_time::date AND p.payment_date<=CURRENT_DATE
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
@@ -41,7 +43,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
     for (loan_id, contract_no, uid, event_time, source_id, row_num,
          payment_id, payment_date, amount, principal, interest, penalty,
          payment_type, payment_source, event_occurred_at, recorded_at,
-         event_time_basis, posting_snapshot_sha256, posting_captured_at) in cur.fetchall():
+         event_time_basis, posting_snapshot_sha256, posting_captured_at,
+         psk_percent, psk_amount, psk_calculated_on, psk_status) in cur.fetchall():
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
         inspection = inspections[loan_id]
@@ -63,7 +66,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
         allocation_audit = audit_payment_allocations(payment, cur.fetchall(), loan_id)
         event23 = assess_event23(inspection, accounting, allocation_audit,
-                                event_occurred_at, posting_snapshot_sha256)
+                                event_occurred_at, posting_snapshot_sha256,
+                                psk_candidate_status=psk_status)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -85,6 +89,12 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
                      'allocation_audit': allocation_audit,
+                     'psk_candidate': ({'percent': str(psk_percent),
+                                        'amount': str(psk_amount),
+                                        'calculated_on': psk_calculated_on.isoformat(),
+                                        'status': psk_status,
+                                        'basis': 'Реестр 1С; не подтверждено договором и не допущено в XML'}
+                                       if psk_percent is not None else None),
                      'event23_readiness': event23,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})

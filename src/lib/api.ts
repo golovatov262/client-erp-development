@@ -269,6 +269,10 @@ export type NbkiPaymentCandidates = {
       allocations: { id: number; schedule_id: number | null;
         component: string; amount: string; mode: string }[];
     };
+    psk_candidate: {
+      percent: string; amount: string; calculated_on: string;
+      status: "source_consistent" | "review"; basis: string;
+    } | null;
     event23_readiness: {
       event_code_candidate: "2.3";
       xsd_version: "5.1";

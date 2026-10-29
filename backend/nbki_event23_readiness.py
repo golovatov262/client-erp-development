@@ -34,7 +34,8 @@ MONETARY_BLOCKS = (
 
 
 def assess_event23(inspection: dict, accounting: dict, allocation: dict,
-                   event_occurred_at, posting_snapshot_sha256) -> dict:
+                   event_occurred_at, posting_snapshot_sha256,
+                   psk_candidate_status=None) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -52,7 +53,11 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
                                if posting_snapshot_sha256 else
                                'Исторического снимка графика на момент проведения нет'),
-        'FL_22_TotalCost': 'ПСК и условие обязательности требуют подтверждённого расчёта',
+        'FL_22_TotalCost': ('ПСК найден в реестре 1С и совпал по дате/сумме с CRM; требуется сверка с подписанным договором и условием обязательности'
+                            if psk_candidate_status == 'source_consistent' else
+                            'ПСК найден в реестре 1С с расхождением реквизитов CRM; требуется ручная сверка'
+                            if psk_candidate_status == 'review' else
+                            'ПСК и условие обязательности требуют подтверждённого расчёта'),
         'FL_25_26_27_28_Group': 'Есть часть по основному долгу и платежам CRM; нет полного расчёта процентов, срочной и просроченной задолженности и кодов платежа',
         'FL_29_MonthlyPayment': 'Нормативный среднемесячный платёж не рассчитан',
         'FL_29_1_DebtBurdenInfo': 'Не проверены условия обязательности и данные долговой нагрузки',
