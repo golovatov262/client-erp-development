@@ -15,12 +15,14 @@ try:
     from nbki_event23_readiness import assess_event23
     from nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
     from nbki_smp import preview_smp
+    from nbki_debt_preview import preview_debt
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
     from backend.nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
     from backend.nbki_smp import preview_smp
+    from backend.nbki_debt_preview import preview_debt
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -87,6 +89,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             latest_payment=ledgers[loan_id][-1][0] == payment_id,
             principal_checked=accounting.get('status') == 'checked')
         smp_candidate = preview_smp(cur, loan_id, payment_date, crm_debt)
+        debt_preview = preview_debt(accounting, crm_debt, interest_candidate)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt)
@@ -113,6 +116,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'crm_debt_reconstruction': crm_debt,
                      'interest_candidate': interest_candidate,
                      'smp_candidate': smp_candidate,
+                     'debt_preview': debt_preview,
                      'allocation_audit': allocation_audit,
                      'psk_candidate': ({'percent': str(psk_percent),
                                         'amount': str(psk_amount),

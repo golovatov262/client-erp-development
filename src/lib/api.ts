@@ -281,6 +281,15 @@ export type NbkiPaymentCandidates = {
       remaining_interest_candidate: string | null;
       issues: string[];
     };
+    debt_preview: {
+      status: "candidate_from_crm_components" | "unavailable";
+      basis: string;
+      term_principal: string | null; overdue_principal: string | null;
+      term_interest_candidate: string | null; overdue_interest: string | null;
+      term_other_candidate: string | null; overdue_other: string | null;
+      term_total_candidate: string | null; overdue_total_candidate: string | null;
+      total_candidate: string | null; issues: string[];
+    };
     smp_candidate: {
       status: "candidate_from_crm_schedule" | "unavailable" | "review";
       basis: string; months_uncapped: number | null; months_cap48: number | null;
