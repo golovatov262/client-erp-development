@@ -94,7 +94,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _exists(deal, 'novationExist', False)
     _exists(deal, 'monetarySourceExist', True)
     _exists(deal, 'monetarySubjectExist', True)
-    _add(deal, 'endDate', loan.get('end_date') or '')
+    _add(deal, 'endDate', loan.get('end_date') or '-')
     _add(deal, 'creditorCode', facts['source']['source_code'])
     _exists(deal, 'partialExist', False)
     _exists(deal, 'creditLineExist', False)
@@ -118,10 +118,10 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         ORDER BY payment_date,id LIMIT 1""", (facts['loan_id'], payment['date']))
     next_row = cur.fetchone()
     payterms = _add(event, 'FL_21_PaymentTerms')
-    _add(payterms, 'mainPaySum', _money(next_row[1]) if next_row else '')
+    _add(payterms, 'mainPaySum', _money(next_row[1]) if next_row else '-')
     if next_row:
         _add(payterms, 'mainPayDate', next_row[0].isoformat())
-    _add(payterms, 'percentPaySum', _money(next_row[2]) if next_row else '')
+    _add(payterms, 'percentPaySum', _money(next_row[2]) if next_row else '-')
     if next_row:
         _add(payterms, 'percentPayDate', next_row[0].isoformat())
     _add(payterms, 'freqCode', '3')
@@ -154,7 +154,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     if due_main + due_interest + penalty:
         d = _add(group, 'FL_26_DebtDue')
         _add(d, 'debtDueExist_1')
-        _add(d, 'debtDueStartDate', '')
+        _add(d, 'debtDueStartDate', loan['start_date'])
         for key, value in (('debtDueSum', due_main + due_interest + penalty),
                            ('debtDueMainSum', due_main), ('debtDuePercentSum', due_interest),
                            ('debtDueOtherSum', penalty)):
@@ -167,9 +167,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         overdue_dates = [date.fromisoformat(row['due']) for row in debt.get('rows', [])
                          if Decimal(row.get('overdue_principal', '0')) +
                          Decimal(row.get('overdue_interest', '0')) > 0]
-        first_overdue = min(overdue_dates).isoformat() if overdue_dates else ''
+        first_overdue = min(overdue_dates).isoformat() if overdue_dates else '-'
         overdue_days = ((date.fromisoformat(payment['date']) - min(overdue_dates)).days
-                        if overdue_dates else '')
+                        if overdue_dates else '-')
         for key, value in (('debtOverdueSum', overdue_main + overdue_interest),
                            ('debtOverdueMainSum', overdue_main),
                            ('debtOverduePercentSum', overdue_interest),
