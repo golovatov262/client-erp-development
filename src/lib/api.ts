@@ -1073,6 +1073,18 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+  psk_calculation?: {
+    percent: number;
+    amount: number;
+    calculated_on: string;
+    principal: number;
+    annual_rate: number;
+    term_months: number;
+    schedule_type: string;
+    status: "cross_checked" | "review";
+    note: string;
+    calculated_at: string;
+  } | null;
   nbki_uid?: string | null;
   nbki_acceptance_basis?: "ticket2_unverified" | "operator_assumed" | "no_receipt" | null;
   nbki_1c_facts?: Nbki1CFacts | null;

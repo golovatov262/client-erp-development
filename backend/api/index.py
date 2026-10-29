@@ -789,6 +789,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 nbki_row = cur.fetchone()
             loan['nbki_uid'] = nbki_row[0] if nbki_row else None
             loan['nbki_acceptance_basis'] = nbki_row[1] if nbki_row else None
+            cur.execute("""SELECT psk_percent,psk_amount,calculated_on,principal,annual_rate,
+                term_months,schedule_type,verification_status,verification_note,calculated_at
+                FROM loan_psk_calculations WHERE loan_id=%s""", (loan['id'],))
+            psk_row = cur.fetchone()
+            loan['psk_calculation'] = (dict(zip(('percent','amount','calculated_on','principal',
+                'annual_rate','term_months','schedule_type','status','note','calculated_at'),
+                (serialize(value) for value in psk_row))) if psk_row else None)
             if staff and staff.get('role') in ('admin', 'manager'):
                 loan['nbki_1c_facts'] = get_loan_facts(cur, loan['id'], loan.get('org_id'))
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
