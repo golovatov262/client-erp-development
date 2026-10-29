@@ -31,6 +31,12 @@ class ReconciliationTests(unittest.TestCase):
                               payments=[])
         self.assertEqual(result, [])
 
+    def test_end_date_difference_is_context_not_payment_issue(self):
+        result = compare_fact({'22': {'value': '26.01.2027'}},
+                              event_date=date(2026, 10, 1),
+                              crm_end_date=date(2027, 1, 30), payments=[])
+        self.assertEqual(result[0]['status'], 'different_definition')
+
 
 if __name__ == '__main__':
     unittest.main()

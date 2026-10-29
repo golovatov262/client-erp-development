@@ -168,7 +168,8 @@ def make_1c_reconciliation_xlsx(report: dict) -> bytes:
                   'Результат', 'Пояснение', 'Решение менеджера', 'Комментарий'))
     labels = {'contract_end_date': 'Дата окончания договора',
               'last_payment': 'Последний платеж ФЛ_28.2'}
-    statuses = {'same': 'Совпадает', 'review': 'Проверить',
+    statuses = {'same': 'Совпадает', 'different_definition': 'Справочно: разные даты',
+                'review': 'Проверить',
                 'missing_in_crm': 'Не найдено в CRM'}
     for row in report['rows']:
         for check in row['checks']:

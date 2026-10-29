@@ -38,7 +38,7 @@ def compare_fact(indicators: dict, *, event_date, crm_end_date,
     if source_end and crm_end_date:
         checks.append({'field': 'contract_end_date', 'source': source_end.isoformat(),
                        'crm': crm_end_date.isoformat(),
-                       'status': 'same' if source_end == crm_end_date else 'review',
+                       'status': 'same' if source_end == crm_end_date else 'different_definition',
                        'note': 'Дата окончания 1С и CRM; в CRM может быть дата графика, требуется проверка договора'})
 
     payment_date = parse_date(source(111))
@@ -75,5 +75,8 @@ def reconciliation_report(cur, org_id: int) -> dict:
     return {'total_loans': len(rows),
             'review_loans': sum(any(c['status'] in ('review', 'missing_in_crm')
                                     for c in row['checks']) for row in rows),
+            'different_end_dates': sum(any(c['field'] == 'contract_end_date' and
+                                           c['status'] == 'different_definition'
+                                           for c in row['checks']) for row in rows),
             'rows': rows,
             'basis': 'Ориентир для проверки, не исправление CRM и не подтверждение приёма НБКИ'}
