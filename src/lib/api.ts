@@ -198,6 +198,7 @@ export type NbkiReconciliationReport = {
   total_loans: number;
   review_loans: number;
   candidate_loans: number;
+  resolved_crm_loans: number;
   unexplained_loans: number;
   different_end_dates: number;
   basis: string;
@@ -206,11 +207,14 @@ export type NbkiReconciliationReport = {
     contract_no: string;
     uid: string;
     event_time: string;
+    source_id: number;
     source_row_num: number;
     checks: { field: string; source: string; crm: string | null;
       payment_date?: string;
-      status: "same" | "review" | "missing_in_crm" | "different_definition" | "date_shift_candidate" | "adjacent_sum_candidate";
+      status: "same" | "review" | "missing_in_crm" | "different_definition" | "date_shift_candidate" | "adjacent_sum_candidate" | "resolved_crm";
       candidate_payments?: { id: number; date: string; amount: string }[];
+      effective_crm_payments?: { id: number; date: string; amount: string }[];
+      decision_source?: string;
       note: string }[];
   }[];
 };

@@ -2,7 +2,8 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from backend.nbki_1c_reconciliation import compare_fact, parse_money
+from backend.nbki_1c_reconciliation import apply_crm_decision, compare_fact, parse_money
+from scripts.record_nbki_crm_payment_decisions import validate_targets
 
 
 class ReconciliationTests(unittest.TestCase):
@@ -61,6 +62,20 @@ class ReconciliationTests(unittest.TestCase):
                               payments=[(1, date(2026, 9, 29), Decimal('4900')),
                                         (2, date(2026, 9, 30), Decimal('4900'))])
         self.assertEqual(result[0]['status'], 'missing_in_crm')
+
+    def test_operator_decision_applies_only_to_same_candidate_ids(self):
+        checks = [{'field': 'last_payment', 'status': 'date_shift_candidate',
+                   'candidate_payments': [{'id': 2493, 'date': '2026-09-30',
+                                           'amount': '4900.00'}]}]
+        apply_crm_decision(checks, [999], 'operator')
+        self.assertEqual(checks[0]['status'], 'date_shift_candidate')
+        apply_crm_decision(checks, [2493], 'operator')
+        self.assertEqual(checks[0]['status'], 'resolved_crm')
+        self.assertEqual(checks[0]['effective_crm_payments'][0]['date'], '2026-09-30')
+
+    def test_seed_rejects_missing_or_changed_targets(self):
+        with self.assertRaises(ValueError):
+            validate_targets({'rows': []})
 
 
 if __name__ == '__main__':

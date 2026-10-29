@@ -73,22 +73,48 @@ def compare_fact(indicators: dict, *, event_date, crm_end_date,
     return checks
 
 
+def apply_crm_decision(checks: list[dict], payment_ids: list[int],
+                       decision_source: str) -> list[dict]:
+    """Resolve only the still-valid candidate payments named by the operator."""
+    for check in checks:
+        if check['field'] != 'last_payment' or check['status'] not in (
+                'date_shift_candidate', 'adjacent_sum_candidate'):
+            continue
+        candidates = check['candidate_payments']
+        if sorted(p['id'] for p in candidates) != sorted(payment_ids):
+            continue
+        check['original_status'] = check['status']
+        check['status'] = 'resolved_crm'
+        check['decision_source'] = decision_source
+        check['effective_crm_payments'] = candidates
+    return checks
+
+
 def reconciliation_report(cur, org_id: int) -> dict:
-    cur.execute("""SELECT f.loan_id,l.contract_no,f.uid,f.event_time,f.source_row_num,
+    cur.execute("""SELECT f.loan_id,l.contract_no,f.uid,f.event_time,f.source_id,f.source_row_num,
         f.indicators,l.end_date
         FROM nbki_1c_loan_facts f JOIN loans l ON l.id=f.loan_id
         WHERE f.org_id=%s AND l.org_id=%s AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,l.id""", (org_id, org_id))
     facts = cur.fetchall()
     rows = []
-    for loan_id, contract_no, uid, event_time, row_num, indicators, end_date in facts:
+    for loan_id, contract_no, uid, event_time, source_id, row_num, indicators, end_date in facts:
         cur.execute("""SELECT id,payment_date,amount FROM loan_payments
             WHERE loan_id=%s AND payment_date<=%s ORDER BY payment_date,id""",
             (loan_id, event_time.date()))
         checks = compare_fact(indicators, event_date=event_time.date(),
                               crm_end_date=end_date, payments=cur.fetchall())
+        cur.execute("""SELECT selected_payment_ids,decision_source
+            FROM nbki_1c_reconciliation_decisions
+            WHERE org_id=%s AND loan_id=%s AND uid=%s AND source_id=%s
+              AND source_row_num=%s AND field='last_payment' AND choice='crm'""",
+            (org_id, loan_id, uid, source_id, row_num))
+        decision = cur.fetchone()
+        if decision:
+            apply_crm_decision(checks, decision[0], decision[1])
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
-                     'event_time': event_time.isoformat(), 'source_row_num': row_num,
+                     'event_time': event_time.isoformat(), 'source_id': source_id,
+                     'source_row_num': row_num,
                      'checks': checks})
     return {'total_loans': len(rows),
             'review_loans': sum(any(c['status'] in ('review', 'missing_in_crm',
@@ -97,6 +123,8 @@ def reconciliation_report(cur, org_id: int) -> dict:
             'candidate_loans': sum(any(c['status'] in ('date_shift_candidate',
                                                      'adjacent_sum_candidate')
                                        for c in row['checks']) for row in rows),
+            'resolved_crm_loans': sum(any(c['status'] == 'resolved_crm'
+                                          for c in row['checks']) for row in rows),
             'unexplained_loans': sum(any(c['status'] in ('review', 'missing_in_crm')
                                          for c in row['checks']) for row in rows),
             'different_end_dates': sum(any(c['field'] == 'contract_end_date' and

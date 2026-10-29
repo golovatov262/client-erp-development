@@ -172,6 +172,7 @@ def make_1c_reconciliation_xlsx(report: dict) -> bytes:
     statuses = {'same': 'Совпадает', 'different_definition': 'Справочно: разные даты',
                 'date_shift_candidate': 'Кандидат: другая дата',
                 'adjacent_sum_candidate': 'Кандидат: сумма двух дней',
+                'resolved_crm': 'Решено: использовать CRM',
                 'review': 'Проверить сумму',
                 'missing_in_crm': 'Не найдено в CRM'}
     for row in report['rows']:
@@ -183,7 +184,9 @@ def make_1c_reconciliation_xlsx(report: dict) -> bytes:
                           statuses[check['status']],
                           '; '.join(f"#{p['id']} {p['date']} {p['amount']}"
                                     for p in check.get('candidate_payments', [])),
-                          check['note'], None, None))
+                          (check['note'] + ('; решение пользователя: значение CRM'
+                                            if check['status'] == 'resolved_crm' else '')),
+                          'CRM' if check['status'] == 'resolved_crm' else None, None))
     for cell in sheet[1]:
         cell.font = Font(bold=True, color='FFFFFF')
         cell.fill = PatternFill('solid', fgColor='24476A')
