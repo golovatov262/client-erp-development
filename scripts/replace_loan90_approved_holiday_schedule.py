@@ -89,9 +89,9 @@ def _state(cur) -> str:
                      FROM loan_schedule s WHERE s.loan_id=%s),
         'payment', (SELECT to_jsonb(p) FROM loan_payments p WHERE p.id=%s),
         'allocations', (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.id),'[]'::jsonb)
-                        FROM loan_payment_allocations a WHERE a.payment_id=%s))::text""",
+                        FROM loan_payment_allocations a WHERE a.payment_id=%s))::text AS state_json""",
                 (LOAN_ID, LOAN_ID, PAYMENT_ID, PAYMENT_ID))
-    return cur.fetchone()[0]
+    return cur.fetchone()['state_json']
 
 
 def _guard(cur) -> tuple[dict, dict[int, dict]]:
