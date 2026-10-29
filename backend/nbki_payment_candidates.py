@@ -7,8 +7,10 @@ from __future__ import annotations
 
 try:
     from nbki_outbox import inspect_loan
+    from nbki_accounting_snapshot import build_accounting_snapshot
 except ImportError:
     from backend.nbki_outbox import inspect_loan
+    from backend.nbki_accounting_snapshot import build_accounting_snapshot
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -26,6 +28,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         ORDER BY p.payment_date,l.id,p.id""", (org_id,))
     rows = []
     inspections = {}
+    ledgers = {}
     for (loan_id, contract_no, uid, event_time, source_id, row_num,
          payment_id, payment_date, amount, principal, interest, penalty,
          payment_type, payment_source) in cur.fetchall():
@@ -35,6 +38,14 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         if inspection['uid'] != uid:
             # A later conflicting UID or borrower match must never enter the queue.
             continue
+        if loan_id not in ledgers:
+            cur.execute("""SELECT id,payment_date,amount,principal_part,
+                interest_part,penalty_part FROM loan_payments
+                WHERE loan_id=%s ORDER BY payment_date,id""", (loan_id,))
+            ledgers[loan_id] = cur.fetchall()
+        loan = inspection['snapshot']['loan']
+        accounting = build_accounting_snapshot(loan['amount'], loan['balance'],
+                                               ledgers[loan_id], payment_id)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -45,6 +56,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'candidate_reason': 'Платёж CRM после последнего события 1С',
                      'crm_issues': inspection['checks']['crm_issues'],
                      'missing_fields': inspection['readiness']['missing_fields'],
+                     'accounting_snapshot': accounting,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})
     return {'total': len(rows), 'rows': rows,

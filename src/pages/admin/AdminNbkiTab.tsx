@@ -297,6 +297,8 @@ const AdminNbkiTab = () => {
               <span className="font-medium">{payment.contract_no}</span> · {payment.payment_date} · {Number(payment.amount).toLocaleString("ru-RU")} ₽ · платёж CRM #{payment.payment_id}
               <div className="text-xs text-muted-foreground">УИД {payment.uid} · последнее событие 1С {payment.baseline_event_time.slice(0, 10)} · код события ещё не определён</div>
               <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">Предварительная проверка: {payment.crm_issues.length} замечаний CRM, {payment.missing_fields.length} блокирующих пунктов</summary>
+                <p className="mt-1">По журналу CRM: основной долг до платежа {payment.accounting_snapshot.principal_before ?? "не рассчитан"} ₽, после {payment.accounting_snapshot.principal_after ?? "не рассчитан"} ₽; сумма частей платежа {payment.accounting_snapshot.components_total ?? "не рассчитана"} ₽. {payment.accounting_snapshot.status === "checked" ? "Внутренние арифметические проверки пройдены." : "Есть арифметические замечания."} Это не расчёт задолженности для НБКИ.</p>
+                {payment.accounting_snapshot.issues.map((issue, index) => <p key={`accounting-${payment.payment_id}-${index}`} className="text-destructive">{issue}</p>)}
                 <ul className="ml-5 mt-1 list-disc">{[...payment.crm_issues, ...payment.missing_fields].map((issue, index) => <li key={`${payment.payment_id}-${index}`}>{issue}</li>)}</ul>
               </details>
             </div>)}

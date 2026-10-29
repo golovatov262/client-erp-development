@@ -241,6 +241,17 @@ export type NbkiPaymentCandidates = {
     candidate_reason: string;
     crm_issues: string[];
     missing_fields: string[];
+    accounting_snapshot: {
+      payment_id: number;
+      principal_before: string | null;
+      principal_after: string | null;
+      components_total: string | null;
+      current_balance_checked: boolean;
+      current_balance: string | null;
+      issues: string[];
+      status: "checked" | "review";
+      basis: string;
+    };
     gutdf_event_code: null;
     event_code_confirmed: false;
     xml_ready: false;

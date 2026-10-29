@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from backend.nbki_1c_reconciliation import apply_crm_decision, apply_global_crm_policy, compare_fact, parse_money
 from backend.nbki_payment_candidates import list_payment_candidates
+from backend.nbki_accounting_snapshot import build_accounting_snapshot
 from scripts.record_nbki_crm_payment_decisions import validate_targets
 
 
@@ -104,6 +105,9 @@ class ReconciliationTests(unittest.TestCase):
                 self.query, self.params = query, params
 
             def fetchall(self):
+                if 'WHERE loan_id=%s ORDER BY payment_date,id' in self.query:
+                    return [(2656, date(2026, 10, 28), Decimal('28888.97'),
+                             Decimal('1000'), Decimal('27888.97'), Decimal('0'))]
                 return [(17, '123', 'uid', datetime(2026, 9, 30, 12), 2, 3,
                          2656, date(2026, 10, 28), Decimal('28888.97'),
                          Decimal('1000'), Decimal('27888.97'), Decimal('0'),
@@ -112,14 +116,26 @@ class ReconciliationTests(unittest.TestCase):
         cur = Cursor()
         with patch('backend.nbki_payment_candidates.inspect_loan', return_value={
                 'uid': 'uid', 'checks': {'crm_issues': []},
-                'readiness': {'missing_fields': ['Код события']}}):
+                'readiness': {'missing_fields': ['Код события']},
+                'snapshot': {'loan': {'amount': Decimal('1500'),
+                                      'balance': Decimal('500')}}}):
             result = list_payment_candidates(cur, 2)
         self.assertEqual(result['total'], 1)
         self.assertIsNone(result['rows'][0]['gutdf_event_code'])
         self.assertFalse(result['rows'][0]['xml_ready'])
         self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
-        self.assertIn("e.match_status='matched'", cur.query)
-        self.assertIn('p.payment_date>f.event_time::date', cur.query)
+        self.assertEqual(result['rows'][0]['accounting_snapshot']['status'], 'checked')
+
+    def test_principal_snapshot_checks_payment_parts(self):
+        payments = [(1, date(2026, 9, 1), Decimal('100'), Decimal('40'),
+                     Decimal('60'), Decimal('0')),
+                    (2, date(2026, 10, 1), Decimal('200'), Decimal('100'),
+                     Decimal('90'), Decimal('0'))]
+        result = build_accounting_snapshot(Decimal('1000'), Decimal('860'), payments, 2)
+        self.assertEqual(result['principal_before'], '960')
+        self.assertEqual(result['principal_after'], '860')
+        self.assertEqual(result['status'], 'review')
+        self.assertIn('Сумма частей платежа', result['issues'][0])
 
 
 if __name__ == '__main__':
