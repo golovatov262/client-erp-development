@@ -2,7 +2,10 @@ from datetime import date
 from decimal import Decimal
 import unittest
 
-from reconcile_loan90_penalty import daily_penalty
+try:
+    from scripts.reconcile_loan90_penalty import daily_penalty
+except ImportError:
+    from reconcile_loan90_penalty import daily_penalty
 
 
 class PenaltyReconciliationTest(unittest.TestCase):

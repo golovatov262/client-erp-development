@@ -362,7 +362,19 @@ def accrue_penalties(cur, check_date):
             continue
 
         new_penalty = current_penalty + daily_penalty
-        cur.execute("UPDATE loan_schedule SET penalty_amount=%s WHERE id=%s" % (float(new_penalty), ls_id))
+        # The schedule total is mutable; preserve the exact daily basis and
+        # movement in an immutable, uniquely dated ledger in the same txn.
+        # schedule_id deliberately has no FK: early repayment may delete a
+        # future schedule row, but its past accrual evidence must survive.
+        cur.execute("""INSERT INTO loan_penalty_daily_accruals
+            (loan_id,schedule_id,accrual_date,effective_due_date,
+             principal_base,daily_rate,amount,penalty_before,penalty_after)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (loan_id, ls_id, today, effective_due_date(_pd),
+             overdue_principal, PENALTY_DAILY_RATE, daily_penalty,
+             current_penalty, new_penalty))
+        cur.execute("UPDATE loan_schedule SET penalty_amount=%s WHERE id=%s",
+                    (new_penalty, ls_id))
         total_penalty += daily_penalty
         updated += 1
 
