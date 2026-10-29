@@ -270,6 +270,14 @@ export type NbkiPaymentCandidates = {
         overdue_principal: string; overdue_interest: string }[];
       issues: string[];
     };
+    interest_candidate: {
+      status: "candidate_from_crm_formula" | "unavailable";
+      basis: string; period_start: string | null;
+      accrued_before_payment: string | null;
+      interest_covered_in_period: string | null;
+      remaining_interest_candidate: string | null;
+      issues: string[];
+    };
     allocation_audit: {
       payment_id: number;
       status: "checked" | "review" | "unavailable";

@@ -124,7 +124,9 @@ class ReconciliationTests(unittest.TestCase):
                 return (0,)
 
         cur = Cursor()
-        with patch('backend.nbki_payment_candidates.inspect_loan', return_value={
+        with patch('backend.nbki_payment_candidates.estimate_current_interest', return_value={
+                'status': 'unavailable', 'remaining_interest_candidate': None}), patch(
+                'backend.nbki_payment_candidates.inspect_loan', return_value={
                 'uid': 'uid', 'checks': {'crm_issues': []},
                 'readiness': {'missing_fields': ['Код события']},
                 'snapshot': {'loan': {'amount': Decimal('1500'),

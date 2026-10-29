@@ -13,12 +13,12 @@ try:
     from nbki_outbox import inspect_loan
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from nbki_event23_readiness import assess_event23
-    from nbki_crm_debt import split_latest_crm_debt
+    from nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
-    from backend.nbki_crm_debt import split_latest_crm_debt
+    from backend.nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -70,6 +70,10 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         crm_debt = split_latest_crm_debt(
             cur, loan_id, payment_id, payment_date,
             accounting.get('principal_after') if accounting.get('status') == 'checked' else None)
+        interest_candidate = estimate_current_interest(
+            cur, loan_id, payment_id, payment_date,
+            latest_payment=crm_debt['later_payments'] == 0,
+            principal_checked=accounting.get('status') == 'checked')
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt)
@@ -94,6 +98,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
                      'crm_debt_reconstruction': crm_debt,
+                     'interest_candidate': interest_candidate,
                      'allocation_audit': allocation_audit,
                      'psk_candidate': ({'percent': str(psk_percent),
                                         'amount': str(psk_amount),
