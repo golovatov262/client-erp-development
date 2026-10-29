@@ -104,7 +104,9 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         debt_preview = preview_debt(accounting, crm_debt, interest_candidate)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
-                                psk_candidate_status=psk_status, crm_debt=crm_debt)
+                                psk_candidate_status=psk_status, crm_debt=crm_debt,
+                                interest_candidate=interest_candidate,
+                                debt_preview=debt_preview, smp_candidate=smp_candidate)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,

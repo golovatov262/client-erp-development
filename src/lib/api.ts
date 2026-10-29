@@ -347,8 +347,14 @@ export type NbkiPaymentCandidates = {
         term_principal_crm: string | null;
         overdue_principal_crm: string | null;
         overdue_interest_crm: string | null;
-        interest_debt: null; other_debt: null; total_debt: null;
-        due_debt: null; overdue_debt: null;
+        term_interest_candidate: string | null;
+        other_debt_candidate: string | null;
+        total_debt_candidate: string | null;
+        due_debt_candidate: string | null;
+        overdue_debt_candidate: string | null;
+        interest_debt: string | null; other_debt: string | null;
+        total_debt: string | null; due_debt: string | null;
+        overdue_debt: string | null;
         cumulative_payments_crm: Record<string, string | null> | null;
       };
       xml_ready: false;

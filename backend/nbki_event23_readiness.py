@@ -35,7 +35,9 @@ MONETARY_BLOCKS = (
 
 def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                    event_occurred_at, posting_snapshot_sha256,
-                   psk_candidate_status=None, crm_debt=None) -> dict:
+                   psk_candidate_status=None, crm_debt=None,
+                   interest_candidate=None, debt_preview=None,
+                   smp_candidate=None) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -58,7 +60,9 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                             'Расчёт ПСК по CRM имеет расхождение или недостаточную историческую проверку; требуется ручная сверка'
                             if psk_candidate_status == 'review' else
                             'ПСК и условие обязательности требуют подтверждённого расчёта'),
-        'FL_25_26_27_28_Group': 'Есть часть по основному долгу и платежам CRM; нет полного расчёта процентов, срочной и просроченной задолженности. Коды ФЛ_28.10/28.11 с 29.12.2025 не направляются по письму ЦБ; опубликованная XSD 5.1 требует отдельной проверки представления пустых значений',
+        'FL_25_26_27_28_Group': ('Срез процентов и задолженности рассчитан по журналу, распределениям и графику CRM; сверить правовую классификацию до выпуска. Коды ФЛ_28.10/28.11 заменяются прочерками по письму ЦБ от 09.12.2025'
+            if crm_debt and interest_candidate and debt_preview and debt_preview.get('status') == 'candidate_from_crm_components'
+            else 'Не завершён расчёт процентов и частей задолженности на дату события'),
         'FL_29_MonthlyPayment': 'Нормативный среднемесячный платёж не рассчитан',
         'FL_29_1_DebtBurdenInfo': 'Не проверены условия обязательности и данные долговой нагрузки',
         'FL_20_JointDebtors': 'Нужно подтвердить состав солидарных должников или признак их отсутствия',
@@ -78,16 +82,22 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
     blockers = []
     if not event_occurred_at:
         blockers.append('Не подтверждено фактическое время события')
-    if not posting_snapshot_sha256:
-        blockers.append('Нет снимка графика при проведении платежа')
     if principal is None:
         blockers.append('Не подтверждён остаток основного долга по журналу CRM')
     if allocation.get('status') != 'checked':
         blockers.append('Не подтверждено распределение платежа CRM')
-    blockers.extend(('Не рассчитана полная задолженность по процентам на дату события; текущий график CRM не является историческим снимком',
-                     'Не подтверждены ПСК и среднемесячный платёж для XML',
-                     'Нужно согласовать представление ФЛ_28.10/28.11 в XSD 5.1 с письмом ЦБ от 09.12.2025: числовые коды передавать нельзя',
+    debt_ready = bool(debt_preview and debt_preview.get('status') == 'candidate_from_crm_components')
+    interest_ready = bool(interest_candidate and
+                          interest_candidate.get('status') == 'candidate_from_crm_formula')
+    smp_ready = bool(smp_candidate and smp_candidate.get('status') in
+                     ('candidate_from_crm_schedule', 'candidate_from_crm_components'))
+    if not debt_ready or not interest_ready:
+        blockers.append('Расчёт задолженности по компонентам CRM на дату события не завершён')
+    if psk_candidate_status != 'cross_checked' or not smp_ready:
+        blockers.append('ПСК или среднемесячный платёж не прошли проверку исходных условий CRM')
+    blockers.extend(('Для ФЛ_28.10/28.11 применяются прочерки по письму ЦБ от 09.12.2025; перед выпуском проверить схему представления XSD 5.1',
                      'Не проверены условные и обязательные блоки события 2.3'))
+    debt = debt_preview or {}
     return {'event_code_candidate': '2.3', 'xsd_version': XSD_VERSION,
             'xsd_archive_sha256': XSD_ARCHIVE_SHA256,
             'blocks': blocks, 'blockers': blockers,
@@ -98,6 +108,11 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                                 if crm_debt and crm_debt.get('status') in ('calculated_from_current_crm','calculated_from_posting_snapshot') else None),
                               'overdue_interest_crm': (crm_debt.get('overdue_interest')
                                 if crm_debt and crm_debt.get('status') in ('calculated_from_current_crm','calculated_from_posting_snapshot') else None),
+                              'term_interest_candidate': debt.get('term_interest_candidate'),
+                              'other_debt_candidate': debt.get('term_other_candidate'),
+                              'total_debt_candidate': debt.get('total_candidate'),
+                              'due_debt_candidate': debt.get('term_total_candidate'),
+                              'overdue_debt_candidate': debt.get('overdue_total_candidate'),
                               'interest_debt': None, 'other_debt': None,
                               'total_debt': None, 'due_debt': None,
                               'overdue_debt': None,
