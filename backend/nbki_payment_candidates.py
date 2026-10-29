@@ -38,7 +38,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         LEFT JOIN nbki_payment_posting_snapshots ps ON ps.payment_id=p.id
         LEFT JOIN loan_psk_calculations pc ON pc.loan_id=l.id AND pc.org_id=l.org_id
         WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
-          AND p.payment_date>f.event_time::date AND p.payment_date<=CURRENT_DATE
+          AND p.payment_date>f.event_time::date
+          AND p.payment_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
               WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
                 AND e.role='borrower' AND e.match_status='matched')
@@ -127,6 +128,46 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'event23_readiness': event23,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})
+    # A payment-only queue misses planned due dates, interest accrual and
+    # overdue transitions. The *current* schedule can be rewritten, so these
+    # rows are review leads, never historical events or evidence of NBKI receipt.
+    cur.execute("""SELECT l.id,l.contract_no,f.uid,f.event_time,s.id,
+        s.payment_date,s.status,s.payment_amount,s.paid_amount,
+        COALESCE((SELECT COUNT(*) FROM loan_payments p
+                  WHERE p.loan_id=l.id AND p.payment_date=s.payment_date),0)
+        FROM nbki_1c_loan_facts f
+        JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
+        JOIN loan_schedule s ON s.loan_id=l.id
+        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+          AND s.payment_date>f.event_time::date
+          AND s.payment_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
+          AND s.status NOT IN ('holiday','holiday_pending')
+          AND EXISTS (SELECT 1 FROM nbki_event_deals e
+              WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
+                AND e.role='borrower' AND e.match_status='matched')
+        ORDER BY s.payment_date,l.id,s.id""", (org_id,))
+    schedule_due_review = []
+    for (loan_id, contract_no, uid, baseline_time, schedule_id, due,
+         status, amount, paid, same_day_payments) in cur.fetchall():
+        if loan_id not in inspections:
+            inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
+        if inspections[loan_id]['uid'] != uid:
+            continue
+        schedule_due_review.append({
+            'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
+            'baseline_event_time': baseline_time.isoformat(),
+            'schedule_id': schedule_id, 'due_date': due.isoformat(),
+            'current_schedule_status': status,
+            'current_payment_amount': str(amount),
+            'current_paid_amount': str(paid or 0),
+            'same_day_crm_payment_count': same_day_payments,
+            'event_code_candidate': '2.3', 'event_code_confirmed': False,
+            'historical_state_confirmed': False, 'xml_ready': False,
+        })
     return {'total': len(rows), 'rows': rows,
+            'schedule_due_review_total': len(schedule_due_review),
+            'schedule_due_review': schedule_due_review,
             'acceptance_basis': 'operator_assumed',
-            'note': 'Однодневные совпадения с датой события не включены; требуется отдельная проверка'}
+            'note': ('Однодневные совпадения с датой события не включены. '
+                     'Сроки по текущему графику требуют проверки исторического состояния; '
+                     'начисления процентов и просрочка вне графика пока не покрыты.')}

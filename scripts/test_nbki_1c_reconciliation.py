@@ -105,6 +105,10 @@ class ReconciliationTests(unittest.TestCase):
                 self.query, self.params = query, params
 
             def fetchall(self):
+                if 'FROM nbki_1c_loan_facts f' in self.query and 'JOIN loan_schedule s' in self.query:
+                    return [(17, '123', 'uid', datetime(2026, 9, 30, 12),
+                             91, date(2026, 10, 20), 'paid', Decimal('500'),
+                             Decimal('500'), 0)]
                 if 'FROM loan_schedule s LEFT JOIN loan_payment_allocations a' in self.query:
                     return []
                 if 'WHERE loan_id=%s ORDER BY payment_date,id' in self.query:
@@ -137,6 +141,9 @@ class ReconciliationTests(unittest.TestCase):
                                       'balance': Decimal('500')}}}):
             result = list_payment_candidates(cur, 2)
         self.assertEqual(result['total'], 1)
+        self.assertEqual(result['schedule_due_review_total'], 1)
+        self.assertEqual(result['schedule_due_review'][0]['same_day_crm_payment_count'], 0)
+        self.assertFalse(result['schedule_due_review'][0]['historical_state_confirmed'])
         self.assertIsNone(result['rows'][0]['gutdf_event_code'])
         self.assertEqual(result['rows'][0]['event_code_candidate'], '2.3')
         self.assertFalse(result['rows'][0]['event_code_confirmed'])

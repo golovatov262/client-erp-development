@@ -221,6 +221,15 @@ export type NbkiReconciliationReport = {
 
 export type NbkiPaymentCandidates = {
   total: number;
+  schedule_due_review_total: number;
+  schedule_due_review: {
+    loan_id: number; contract_no: string; uid: string;
+    baseline_event_time: string; schedule_id: number; due_date: string;
+    current_schedule_status: string; current_payment_amount: string;
+    current_paid_amount: string; same_day_crm_payment_count: number;
+    event_code_candidate: "2.3"; event_code_confirmed: false;
+    historical_state_confirmed: false; xml_ready: false;
+  }[];
   acceptance_basis: "operator_assumed";
   note: string;
   rows: {

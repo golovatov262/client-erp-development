@@ -324,6 +324,20 @@ const AdminNbkiTab = () => {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle className="text-base">Плановые сроки после последнего события 1С · {paymentCandidates?.schedule_due_review_total ?? "…"}</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">Срок платежа и начисление процентов тоже могут вызвать событие 2.3. Ниже — только строки текущего графика для ручной проверки: исторический график, начисления и просрочка на дату срока не подтверждены. Совпадение с платежом CRM не исключает отдельного события.</p>
+          <div className="max-h-60 overflow-y-auto">
+            {paymentCandidates?.schedule_due_review.map(row => <div key={row.schedule_id} className="border-b py-2">
+              <span className="font-medium">{row.contract_no}</span> · {row.due_date} · план {Number(row.current_payment_amount).toLocaleString("ru-RU")} ₽ · строка #{row.schedule_id}
+              <div className="text-xs text-muted-foreground">УИД {row.uid} · текущий статус {row.current_schedule_status} · зачтено {Number(row.current_paid_amount).toLocaleString("ru-RU")} ₽ · платежей CRM в этот день {row.same_day_crm_payment_count}. Код 2.3 и состояние на дату не подтверждены; XML заблокирован.</div>
+            </div>)}
+            {paymentCandidates && !paymentCandidates.schedule_due_review_total && <p className="text-muted-foreground">Сроков для проверки по текущему графику нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">Изменения CRM для НБКИ · {changeCandidateTotal}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">При сохранении нового снимка сопоставленного договора фиксируются отличия от предыдущего: реквизиты, платежи, график и обеспечение. Это кандидаты на события, а не готовые файлы ГУТДФ; тип события и корректность данных ещё нужно определить.</p>
