@@ -37,7 +37,7 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                    event_occurred_at, posting_snapshot_sha256,
                    psk_candidate_status=None, crm_debt=None,
                    interest_candidate=None, debt_preview=None,
-                   smp_candidate=None) -> dict:
+                   smp_candidate=None, loan_terms=None) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -49,7 +49,10 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_17_DealUid': ('Есть УИД, номер и дата договора в CRM; требуется проверка значений XML'
                           if uid and loan.get('contract_no') and loan.get('start_date')
                           else 'Не хватает УИД, номера или даты договора'),
-        'FL_18_Deal': 'Не подтверждены коды вида, цели и условий сделки на дату события',
+        'FL_18_Deal': ('Версионированные коды вида, цели и условий сделки найдены в CRM'
+                       if loan_terms and all(loan_terms.get(key) for key in
+                           ('deal_code','kind_code','purpose_code'))
+                       else 'В CRM нет полного набора кодов сделки на дату события'),
         'FL_19_Amount': 'Сумма займа есть в CRM; валюта и условные показатели требуют сверки',
         'FL_19_1_AmountInfo': 'Нужно определить применимое заполнение обеспечиваемого обязательства',
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
@@ -82,6 +85,9 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
     blockers = []
     if not event_occurred_at:
         blockers.append('Не подтверждено фактическое время события')
+    if not loan_terms or not all(loan_terms.get(key) for key in
+                                 ('deal_code','kind_code','purpose_code')):
+        blockers.append('В CRM не заполнены версионированные коды вида, цели и типа сделки')
     if principal is None:
         blockers.append('Не подтверждён остаток основного долга по журналу CRM')
     if allocation.get('status') != 'checked':

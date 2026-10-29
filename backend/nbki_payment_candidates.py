@@ -102,11 +102,35 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             principal_checked=accounting.get('status') == 'checked')
         smp_candidate = preview_smp(cur, loan_id, payment_date, crm_debt)
         debt_preview = preview_debt(accounting, crm_debt, interest_candidate)
+        cur.execute("""SELECT deal_code,kind_code,purpose_code,interest_day_basis,
+            annual_rate FROM nbki_loan_terms_versions WHERE loan_id=%s
+            AND valid_from<=%s AND (valid_until IS NULL OR valid_until>%s)
+            ORDER BY valid_from DESC,id DESC LIMIT 1""",
+            (loan_id, event_occurred_at or datetime.combine(payment_date, datetime.min.time(), MOSCOW),
+             event_occurred_at or datetime.combine(payment_date, datetime.min.time(), MOSCOW)))
+        terms_row = cur.fetchone()
+        loan_terms = ({'deal_code': terms_row[0], 'kind_code': terms_row[1],
+                       'purpose_code': terms_row[2], 'interest_day_basis': terms_row[3],
+                       'annual_rate': str(terms_row[4]) if terms_row[4] is not None else None}
+                      if terms_row else None)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt,
                                 interest_candidate=interest_candidate,
-                                debt_preview=debt_preview, smp_candidate=smp_candidate)
+                                debt_preview=debt_preview, smp_candidate=smp_candidate,
+                                loan_terms=loan_terms)
+        generic_event_gaps = {
+            'Дата и время фактического события по правилам ГУТДФ',
+            'Код вида, назначения и условий сделки для применимого события',
+            'Подтверждённый расчёт полной стоимости займа и среднемесячного платежа',
+            'Детализация текущей, срочной и просроченной задолженности на дату события',
+            'Согласованное с НБКИ представление ФЛ_28.10/28.11 без числовых кодов',
+            'Проверка обязательных блоков и условных полей выбранного события',
+        }
+        event_missing_fields = [field for field in inspection['readiness']['missing_fields']
+                                if field not in generic_event_gaps]
+        event_missing_fields.extend(issue for issue in event23['blockers']
+                                    if issue not in event_missing_fields)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -125,7 +149,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                          '№ 758-П: изменились сведения об исполнении обязательства субъектом. '
                          'Требуется подтвердить фактическое время платежа и состав блоков.'),
                      'crm_issues': inspection['checks']['crm_issues'],
-                     'missing_fields': inspection['readiness']['missing_fields'],
+                     'missing_fields': event_missing_fields,
                      'accounting_snapshot': accounting,
                      'crm_debt_reconstruction': crm_debt,
                      'interest_candidate': interest_candidate,
