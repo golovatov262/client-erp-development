@@ -150,7 +150,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         for key, value in (('debtSum', total), ('debtMainSum', due_main + overdue_main),
                            ('debtPercentSum', due_interest + overdue_interest),
                            ('debtOtherSum', penalty), ('currency', 'RUB')):
-            _add(d, key, _money(value))
+            _add(d, key, value if key == 'currency' else _money(value))
     if due_main + due_interest + penalty:
         d = _add(group, 'FL_26_DebtDue')
         _add(d, 'debtDueExist_1')
@@ -186,7 +186,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                        ('totalPercentSum', payment['cumulative']['interest']),
                        ('totalOtherSum', payment['cumulative']['penalty']), ('date', payment['date']),
                        ('sizeCode', '-'), ('scheduleCode', '-'), ('payCurrency', 'RUB')):
-        _add(p, key, value if value == '-' or key == 'date' else _money(value))
+        _add(p, key, value if key in ('sizeCode', 'scheduleCode', 'payCurrency', 'date') else _money(value))
 
     if smp and smp.get('value_without_penalty_uncapped') is not None:
         monthly = _add(event, 'FL_29_MonthlyPayment')
