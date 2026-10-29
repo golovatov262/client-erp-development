@@ -1009,7 +1009,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 forced = body.get('forced_distribution')
                 result = post_loan_payment(
                     cur, lid, amt, pd, body.get('description', 'Ручной платёж'),
-                    source='manual', forced=forced)
+                    source='manual', forced=forced,
+                    event_time_msk=body.get('event_time_msk'))
                 audit_log(cur, staff, 'payment', 'loan', lid, str(lid),
                           'Платёж %s; единый движок v2' % amt, ip)
                 conn.commit()
@@ -1429,7 +1430,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     raise ValueError('Данные займа изменились. Рассчитайте погашение повторно')
             result = post_loan_payment(
                 cur, lid, amt, pd, 'Досрочное погашение',
-                source='manual', early_strategy=rt)
+                source='manual', early_strategy=rt,
+                event_time_msk=body.get('event_time_msk'))
             if result.get('unapplied', 0) > 0.01:
                 raise ValueError('Сумма досрочного погашения превышает общую задолженность')
             refresh_loan_overdue_status(cur, lid)

@@ -1,9 +1,30 @@
 """Unified, forward-only loan payment allocation engine (v2)."""
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+import re
+from zoneinfo import ZoneInfo
 
 CENT = Decimal('0.01')
 EPS = Decimal('0.005')
+MOSCOW = ZoneInfo('Europe/Moscow')
+
+
+def parse_event_time_msk(payment_date: date, value: str | None) -> datetime | None:
+    """Parse operator-confirmed occurrence time, never the CRM creation time."""
+    if not value:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r'\d{2}:\d{2}(?::\d{2})?', value):
+        raise ValueError('Укажите фактическое время платежа в формате ЧЧ:ММ (МСК)')
+    try:
+        parsed = time.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Укажите фактическое время платежа в формате ЧЧ:ММ (МСК)') from exc
+    if parsed.tzinfo is not None:
+        raise ValueError('Время платежа указывается без часового пояса: МСК задана отдельно')
+    occurred_at = datetime.combine(payment_date, parsed, tzinfo=MOSCOW)
+    if occurred_at > datetime.now(MOSCOW) + timedelta(minutes=1):
+        raise ValueError('Фактическое время платежа не может быть в будущем')
+    return occurred_at
 
 
 def money(value):
@@ -126,9 +147,13 @@ def _recalculate_future_reduce_term(cur, loan_id, balance, payment_date, include
 
 
 def post_loan_payment(cur, loan_id, amount, payment_date, description='', source='manual',
-                      source_ref=None, forced=None, early_strategy='reduce_payment'):
+                      source_ref=None, forced=None, early_strategy='reduce_payment',
+                      event_time_msk=None):
     """Post one payment atomically. Caller owns commit/rollback."""
     payment_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
+    event_occurred_at = parse_event_time_msk(payment_date, event_time_msk)
+    if event_occurred_at is not None and source != 'manual':
+        raise ValueError('Время, введённое оператором, допустимо только для ручного платежа')
     amount = money(amount)
     if amount <= 0:
         raise ValueError('Сумма платежа должна быть больше нуля')
@@ -153,9 +178,12 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
 
     cur.execute("""INSERT INTO loan_payments
         (loan_id,payment_date,amount,principal_part,interest_part,penalty_part,payment_type,
-         description,source,source_ref,engine_version)
-        VALUES (%s,%s,%s,0,0,0,'regular',%s,%s,%s,'v2') RETURNING id""",
-        (loan_id, payment_date, amount, description or '', source, source_ref))
+         description,source,source_ref,engine_version,nbki_recorded_at,
+         nbki_event_occurred_at,nbki_event_time_basis)
+        VALUES (%s,%s,%s,0,0,0,'regular',%s,%s,%s,'v2',clock_timestamp(),%s,%s)
+        RETURNING id""",
+        (loan_id, payment_date, amount, description or '', source, source_ref,
+         event_occurred_at, 'operator_entered' if event_occurred_at else None))
     payment_id = cur.fetchone()[0]
     remaining = amount
     totals = {'interest': Decimal('0'), 'principal': Decimal('0'), 'penalty': Decimal('0'), 'early_principal': Decimal('0')}

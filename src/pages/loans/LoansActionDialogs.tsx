@@ -13,13 +13,13 @@ interface LoansActionDialogsProps {
   saving: boolean;
   showPayment: boolean;
   setShowPayment: (v: boolean) => void;
-  payForm: { amount: string; date: string; manual: boolean; principal: string; interest: string; penalty: string };
-  setPayForm: (v: { amount: string; date: string; manual: boolean; principal: string; interest: string; penalty: string }) => void;
+  payForm: { amount: string; date: string; event_time_msk: string; manual: boolean; principal: string; interest: string; penalty: string };
+  setPayForm: (v: { amount: string; date: string; event_time_msk: string; manual: boolean; principal: string; interest: string; penalty: string }) => void;
   handlePayment: () => void;
   showEarly: boolean;
   setShowEarly: (v: boolean) => void;
-  earlyForm: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string };
-  setEarlyForm: (v: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string }) => void;
+  earlyForm: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string; event_time_msk: string };
+  setEarlyForm: (v: { mode: "partial" | "full"; amount: string; repayment_type: string; date: string; event_time_msk: string }) => void;
   earlyPreview: EarlyRepaymentPreview | null;
   calculatingEarly: boolean;
   calculateEarly: () => void;
@@ -48,6 +48,7 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
           <div className="text-sm text-muted-foreground">Остаток: {detail ? fmt(detail.balance) : "—"}</div>
           <div><Label>Сумма</Label><Input type="number" value={props.payForm.amount} onChange={e => props.setPayForm({ ...props.payForm, amount: e.target.value })} /></div>
           <div><Label>Дата</Label><Input type="date" value={props.payForm.date} onChange={e => props.setPayForm({ ...props.payForm, date: e.target.value })} /></div>
+          <div><Label>Фактическое время приёма платежа (МСК)</Label><Input type="time" step="1" value={props.payForm.event_time_msk} onChange={e => props.setPayForm({ ...props.payForm, event_time_msk: e.target.value })} /><p className="text-xs text-muted-foreground">Заполняйте только по документу или подтверждённому факту. Время внесения записи в CRM не подходит.</p></div>
           <div className="flex items-center gap-2 py-1">
             <input type="checkbox" id="new_manual_dist" checked={props.payForm.manual} onChange={e => props.setPayForm({ ...props.payForm, manual: e.target.checked })} className="h-4 w-4 rounded border-gray-300" />
             <Label htmlFor="new_manual_dist" className="cursor-pointer text-sm font-medium">Принудительное распределение по данным 1С</Label>
@@ -80,6 +81,7 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
           </div>
           {props.earlyForm.mode === "partial" && <div><Label>Планируемая сумма</Label><Input type="number" min="0.01" step="0.01" value={props.earlyForm.amount} onChange={e => props.setEarlyForm({ ...props.earlyForm, amount: e.target.value })} /></div>}
           <div><Label>Дата</Label><Input type="date" value={props.earlyForm.date} onChange={e => props.setEarlyForm({ ...props.earlyForm, date: e.target.value })} /></div>
+          <div><Label>Фактическое время приёма платежа (МСК)</Label><Input type="time" step="1" value={props.earlyForm.event_time_msk} onChange={e => props.setEarlyForm({ ...props.earlyForm, event_time_msk: e.target.value })} /><p className="text-xs text-muted-foreground">Не подменяйте временем создания записи или файла.</p></div>
           {props.earlyForm.mode === "partial" && <div>
             <Label>После погашения</Label>
             <Select value={props.earlyForm.repayment_type} onValueChange={v => props.setEarlyForm({ ...props.earlyForm, repayment_type: v })}>

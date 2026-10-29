@@ -69,8 +69,8 @@ const Loans = () => {
   const { isAdmin, isManager } = useAuth();
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
-  const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), manual: false, principal: "", interest: "", penalty: "" });
-  const [earlyForm, setEarlyForm] = useState({ mode: "partial" as "partial" | "full", amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
+  const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), event_time_msk: "", manual: false, principal: "", interest: "", penalty: "" });
+  const [earlyForm, setEarlyForm] = useState({ mode: "partial" as "partial" | "full", amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10), event_time_msk: "" });
   const [showEditPayment, setShowEditPayment] = useState(false);
   const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: true });
   const [exporting, setExporting] = useState(false);
@@ -128,7 +128,7 @@ const Loans = () => {
     setSaving(true);
     try {
       const res = await api.loans.payment({
-        loan_id: detail.id, payment_date: payForm.date,
+        loan_id: detail.id, payment_date: payForm.date, event_time_msk: payForm.event_time_msk || undefined,
         amount: toNum(payForm.amount),
         ...(payForm.manual ? { forced_distribution: {
           principal: toNum(payForm.principal || "0"),
@@ -189,6 +189,7 @@ const Loans = () => {
       const res = await api.loans.earlyRepayment({
         loan_id: detail.id, amount: earlyPreview.amount,
         repayment_type: earlyForm.repayment_type, payment_date: earlyForm.date,
+        event_time_msk: earlyForm.event_time_msk || undefined,
         full_repayment: earlyForm.mode === "full",
         expected_preview: earlyPreview,
       });

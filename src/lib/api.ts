@@ -238,6 +238,9 @@ export type NbkiPaymentCandidates = {
     penalty: string;
     payment_type: string;
     payment_source: string;
+    event_occurred_at_msk: string | null;
+    crm_recorded_at_msk: string | null;
+    event_time_basis: string | null;
     candidate_reason: string;
     event_code_candidate: "2.3";
     event_code_candidate_basis: string;
@@ -429,9 +432,9 @@ export const api = {
         entity: "loans", action: "schedule", amount, rate, term, schedule_type: scheduleType, start_date: startDate,
       }),
     create: (data: CreateLoanData) => request<{ id: number; schedule: ScheduleItem[]; monthly_payment: number }>("POST", undefined, { entity: "loans", action: "create", ...data }),
-    payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
+    payment: (data: { loan_id: number; payment_date: string; amount: number; event_time_msk?: string; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
-    earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string; full_repayment?: boolean; expected_preview?: EarlyRepaymentPreview }) =>
+    earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string; event_time_msk?: string; full_repayment?: boolean; expected_preview?: EarlyRepaymentPreview }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
     previewEarlyRepayment: (data: { loan_id: number; payment_date: string; repayment_type: string; mode: "full" | "partial"; amount?: number }) =>
       request<EarlyRepaymentPreview>("POST", undefined, { entity: "loans", action: "early_repayment_preview", ...data }),
