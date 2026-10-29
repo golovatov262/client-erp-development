@@ -1,0 +1,38 @@
+"""Read-only CRM payment queue after the latest operator-assumed 1C event.
+
+This queue does not assign a GUTDF event, produce XML, or prove NBKI receipt.
+"""
+
+from __future__ import annotations
+
+
+def list_payment_candidates(cur, org_id: int) -> dict:
+    cur.execute("""SELECT l.id,l.contract_no,f.uid,f.event_time,f.source_id,
+        f.source_row_num,p.id,p.payment_date,p.amount,p.principal_part,
+        p.interest_part,p.penalty_part,p.payment_type,p.source
+        FROM nbki_1c_loan_facts f
+        JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
+        JOIN loan_payments p ON p.loan_id=l.id
+        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+          AND p.payment_date>f.event_time::date AND p.payment_date<=CURRENT_DATE
+          AND EXISTS (SELECT 1 FROM nbki_event_deals e
+              WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
+                AND e.role='borrower' AND e.match_status='matched')
+        ORDER BY p.payment_date,l.id,p.id""", (org_id,))
+    rows = []
+    for (loan_id, contract_no, uid, event_time, source_id, row_num,
+         payment_id, payment_date, amount, principal, interest, penalty,
+         payment_type, payment_source) in cur.fetchall():
+        rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
+                     'baseline_event_time': event_time.isoformat(),
+                     'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
+                     'payment_id': payment_id, 'payment_date': payment_date.isoformat(),
+                     'amount': str(amount), 'principal': str(principal or 0),
+                     'interest': str(interest or 0), 'penalty': str(penalty or 0),
+                     'payment_type': payment_type, 'payment_source': payment_source,
+                     'candidate_reason': 'Платёж CRM после последнего события 1С',
+                     'gutdf_event_code': None, 'event_code_confirmed': False,
+                     'xml_ready': False})
+    return {'total': len(rows), 'rows': rows,
+            'acceptance_basis': 'operator_assumed',
+            'note': 'Однодневные совпадения с датой события не включены; требуется отдельная проверка'}

@@ -46,6 +46,10 @@ try:
     from nbki_1c_reconciliation import reconciliation_report
 except ImportError:
     from backend.nbki_1c_reconciliation import reconciliation_report
+try:
+    from nbki_payment_candidates import list_payment_candidates
+except ImportError:
+    from backend.nbki_payment_candidates import list_payment_candidates
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9692,6 +9696,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return readiness_report(cur, org_id)
     if action == 'reconciliation_report':
         return reconciliation_report(cur, org_id)
+    if action == 'payment_candidates':
+        return list_payment_candidates(cur, org_id)
     if action == 'sync_1c_facts':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

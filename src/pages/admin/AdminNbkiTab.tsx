@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiPaymentCandidates, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -73,13 +73,15 @@ const AdminNbkiTab = () => {
   const [bulkResult, setBulkResult] = useState("");
   const [factsResult, setFactsResult] = useState("");
   const [reconciliation, setReconciliation] = useState<NbkiReconciliationReport | null>(null);
+  const [paymentCandidates, setPaymentCandidates] = useState<NbkiPaymentCandidates | null>(null);
 
   const refreshOutbox = async () => {
     try {
-      const [outbox, candidates] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates()]);
+      const [outbox, candidates, payments] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates(), api.nbki.paymentCandidates()]);
       setDrafts(outbox.rows);
       setChangeCandidates(candidates.rows);
       setChangeCandidateTotal(candidates.total);
+      setPaymentCandidates(payments);
     }
     catch (e) { setError(humanizeError(e)); }
   };
@@ -286,6 +288,21 @@ const AdminNbkiTab = () => {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle className="text-base">Новые платежи CRM после последнего события 1С · {paymentCandidates?.total ?? "…"}</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">Только действующие договоры с однозначным УИД. Даты и суммы берутся из CRM. Это очередь кандидатов, не готовые события ГУТДФ и не XML для отправки; платежи в дату последнего события требуют отдельной проверки.</p>
+          <Button variant="outline" disabled={outboxLoading} onClick={() => void refreshOutbox()}>Обновить очередь</Button>
+          <div className="max-h-60 overflow-y-auto text-sm">
+            {paymentCandidates?.rows.map(payment => <div key={payment.payment_id} className="border-b py-2">
+              <span className="font-medium">{payment.contract_no}</span> · {payment.payment_date} · {Number(payment.amount).toLocaleString("ru-RU")} ₽ · платёж CRM #{payment.payment_id}
+              <div className="text-xs text-muted-foreground">УИД {payment.uid} · последнее событие 1С {payment.baseline_event_time.slice(0, 10)} · код события ещё не определён</div>
+            </div>)}
+            {paymentCandidates && !paymentCandidates.total && <p className="text-muted-foreground">Новых платежей по сопоставленным договорам нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">Изменения CRM для НБКИ · {changeCandidateTotal}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">При сохранении нового снимка сопоставленного договора фиксируются отличия от предыдущего: реквизиты, платежи, график и обеспечение. Это кандидаты на события, а не готовые файлы ГУТДФ; тип события и корректность данных ещё нужно определить.</p>
@@ -331,7 +348,7 @@ const AdminNbkiTab = () => {
           {factsResult && <p role="status" className="text-sm">{factsResult}</p>}
           <Button variant="outline" disabled={readinessLoading} onClick={() => void loadReconciliation()}>Сверить с CRM</Button>
           {reconciliation && <div className="rounded-md border p-3 text-sm">
-            <p>Сопоставлено {reconciliation.total_loans} договоров; для {reconciliation.resolved_crm_loans} по вашему решению принято значение CRM. Ещё по {reconciliation.review_loans} платежи требуют проверки: {reconciliation.candidate_loans} кандидатов и {reconciliation.unexplained_loans} без объяснения. Различие дат окончания (договор 1С / график CRM): {reconciliation.different_end_dates}, показано справочно. Учётные данные не меняются; приём НБКИ не подтверждается.</p>
+            <p>Сопоставлено {reconciliation.total_loans} договоров; по {reconciliation.resolved_crm_loans} различиям принято общее правило: для выгрузки использовать CRM. Неурегулированных платёжных вопросов: {reconciliation.review_loans}. Различие дат окончания (договор 1С / график CRM): {reconciliation.different_end_dates}, показано справочно. Учётные данные не меняются; приём НБКИ не подтверждается.</p>
             <div className="mt-2 max-h-56 overflow-y-auto">
               {reconciliation.rows.filter(row => row.checks.some(check => check.field === "last_payment" && check.status !== "same")).map(row => <div key={row.loan_id} className="border-t py-2">
                 <span className="font-medium">{row.contract_no}</span> · событие {row.event_time.slice(0, 10)} · {row.checks.find(check => check.field === "last_payment")?.status === "resolved_crm" ? "решено: CRM" : row.checks.find(check => check.field === "last_payment")?.status === "date_shift_candidate" ? "вероятно, отличается дата" : row.checks.find(check => check.field === "last_payment")?.status === "adjacent_sum_candidate" ? "вероятно, платёж разнесён на два дня" : "сумма требует проверки"}

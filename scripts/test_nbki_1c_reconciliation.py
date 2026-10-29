@@ -1,8 +1,9 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from backend.nbki_1c_reconciliation import apply_crm_decision, compare_fact, parse_money
+from backend.nbki_1c_reconciliation import apply_crm_decision, apply_global_crm_policy, compare_fact, parse_money
+from backend.nbki_payment_candidates import list_payment_candidates
 from scripts.record_nbki_crm_payment_decisions import validate_targets
 
 
@@ -76,6 +77,44 @@ class ReconciliationTests(unittest.TestCase):
     def test_seed_rejects_missing_or_changed_targets(self):
         with self.assertRaises(ValueError):
             validate_targets({'rows': []})
+
+    def test_global_policy_uses_crm_even_when_1c_amount_differs(self):
+        checks = compare_fact({'111': {'value': '13.10.2026'},
+                               '112': {'value': '11 700,03'}},
+                              event_date=date(2026, 10, 13), crm_end_date=None,
+                              payments=[(2556, date(2026, 10, 13), Decimal('13500'))])
+        apply_global_crm_policy(checks)
+        self.assertEqual(checks[0]['status'], 'resolved_crm')
+        self.assertEqual(checks[0]['original_status'], 'review')
+        self.assertEqual(checks[0]['effective_crm_payments'][0]['amount'], '13500')
+
+    def test_global_policy_does_not_invent_missing_crm_payment(self):
+        checks = compare_fact({'111': {'value': '13.10.2026'},
+                               '112': {'value': '11 700,03'}},
+                              event_date=date(2026, 10, 13), crm_end_date=None,
+                              payments=[])
+        apply_global_crm_policy(checks)
+        self.assertEqual(checks[0]['status'], 'missing_in_crm')
+        self.assertEqual(checks[0]['effective_source'], 'crm')
+
+    def test_payment_queue_keeps_code_unassigned(self):
+        class Cursor:
+            def execute(self, query, params):
+                self.query, self.params = query, params
+
+            def fetchall(self):
+                return [(17, '123', 'uid', datetime(2026, 9, 30, 12), 2, 3,
+                         2656, date(2026, 10, 28), Decimal('28888.97'),
+                         Decimal('1000'), Decimal('27888.97'), Decimal('0'),
+                         'early_partial', 'bank')]
+
+        cur = Cursor()
+        result = list_payment_candidates(cur, 2)
+        self.assertEqual(result['total'], 1)
+        self.assertIsNone(result['rows'][0]['gutdf_event_code'])
+        self.assertFalse(result['rows'][0]['xml_ready'])
+        self.assertIn("e.match_status='matched'", cur.query)
+        self.assertIn('p.payment_date>f.event_time::date', cur.query)
 
 
 if __name__ == '__main__':

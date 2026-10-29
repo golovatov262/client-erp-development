@@ -66,6 +66,9 @@ def compare_fact(indicators: dict, *, event_date, crm_end_date,
                        'crm': str(crm_total) if same_day else None,
                        'payment_date': payment_date.isoformat(),
                        'status': status,
+                       'crm_day_payments': [{'id': id_, 'date': paid.isoformat(),
+                                             'amount': str(amount)}
+                                            for id_, paid, amount in same_day],
                        'candidate_payments': [{'id': id_, 'date': paid.isoformat(),
                                                'amount': str(amount)}
                                               for id_, paid, amount in candidates],
@@ -87,6 +90,23 @@ def apply_crm_decision(checks: list[dict], payment_ids: list[int],
         check['status'] = 'resolved_crm'
         check['decision_source'] = decision_source
         check['effective_crm_payments'] = candidates
+    return checks
+
+
+def apply_global_crm_policy(checks: list[dict]) -> list[dict]:
+    """1C remains historical context; CRM is the operator-selected source."""
+    for check in checks:
+        check['effective_source'] = 'crm'
+        if check['field'] != 'last_payment' or check['status'] in ('same', 'resolved_crm'):
+            continue
+        effective = check['candidate_payments'] or check['crm_day_payments']
+        if not effective:
+            # CRM has no payment to use; the 1C row must not invent one.
+            continue
+        check['original_status'] = check['status']
+        check['status'] = 'resolved_crm'
+        check['decision_source'] = 'operator_global_crm_policy'
+        check['effective_crm_payments'] = effective
     return checks
 
 
@@ -112,6 +132,7 @@ def reconciliation_report(cur, org_id: int) -> dict:
         decision = cur.fetchone()
         if decision:
             apply_crm_decision(checks, decision[0], decision[1])
+        apply_global_crm_policy(checks)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'event_time': event_time.isoformat(), 'source_id': source_id,
                      'source_row_num': row_num,

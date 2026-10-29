@@ -165,7 +165,7 @@ def make_1c_reconciliation_xlsx(report: dict) -> bytes:
     sheet.title = 'Сверка 1С и CRM'
     sheet.append(('ID CRM', 'Договор', 'УИД', 'Дата события 1С', 'Строка 1С',
                   'Показатель', 'Дата платежа', 'Значение 1С', 'Значение CRM',
-                  'Результат', 'Кандидаты платежей CRM', 'Пояснение',
+                  'Результат', 'Платежи CRM (выбрано/кандидат)', 'Пояснение',
                   'Решение менеджера', 'Комментарий'))
     labels = {'contract_end_date': 'Дата окончания договора',
               'last_payment': 'Последний платеж ФЛ_28.2'}
@@ -183,7 +183,8 @@ def make_1c_reconciliation_xlsx(report: dict) -> bytes:
                           check.get('payment_date'), check['source'], check['crm'],
                           statuses[check['status']],
                           '; '.join(f"#{p['id']} {p['date']} {p['amount']}"
-                                    for p in check.get('candidate_payments', [])),
+                                    for p in check.get('effective_crm_payments',
+                                                       check.get('candidate_payments', []))),
                           (check['note'] + ('; решение пользователя: значение CRM'
                                             if check['status'] == 'resolved_crm' else '')),
                           'CRM' if check['status'] == 'resolved_crm' else None, None))

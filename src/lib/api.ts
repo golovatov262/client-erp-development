@@ -219,6 +219,32 @@ export type NbkiReconciliationReport = {
   }[];
 };
 
+export type NbkiPaymentCandidates = {
+  total: number;
+  acceptance_basis: "operator_assumed";
+  note: string;
+  rows: {
+    loan_id: number;
+    contract_no: string;
+    uid: string;
+    baseline_event_time: string;
+    baseline_source_id: number;
+    baseline_source_row_num: number;
+    payment_id: number;
+    payment_date: string;
+    amount: string;
+    principal: string;
+    interest: string;
+    penalty: string;
+    payment_type: string;
+    payment_source: string;
+    candidate_reason: string;
+    gutdf_event_code: null;
+    event_code_confirmed: false;
+    xml_ready: false;
+  }[];
+};
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -314,6 +340,7 @@ export const api = {
     changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
     readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
     reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", action: "reconciliation_report" }),
+    paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
     sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
