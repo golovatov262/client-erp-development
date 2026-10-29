@@ -46,6 +46,21 @@ class DebtTest(unittest.TestCase):
         self.assertEqual(result['status'], 'unavailable')
         self.assertIsNone(result['overdue_principal'])
 
+    def test_unpaid_penalty_is_separate_and_due_status_unconfirmed(self):
+        class PenaltyCursor(Cursor):
+            def fetchone(self):
+                if 'SUM(penalty_amount)' in self.query:
+                    return (Decimal('305.73'),)
+                if 'SUM(penalty_part)' in self.query:
+                    return (Decimal('120.71'),)
+                return super().fetchone()
+
+        result = split_latest_crm_debt(PenaltyCursor(0, []), 87, 2649,
+                                       date(2026, 10, 26), '321425.56')
+        self.assertEqual(result['penalty_candidate']['remaining'], '185.02')
+        self.assertEqual(result['penalty_candidate']['due_classification'], 'unconfirmed')
+        self.assertIsNone(result['total_debt'])
+
     def test_actual_period_interest_is_not_future_scheduled_interest(self):
         class InterestCursor:
             def execute(self, query, params):

@@ -124,6 +124,7 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
               'later_payments': later_count, 'overdue_principal': None,
               'overdue_interest': None, 'term_principal': None,
               'interest_debt': None, 'total_debt': None,
+              'penalty_candidate': None,
               'rows': [], 'issues': []}
     if later_count:
         result['issues'].append('После события есть платежи: текущий график не является состоянием на дату события')
@@ -173,4 +174,24 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
     result['overdue_principal'] = str(overdue_principal)
     result['overdue_interest'] = str(overdue_interest)
     result['term_principal'] = str(principal - overdue_principal)
+    # Penalties are accounted separately from schedule paid_amount in CRM.
+    # Their contractual due date is not encoded, so do not label them overdue.
+    if overdue_principal == ZERO:
+        cur.execute("""SELECT COALESCE(SUM(penalty_amount),0)
+            FROM loan_schedule WHERE loan_id=%s""", (loan_id,))
+        assessed_penalty = _money(cur.fetchone()[0])
+        cur.execute("""SELECT COALESCE(SUM(penalty_part),0)
+            FROM loan_payments WHERE loan_id=%s
+              AND (payment_date,id)<=(%s,%s)""",
+            (loan_id, event_date, payment_id))
+        paid_penalty = _money(cur.fetchone()[0])
+        if assessed_penalty < paid_penalty:
+            result['status'] = 'review'
+            result['issues'].append('Погашенные пени превышают начисленные в графике CRM')
+        else:
+            result['penalty_candidate'] = {
+                'assessed_crm': str(assessed_penalty),
+                'paid_crm': str(paid_penalty),
+                'remaining': str(assessed_penalty - paid_penalty),
+                'due_classification': 'unconfirmed'}
     return result

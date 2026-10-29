@@ -266,6 +266,8 @@ export type NbkiPaymentCandidates = {
       basis: string; later_payments: number;
       overdue_principal: string | null; overdue_interest: string | null;
       term_principal: string | null; interest_debt: null; total_debt: null;
+      penalty_candidate: { assessed_crm: string; paid_crm: string;
+        remaining: string; due_classification: "unconfirmed" } | null;
       rows: { schedule_id: number; due: string;
         overdue_principal: string; overdue_interest: string }[];
       issues: string[];
