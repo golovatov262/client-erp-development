@@ -211,7 +211,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
         </div>
 
         {detail.psk_calculation && <div className="rounded-md border px-3 py-2 text-sm">
-          <div className="font-medium">ПСК по исходным условиям CRM: {detail.psk_calculation.percent.toFixed(3)}% годовых · {fmt(detail.psk_calculation.amount)}</div>
+          <div className="font-medium">{detail.psk_calculation.status === "cross_checked" ? "ПСК по исходным условиям CRM" : "Предварительный расчёт ПСК — не использовать для выгрузки"}: {detail.psk_calculation.percent.toFixed(3)}% годовых · {fmt(detail.psk_calculation.amount)}</div>
           <div className="text-xs text-muted-foreground mt-1">{detail.psk_calculation.status === "cross_checked" ? "Сопоставлена с историческим расчетом 1С" : "Требуется проверка первоначальных условий"}. {detail.psk_calculation.note}. Штрафы за просрочку не включены.</div>
         </div>}
 
