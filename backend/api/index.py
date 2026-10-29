@@ -55,6 +55,10 @@ try:
 except ImportError:
     from backend.nbki_crm_events import list_crm_events
 try:
+    from nbki_collateral_readiness import collateral_readiness
+except ImportError:
+    from backend.nbki_collateral_readiness import collateral_readiness
+try:
     from nbki_crm_export_facts import payment_event_facts
 except ImportError:
     from backend.nbki_crm_export_facts import payment_event_facts
@@ -9734,6 +9738,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return list_payment_candidates(cur, org_id)
     if action == 'crm_events':
         return list_crm_events(cur, org_id)
+    if action == 'collateral_readiness':
+        return collateral_readiness(cur, org_id)
     if action == 'crm_event_facts':
         try:
             return payment_event_facts(cur, org_id, int(params.get('event_id')))

@@ -381,6 +381,16 @@ export type NbkiCrmEvents = {
   }[];
 };
 
+export type NbkiCollateralReadiness = {
+  active_loans: number;
+  collateral_records: number;
+  ready_for_event24: number;
+  event24_status: string;
+  by_type: { type: string; count: number; with_missing_data: number; missing_counts: Record<string, number> }[];
+  rows: { loan_id: number; contract_no: string; loan_status: string; collateral_id: number;
+    collateral_type: string; missing_fields: string[]; has_previous_source: boolean }[];
+};
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -478,6 +488,7 @@ export const api = {
     reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", action: "reconciliation_report" }),
     paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
     crmEvents: () => request<NbkiCrmEvents>("GET", { entity: "nbki", action: "crm_events" }),
+    collateralReadiness: () => request<NbkiCollateralReadiness>("GET", { entity: "nbki", action: "collateral_readiness" }),
     event23Xml: (eventId: number) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string }>("POST", { event_id: eventId }, { entity: "nbki", action: "event23_xml" }),
     event23BatchXml: (eventIds: number[]) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string; events: { event_id: number; contract_no: string; uid: string }[]; excluded: { event_id: number; reason: string }[] }>("POST", { event_ids: eventIds }, { entity: "nbki", action: "event23_batch_xml" }),
     sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),

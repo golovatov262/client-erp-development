@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiChangeCandidate, NbkiCrmEvents, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiPaymentCandidates, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiCollateralReadiness, NbkiCrmEvents, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiPaymentCandidates, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,8 @@ const AdminNbkiTab = () => {
   const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
   const [buildingEventId, setBuildingEventId] = useState<number | null>(null);
   const [buildingEventBatch, setBuildingEventBatch] = useState(false);
+  const [collateralReadiness, setCollateralReadiness] = useState<NbkiCollateralReadiness | null>(null);
+  const [loadingCollateralReadiness, setLoadingCollateralReadiness] = useState(false);
 
   const refreshOutbox = async () => {
     try {
@@ -262,6 +264,14 @@ const AdminNbkiTab = () => {
     finally { setBuildingEventBatch(false); }
   };
 
+  const loadCollateralReadiness = async () => {
+    setLoadingCollateralReadiness(true);
+    setError("");
+    try { setCollateralReadiness(await api.nbki.collateralReadiness()); }
+    catch (e) { setError(humanizeError(e)); }
+    finally { setLoadingCollateralReadiness(false); }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -298,6 +308,30 @@ const AdminNbkiTab = () => {
             </div>)}
             {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Новых событий после запуска журнала пока нет.</p>}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Обеспечение · подготовка события 2.4</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">Проверка показывает, какие сведения и история изменения обеспечения доступны в CRM. До их сопоставления XML 2.4 не формируется.</p>
+          <Button variant="outline" onClick={() => void loadCollateralReadiness()} disabled={loadingCollateralReadiness}>
+            {loadingCollateralReadiness ? "Проверяю…" : "Проверить готовность события 2.4"}
+          </Button>
+          {collateralReadiness && <>
+            <p>Активных договоров: {collateralReadiness.active_loans}; записей обеспечения: {collateralReadiness.collateral_records}; готовых событий 2.4: {collateralReadiness.ready_for_event24}.</p>
+            <div className="space-y-1">{collateralReadiness.by_type.map(item => <div key={item.type} className="rounded border px-2 py-1">
+              <span className="font-medium">{item.type}</span>: {item.count}; требуют данных — {item.with_missing_data}.
+              {Object.keys(item.missing_counts).length > 0 && <span className="text-muted-foreground"> {Object.entries(item.missing_counts).map(([field, count]) => `${field} (${count})`).join(" · ")}</span>}
+            </div>)}</div>
+            <details>
+              <summary className="cursor-pointer font-medium">Договоры и недостающие поля</summary>
+              <div className="mt-2 max-h-64 overflow-y-auto">{collateralReadiness.rows.map(item => <div key={item.collateral_id} className="border-b py-1.5">
+                <span className="font-medium">{item.contract_no}</span> · {item.collateral_type}
+                <div className="text-xs text-muted-foreground">{item.missing_fields.length ? item.missing_fields.join("; ") : "Поля заполнены; требуется проверить изменение относительно ранее переданных сведений"}</div>
+              </div>)}</div>
+            </details>
+          </>}
         </CardContent>
       </Card>
 
