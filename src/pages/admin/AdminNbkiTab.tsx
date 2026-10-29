@@ -71,6 +71,7 @@ const AdminNbkiTab = () => {
   const [readinessLoading, setReadinessLoading] = useState(false);
   const [outboxLoading, setOutboxLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState("");
+  const [factsResult, setFactsResult] = useState("");
 
   const refreshOutbox = async () => {
     try {
@@ -90,6 +91,17 @@ const AdminNbkiTab = () => {
     try { setReadinessReport(await api.nbki.readinessReport()); }
     catch (e) { setError(humanizeError(e)); }
     finally { setReadinessLoading(false); }
+  };
+
+  const sync1CFacts = async () => {
+    setImporting(true);
+    setError("");
+    try {
+      const result = await api.nbki.sync1CFacts();
+      setFactsResult(`Последний отчёт 1С: ${result.source_last_event_time}. Действующих договоров с однозначным сопоставлением: ${result.matched_active}; заполнено: ${result.created}, обновлено: ${result.updated}, без изменений: ${result.unchanged}. Конфликтов: ${result.conflict}.`);
+      await loadReadiness();
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setImporting(false); }
   };
 
   const inspect = async (save: boolean) => {
@@ -300,9 +312,13 @@ const AdminNbkiTab = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">События 1С (MXL)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">События хранятся отдельно от XML. По вашему указанию они считаются принятыми для учета в CRM, но это не подтверждение НБКИ: без квитанции и проверки подписи фактический прием неизвестен. Суммы, даты и платежи в договорах не перезаписываются.</p>
+          <p className="text-sm text-muted-foreground">События хранятся отдельно от XML. По вашему указанию они считаются принятыми для учета в CRM, но это не подтверждение НБКИ: без квитанции и проверки подписи фактический прием неизвестен. Показатели последнего события можно перенести в отдельный раздел карточки сопоставленного займа. Учетные суммы, даты и платежи при этом не перезаписываются.</p>
           <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".mxl" onChange={event => setEventFile(event.target.files?.[0] || null)} />
-          <Button disabled={!eventFile || importing} onClick={() => void importEventFile()}>{importing ? "Сопоставляем…" : "Импортировать события"}</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={!eventFile || importing} onClick={() => void importEventFile()}>{importing ? "Сопоставляем…" : "Импортировать события"}</Button>
+            <Button variant="outline" disabled={importing} onClick={() => void sync1CFacts()}>Перенести показатели 1С в карточки</Button>
+          </div>
+          {factsResult && <p role="status" className="text-sm">{factsResult}</p>}
           {eventImportResult && <p role="status" className="text-sm">Обработано {eventImportResult.rows} событий: {eventImportResult.borrower_uids} УИД заемщиков, {eventImportResult.guarantor_uids} УИД поручителей. Сопоставлено {eventImportResult.matched}, требуют проверки {eventImportResult.review}, нет в CRM {eventImportResult.not_in_crm}. Поручительства: дополнено {eventImportResult.guarantees_updated}, добавлено {eventImportResult.guarantees_created}, требуют сверки {eventImportResult.guarantees_pending}.</p>}
         </CardContent>
       </Card>

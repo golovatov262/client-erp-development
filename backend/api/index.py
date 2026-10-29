@@ -38,6 +38,10 @@ try:
     from nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report, historical_context
 except ImportError:
     from backend.nbki_outbox import inspect_loan, create_draft, create_all_drafts, list_drafts, list_change_candidates, readiness_report, historical_context
+try:
+    from nbki_1c_facts import get_loan_facts, sync_1c_facts
+except ImportError:
+    from backend.nbki_1c_facts import get_loan_facts, sync_1c_facts
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -777,6 +781,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 nbki_row = cur.fetchone()
             loan['nbki_uid'] = nbki_row[0] if nbki_row else None
             loan['nbki_acceptance_basis'] = nbki_row[1] if nbki_row else None
+            if staff and staff.get('role') in ('admin', 'manager'):
+                loan['nbki_1c_facts'] = get_loan_facts(cur, loan['id'], loan.get('org_id'))
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
             loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
             return loan
@@ -9680,6 +9686,20 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return list_change_candidates(cur, org_id)
     if action == 'readiness_report':
         return readiness_report(cur, org_id)
+    if action == 'sync_1c_facts':
+        if method != 'POST':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        try:
+            cur.execute('SELECT id FROM nbki_event_sources WHERE org_id=%s ORDER BY last_event_time DESC,id DESC LIMIT 1', (org_id,))
+            source = cur.fetchone()
+            if not source:
+                raise ValueError('Сначала загрузите отчет событий 1С')
+            result = sync_1c_facts(cur, org_id, source[0], apply=True)
+            conn.commit()
+            return result
+        except ValueError as exc:
+            conn.rollback()
+            return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'create_drafts_all':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}
@@ -9728,6 +9748,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
             if len(raw) > 20 * 1024 * 1024 or not decoder.eof or decoder.unused_data:
                 raise ValueError('MXL превышает 20 МБ или поврежден')
             result = import_mxl(conn, raw, str(body.get('file_name', 'events.mxl')))
+            result['facts_sync'] = sync_1c_facts(cur, org_id, result['source_id'], apply=True)
             conn.commit()
             return {'success': True, **result}
         except (ValueError, TypeError, zlib.error, binascii.Error) as exc:

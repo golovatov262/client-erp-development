@@ -167,6 +167,33 @@ export type NbkiReadinessReport = {
   rows: NbkiReadinessRow[];
 };
 
+export type Nbki1CFacts = {
+  loan_id: number;
+  uid: string;
+  source_id: number;
+  source_row_num: number;
+  event_time: string;
+  event_type: string;
+  source_sha256: string;
+  source_last_event_time: string;
+  acceptance_basis: "operator_assumed";
+  indicators: Record<string, { code: string; value: string }>;
+};
+
+export type Nbki1CFactsSync = {
+  source_id: number;
+  source_last_event_time: string;
+  matched_active: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  older: number;
+  unmatched: number;
+  excluded: number;
+  conflict: number;
+  applied: boolean;
+};
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -261,6 +288,7 @@ export const api = {
     outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
     changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
     readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
+    sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
       entity: "nbki", action: "create_draft", loan_id: loanId,
@@ -912,6 +940,7 @@ export interface LoanDetail extends Loan {
   payments: LoanPayment[];
   nbki_uid?: string | null;
   nbki_acceptance_basis?: "ticket2_unverified" | "operator_assumed" | "no_receipt" | null;
+  nbki_1c_facts?: Nbki1CFacts | null;
 }
 
 export interface LoanCollateral {

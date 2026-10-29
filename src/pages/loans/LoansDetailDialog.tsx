@@ -227,6 +227,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
             <TabsTrigger value="schedule">График</TabsTrigger>
             <TabsTrigger value="payments">Платежи</TabsTrigger>
             <TabsTrigger value="collateral">Обеспечение</TabsTrigger>
+            {(isAdmin || isManager) && <TabsTrigger value="nbki">НБКИ / 1С</TabsTrigger>}
             {(isAdmin || isManager) && <TabsTrigger value="docs">Справки</TabsTrigger>}
           </TabsList>
 
@@ -241,6 +242,21 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <TabsContent value="collateral">
             <LoanCollateralTab loanId={detail.id} />
           </TabsContent>
+
+          {(isAdmin || isManager) && <TabsContent value="nbki" className="space-y-3">
+            <p className="text-sm text-muted-foreground">Показатели последнего сопоставленного события 1С. Данные хранятся отдельно от учётного остатка, графика и платежей CRM. Приём НБКИ без проверенной квитанции не подтверждён.</p>
+            {detail.nbki_1c_facts ? <>
+              <div className="rounded-md border p-3 text-sm">
+                <div className="font-medium">{detail.nbki_1c_facts.event_type} · {new Date(detail.nbki_1c_facts.event_time).toLocaleString("ru-RU")}</div>
+                <div className="mt-1 text-muted-foreground">УИД {detail.nbki_1c_facts.uid} · строка {detail.nbki_1c_facts.source_row_num} отчёта 1С · SHA-256 {detail.nbki_1c_facts.source_sha256.slice(0, 12)}…</div>
+              </div>
+              <div className="grid gap-2 text-sm sm:grid-cols-2">
+                {Object.entries(detail.nbki_1c_facts.indicators).sort(([a], [b]) => Number(a) - Number(b)).map(([column, field]) => (
+                  <div key={column} className="rounded border px-3 py-2"><div className="text-xs text-muted-foreground">{field.code} · колонка {column}</div><div className="break-words">{field.value}</div></div>
+                ))}
+              </div>
+            </> : <p className="text-sm text-muted-foreground">Сопоставленных показателей 1С для этого договора пока нет.</p>}
+          </TabsContent>}
 
           {(isAdmin || isManager) && (
             <TabsContent value="docs">
