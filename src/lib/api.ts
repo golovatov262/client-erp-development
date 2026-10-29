@@ -1073,6 +1073,12 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+  nbki_purpose_confirmation?: {
+    purpose: "consumer" | "business" | "unknown";
+    basis: string;
+    note: string;
+    confirmed_at: string;
+  } | null;
   psk_calculation?: {
     percent: number;
     amount: number;

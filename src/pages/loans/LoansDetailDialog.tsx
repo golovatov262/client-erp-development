@@ -215,6 +215,11 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <div className="text-xs text-muted-foreground mt-1">{detail.psk_calculation.status === "cross_checked" ? "Сопоставлена с историческим расчетом 1С" : "Требуется проверка первоначальных условий"}. {detail.psk_calculation.note}. Штрафы за просрочку не включены.</div>
         </div>}
 
+        {detail.nbki_purpose_confirmation && <div className="rounded-md border px-3 py-2 text-sm">
+          <span className="font-medium">Цель займа: {detail.nbki_purpose_confirmation.purpose === "consumer" ? "потребительская" : detail.nbki_purpose_confirmation.purpose === "business" ? "предпринимательская" : "не определена"}</span>
+          <div className="text-xs text-muted-foreground mt-1">{detail.nbki_purpose_confirmation.note}</div>
+        </div>}
+
         {detail.nbki_uid && <div className="rounded-md border px-3 py-2 text-sm">
           <span className="text-muted-foreground">УИД НБКИ: </span><span className="break-all font-mono">{detail.nbki_uid}</span>
           <div className="text-xs text-muted-foreground">{detail.nbki_acceptance_basis === "operator_assumed" ? "События учтены по указанию; квитанция НБКИ отсутствует" : detail.nbki_acceptance_basis === "ticket2_unverified" ? "Есть квитанция НБКИ; подпись не проверена" : "Нет квитанции о приеме"}</div>

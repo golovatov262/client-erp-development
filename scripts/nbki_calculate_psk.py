@@ -14,22 +14,28 @@ from loan_psk import calculate_psk, classify_psk  # noqa: E402
 
 def run(cur, org_id: int, apply: bool = False):
     cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,l.start_date,l.schedule_type,
-        c.psk_percent,c.psk_amount,c.status,
+        c.psk_percent,c.psk_amount,c.status,p.purpose,
         (SELECT value->>'value' FROM nbki_1c_loan_facts f,
             LATERAL jsonb_each(f.indicators::jsonb) WHERE f.loan_id=l.id
               AND value->>'code'='ФЛ_18.5/ЮЛ_11.5' LIMIT 1) AS historic_purpose
         FROM loans l LEFT JOIN nbki_contract_cost_facts c ON c.loan_id=l.id
+        LEFT JOIN nbki_loan_purpose_confirmations p ON p.loan_id=l.id AND p.org_id=l.org_id
         WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
           AND EXISTS (SELECT 1 FROM nbki_event_deals e WHERE e.loan_id=l.id AND e.org_id=l.org_id
             AND e.role='borrower' AND e.match_status='matched')
         ORDER BY l.id""", (org_id,))
     report = {'total': 0, 'cross_checked': 0, 'review': 0, 'errors': [], 'rows': []}
-    for loan_id, contract_no, amount, rate, term, start, kind, source_pct, source_sum, source_status, purpose in cur.fetchall():
+    for loan_id, contract_no, amount, rate, term, start, kind, source_pct, source_sum, source_status, confirmed_purpose, purpose in cur.fetchall():
         report['total'] += 1
         try:
             item = calculate_psk(amount, rate, term, start, kind)
             status, note = classify_psk(item, source_pct, source_sum, source_status)
-            if purpose and ('оборотных сред' in purpose.lower() or 'не определена' in purpose.lower()):
+            if confirmed_purpose == 'consumer':
+                note += '; потребительская цель подтверждена оператором CRM'
+            elif confirmed_purpose == 'business':
+                status = 'review'
+                note = 'Потребительская ПСК неприменима: подтверждена предпринимательская цель'
+            elif purpose and ('оборотных сред' in purpose.lower() or 'не определена' in purpose.lower()):
                 status = 'review'
                 note = 'Применимость 353-ФЗ к цели займа не подтверждена: ' + purpose
         except (ValueError, OverflowError) as exc:
