@@ -1,6 +1,7 @@
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 from backend.nbki_1c_reconciliation import apply_crm_decision, apply_global_crm_policy, compare_fact, parse_money
 from backend.nbki_payment_candidates import list_payment_candidates
@@ -109,10 +110,14 @@ class ReconciliationTests(unittest.TestCase):
                          'early_partial', 'bank')]
 
         cur = Cursor()
-        result = list_payment_candidates(cur, 2)
+        with patch('backend.nbki_payment_candidates.inspect_loan', return_value={
+                'uid': 'uid', 'checks': {'crm_issues': []},
+                'readiness': {'missing_fields': ['Код события']}}):
+            result = list_payment_candidates(cur, 2)
         self.assertEqual(result['total'], 1)
         self.assertIsNone(result['rows'][0]['gutdf_event_code'])
         self.assertFalse(result['rows'][0]['xml_ready'])
+        self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
         self.assertIn("e.match_status='matched'", cur.query)
         self.assertIn('p.payment_date>f.event_time::date', cur.query)
 

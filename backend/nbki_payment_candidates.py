@@ -5,6 +5,11 @@ This queue does not assign a GUTDF event, produce XML, or prove NBKI receipt.
 
 from __future__ import annotations
 
+try:
+    from nbki_outbox import inspect_loan
+except ImportError:
+    from backend.nbki_outbox import inspect_loan
+
 
 def list_payment_candidates(cur, org_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,f.uid,f.event_time,f.source_id,
@@ -20,9 +25,16 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                 AND e.role='borrower' AND e.match_status='matched')
         ORDER BY p.payment_date,l.id,p.id""", (org_id,))
     rows = []
+    inspections = {}
     for (loan_id, contract_no, uid, event_time, source_id, row_num,
          payment_id, payment_date, amount, principal, interest, penalty,
          payment_type, payment_source) in cur.fetchall():
+        if loan_id not in inspections:
+            inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
+        inspection = inspections[loan_id]
+        if inspection['uid'] != uid:
+            # A later conflicting UID or borrower match must never enter the queue.
+            continue
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -31,6 +43,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'interest': str(interest or 0), 'penalty': str(penalty or 0),
                      'payment_type': payment_type, 'payment_source': payment_source,
                      'candidate_reason': 'Платёж CRM после последнего события 1С',
+                     'crm_issues': inspection['checks']['crm_issues'],
+                     'missing_fields': inspection['readiness']['missing_fields'],
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})
     return {'total': len(rows), 'rows': rows,

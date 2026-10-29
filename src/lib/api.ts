@@ -239,6 +239,8 @@ export type NbkiPaymentCandidates = {
     payment_type: string;
     payment_source: string;
     candidate_reason: string;
+    crm_issues: string[];
+    missing_fields: string[];
     gutdf_event_code: null;
     event_code_confirmed: false;
     xml_ready: false;

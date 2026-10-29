@@ -296,6 +296,9 @@ const AdminNbkiTab = () => {
             {paymentCandidates?.rows.map(payment => <div key={payment.payment_id} className="border-b py-2">
               <span className="font-medium">{payment.contract_no}</span> · {payment.payment_date} · {Number(payment.amount).toLocaleString("ru-RU")} ₽ · платёж CRM #{payment.payment_id}
               <div className="text-xs text-muted-foreground">УИД {payment.uid} · последнее событие 1С {payment.baseline_event_time.slice(0, 10)} · код события ещё не определён</div>
+              <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">Предварительная проверка: {payment.crm_issues.length} замечаний CRM, {payment.missing_fields.length} блокирующих пунктов</summary>
+                <ul className="ml-5 mt-1 list-disc">{[...payment.crm_issues, ...payment.missing_fields].map((issue, index) => <li key={`${payment.payment_id}-${index}`}>{issue}</li>)}</ul>
+              </details>
             </div>)}
             {paymentCandidates && !paymentCandidates.total && <p className="text-muted-foreground">Новых платежей по сопоставленным договорам нет.</p>}
           </div>
