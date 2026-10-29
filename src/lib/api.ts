@@ -227,6 +227,8 @@ export type NbkiPaymentCandidates = {
     baseline_event_time: string; schedule_id: number; due_date: string;
     current_schedule_status: string; current_payment_amount: string;
     current_paid_amount: string; same_day_crm_payment_count: number;
+    overdue_transition_review_date: string | null;
+    crm_schedule_issues: string[];
     event_code_candidate: "2.3"; event_code_confirmed: false;
     historical_state_confirmed: false; xml_ready: false;
   }[];

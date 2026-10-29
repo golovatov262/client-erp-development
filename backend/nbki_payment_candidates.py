@@ -5,6 +5,7 @@ This queue does not assign a GUTDF event, produce XML, or prove NBKI receipt.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 MOSCOW = ZoneInfo('Europe/Moscow')
@@ -147,6 +148,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                 AND e.role='borrower' AND e.match_status='matched')
         ORDER BY s.payment_date,l.id,s.id""", (org_id,))
     schedule_due_review = []
+    today_msk = datetime.now(MOSCOW).date()
     for (loan_id, contract_no, uid, baseline_time, schedule_id, due,
          status, amount, paid, same_day_payments) in cur.fetchall():
         if loan_id not in inspections:
@@ -161,6 +163,13 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             'current_payment_amount': str(amount),
             'current_paid_amount': str(paid or 0),
             'same_day_crm_payment_count': same_day_payments,
+            'overdue_transition_review_date': (
+                (due + timedelta(days=1)).isoformat()
+                if due < today_msk and status == 'overdue' and (paid or 0) < amount
+                else None),
+            'crm_schedule_issues': [issue for issue in
+                inspections[loan_id]['checks']['crm_issues']
+                if issue.startswith(('Повтор номера платежа графика', 'Дата строки графика'))],
             'event_code_candidate': '2.3', 'event_code_confirmed': False,
             'historical_state_confirmed': False, 'xml_ready': False,
         })

@@ -4,10 +4,28 @@ import copy
 import unittest
 
 from backend.nbki_outbox import (event_hints, extract_historical_indicators,
-                                 source_readiness, summarize_changes)
+                                 schedule_integrity_issues, source_readiness,
+                                 summarize_changes)
 
 
 class ChangeSummaryTests(unittest.TestCase):
+    def test_schedule_integrity_detects_backward_due_date(self):
+        schedule = [
+            {'id': 1, 'payment_no': 24, 'payment_date': '2027-06-28'},
+            {'id': 2, 'payment_no': 25, 'payment_date': '2026-08-31'},
+            {'id': 3, 'payment_no': 27, 'payment_date': '2026-10-01'},
+        ]
+        issues = schedule_integrity_issues(schedule)
+        self.assertEqual(len(issues), 1)
+        self.assertIn('№ 25', issues[0])
+
+    def test_schedule_integrity_detects_duplicate_numbers(self):
+        schedule = [
+            {'id': 1, 'payment_no': 1, 'payment_date': '2026-01-31'},
+            {'id': 2, 'payment_no': 1, 'payment_date': '2026-02-28'},
+        ]
+        self.assertIn('Повтор номера платежа графика 1', schedule_integrity_issues(schedule))
+
     def setUp(self):
         self.before = {
             'loan': {'id': 7, 'balance': '1000', 'updated_at': '2026-10-01'},

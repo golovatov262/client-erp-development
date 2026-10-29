@@ -77,6 +77,24 @@ def event_hints(change_summary: dict | None) -> list[dict]:
     return hints
 
 
+def schedule_integrity_issues(schedule: list[dict]) -> list[str]:
+    """Flag ordering defects without rewriting contractual schedule history."""
+    issues = []
+    seen_numbers = set()
+    previous = None
+    for row in sorted(schedule, key=lambda item: (item['payment_no'], item['id'])):
+        number, due = row['payment_no'], row['payment_date']
+        if number in seen_numbers:
+            issues.append(f'Повтор номера платежа графика {number}')
+        seen_numbers.add(number)
+        if previous and due < previous['payment_date']:
+            issues.append(
+                f'Дата строки графика № {number} ({due}) раньше строки '
+                f'№ {previous["payment_no"]} ({previous["payment_date"]})')
+        previous = row
+    return issues
+
+
 def source_readiness(snapshot: dict, issues: list[str], changes: dict | None = None) -> dict:
     """Field coverage, distinct from XSD and NBKI business-rule validation."""
     loan = snapshot['loan']
@@ -226,6 +244,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     name = (' '.join(filter(None, (data['last_name'],data['first_name'],data['middle_name'])))
             if data['member_type'] == 'FL' else data['company_name'])
     issues = []
+    issues.extend(schedule_integrity_issues(schedule))
     eligible = data['status'] in ('active', 'overdue', 'holiday')
     if not eligible:
         issues.append('Закрытый договор исключен из исходящей выгрузки')
