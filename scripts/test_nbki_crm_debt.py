@@ -114,6 +114,8 @@ class DebtTest(unittest.TestCase):
             def fetchone(self):
                 if 'approved_loan_schedule_replacements' in self.query:
                     return (False,)
+                if 'FROM loan_payment_allocations a' in self.query:
+                    return (0,)
                 if 'FROM loans WHERE' in self.query:
                     return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
                 if 'MAX(payment_date)' in self.query:
@@ -129,6 +131,52 @@ class DebtTest(unittest.TestCase):
         self.assertEqual(result['status'], 'candidate_from_crm_formula')
         self.assertEqual(result['accrued_before_payment'], '8382.13')
         self.assertEqual(result['remaining_interest_candidate'], '8382.13')
+
+    def test_interest_preview_refuses_interest_allocated_to_overdue_row(self):
+        class OverdueInterestCursor:
+            def execute(self, query, params):
+                self.query = query
+
+            def fetchone(self):
+                if 'approved_loan_schedule_replacements' in self.query:
+                    return (False,)
+                if 'FROM loans WHERE' in self.query:
+                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
+                if 'MAX(payment_date)' in self.query:
+                    return (date(2026, 9, 30),)
+                if 'FROM loan_payment_allocations a' in self.query:
+                    return (1,)
+                raise AssertionError(self.query)
+
+        result = estimate_current_interest(OverdueInterestCursor(), 87, 2649,
+                                           date(2026, 10, 26), latest_payment=True)
+        self.assertEqual(result['status'], 'review')
+        self.assertIsNone(result['remaining_interest_candidate'])
+
+    def test_interest_preview_refuses_overcoverage(self):
+        class OvercoverageCursor:
+            def execute(self, query, params):
+                self.query = query
+
+            def fetchone(self):
+                if 'approved_loan_schedule_replacements' in self.query:
+                    return (False,)
+                if 'FROM loans WHERE' in self.query:
+                    return (Decimal('100000'), Decimal('12'), 'annuity', date(2025, 1, 1), 'active')
+                if 'MAX(payment_date)' in self.query:
+                    return (date(2026, 9, 30),)
+                if 'FROM loan_payment_allocations a' in self.query:
+                    return (0,)
+                return (10, Decimal('5000'), Decimal('5000'), Decimal('0'), Decimal('0'))
+
+            def fetchall(self):
+                return [(1, date(2026, 10, 1), Decimal('0')),
+                        (2, date(2026, 10, 28), Decimal('0'))]
+
+        result = estimate_current_interest(OvercoverageCursor(), 1, 2,
+                                           date(2026, 10, 28), latest_payment=True)
+        self.assertEqual(result['status'], 'review')
+        self.assertIsNone(result['remaining_interest_candidate'])
 
     def test_interest_preview_refuses_older_payment(self):
         result = estimate_current_interest(Cursor(1, []), 1, 2,
