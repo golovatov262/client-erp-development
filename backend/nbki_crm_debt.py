@@ -117,6 +117,12 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
     if not principal_checked:
         result['issues'].append('Остаток основного долга не прошёл сверку журнала CRM')
         return result
+    cur.execute("""SELECT EXISTS (SELECT 1 FROM approved_loan_schedule_replacements
+        WHERE loan_id=%s AND (applied_at AT TIME ZONE 'Europe/Moscow')::date >= %s)""",
+        (loan_id, event_date))
+    if cur.fetchone()[0]:
+        result['issues'].append('После даты события утверждён новый график: текущая строка процентов не является снимком на дату платежа')
+        return result
     cur.execute("""SELECT amount,rate,schedule_type,start_date,status
         FROM loans WHERE id=%s""", (loan_id,))
     loan = cur.fetchone()
@@ -213,6 +219,13 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
     if principal_after is None:
         result['issues'].append('Остаток основного долга CRM не рассчитан')
         result['status'] = 'unavailable'
+        return result
+    cur.execute("""SELECT EXISTS (SELECT 1 FROM approved_loan_schedule_replacements
+        WHERE loan_id=%s AND (applied_at AT TIME ZONE 'Europe/Moscow')::date >= %s)""",
+        (loan_id, event_date))
+    if cur.fetchone()[0]:
+        result['issues'].append('График утверждён заново после даты события; текущие сроки и пени нельзя считать историческим срезом')
+        result['status'] = 'review'
         return result
     cur.execute("""SELECT s.id,s.payment_date,s.principal_amount,s.interest_amount,
         COALESCE(s.paid_amount,0),

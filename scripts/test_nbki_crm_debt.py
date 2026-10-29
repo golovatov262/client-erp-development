@@ -9,15 +9,18 @@ from backend.nbki_crm_debt import (split_latest_crm_debt,
 
 
 class Cursor:
-    def __init__(self, later, rows):
+    def __init__(self, later, rows, replaced=False):
         self.later = later
         self.rows = rows
+        self.replaced = replaced
         self.query = ''
 
     def execute(self, query, params):
         self.query = query
 
     def fetchone(self):
+        if 'approved_loan_schedule_replacements' in self.query:
+            return (self.replaced,)
         if 'SUM(penalty_amount)' in self.query:
             return (Decimal('0'), date(2030, 1, 31))
         if 'SUM(penalty_part)' in self.query:
@@ -52,6 +55,14 @@ class DebtTest(unittest.TestCase):
         result = split_latest_crm_debt(Cursor(1, []), 1, 2, date(2026, 10, 1), '900')
         self.assertEqual(result['status'], 'unavailable')
         self.assertIsNone(result['overdue_principal'])
+
+    def test_later_approved_schedule_replacement_blocks_historical_debt(self):
+        result = split_latest_crm_debt(Cursor(0, [], replaced=True), 90, 2417,
+                                       date(2026, 9, 16), '33351.88')
+        self.assertEqual(result['status'], 'review')
+        self.assertIsNone(result['overdue_principal'])
+        self.assertIsNone(result['penalty_candidate'])
+        self.assertIn('График утверждён заново', result['issues'][0])
 
     def test_unpaid_penalty_is_due_with_final_installment(self):
         class PenaltyCursor(Cursor):
@@ -101,6 +112,8 @@ class DebtTest(unittest.TestCase):
                 self.query = query
 
             def fetchone(self):
+                if 'approved_loan_schedule_replacements' in self.query:
+                    return (False,)
                 if 'FROM loans WHERE' in self.query:
                     return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
                 if 'MAX(payment_date)' in self.query:
@@ -121,6 +134,12 @@ class DebtTest(unittest.TestCase):
         result = estimate_current_interest(Cursor(1, []), 1, 2,
                                            date(2026, 10, 1), latest_payment=False)
         self.assertEqual(result['status'], 'unavailable')
+
+    def test_interest_preview_refuses_replaced_schedule(self):
+        result = estimate_current_interest(Cursor(0, [], replaced=True), 90, 2417,
+                                           date(2026, 9, 16), latest_payment=True)
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIn('новый график', result['issues'][0])
 
 
 if __name__ == '__main__':
