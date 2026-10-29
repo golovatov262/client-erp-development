@@ -144,15 +144,9 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
         result['issues'].append('Нет корректной начальной даты периода начисления')
         return result
     result['period_start'] = anchor.isoformat()
-    cur.execute("""SELECT COUNT(*) FROM loan_payment_allocations a
-        JOIN loan_schedule s ON s.id=a.schedule_id
-        WHERE a.payment_id=%s AND a.component='interest'
-          AND s.loan_id=%s AND s.payment_date<%s""",
-        (payment_id, loan_id, event_date))
-    if cur.fetchone()[0]:
-        result['status'] = 'review'
-        result['issues'].append('Проценты платежа зачтены в просроченную строку; их нельзя считать оплатой текущего периода')
-        return result
+    # The target payment may be allocated to an overdue installment. That
+    # allocation reduces overdue interest in split_latest_crm_debt; it must not
+    # be subtracted from the current installment's accrued interest here.
     cur.execute("""SELECT s.id,s.interest_amount,COALESCE(s.paid_amount,0),
         COALESCE(SUM(a.amount) FILTER (WHERE a.component='interest'),0),
         COALESCE(SUM(a.amount),0)
@@ -203,10 +197,10 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
         accrued += _money(balance * rate * Decimal((event_date - prior_date).days) / Decimal('36500'))
     result['accrued_before_payment'] = str(accrued)
     result['interest_covered_in_period'] = str(covered_interest)
-    if covered_interest > accrued + CENT:
-        result['status'] = 'review'
-        result['issues'].append('Зачтённые проценты строки графика превышают оценку начисления за фактические дни')
-        return result
+    # The payment engine can allocate the full scheduled installment interest
+    # before the contractual due date. In that case CRM has already covered all
+    # interest accrued through this payment date; the excess is an advance
+    # payment against the scheduled amount, not negative debt.
     result['remaining_interest_candidate'] = str(max(ZERO, accrued - covered_interest))
     result['status'] = 'candidate_from_crm_formula'
     return result
