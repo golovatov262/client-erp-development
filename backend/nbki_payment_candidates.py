@@ -191,10 +191,47 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             'event_code_candidate': '2.3', 'event_code_confirmed': False,
             'historical_state_confirmed': False, 'xml_ready': False,
         })
+    # Unlike mutable schedule rows, these are actual, dated CRM accruals.
+    # Aggregate by contract for a manageable review list; a daily sum is not
+    # itself a confirmed GUTDF event or a complete debt snapshot.
+    cur.execute("""SELECT l.id,l.contract_no,f.uid,f.event_time,
+        MIN(a.accrual_date),MAX(a.accrual_date),
+        COUNT(DISTINCT a.accrual_date),COUNT(*),SUM(a.amount)
+        FROM loan_penalty_daily_accruals a
+        JOIN loans l ON l.id=a.loan_id
+        JOIN nbki_1c_loan_facts f ON f.loan_id=l.id AND f.org_id=l.org_id
+        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+          AND a.accrual_date>f.event_time::date
+          AND a.accrual_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
+          AND EXISTS (SELECT 1 FROM nbki_event_deals e
+              WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
+                AND e.role='borrower' AND e.match_status='matched')
+        GROUP BY l.id,l.contract_no,f.uid,f.event_time
+        ORDER BY MAX(a.accrual_date) DESC,l.id""", (org_id,))
+    penalty_accrual_review = []
+    for (loan_id, contract_no, uid, baseline_time, first_day, last_day,
+         day_count, entry_count, amount) in cur.fetchall():
+        if loan_id not in inspections:
+            inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
+        if inspections[loan_id]['uid'] != uid:
+            continue
+        penalty_accrual_review.append({
+            'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
+            'baseline_event_time': baseline_time.isoformat(),
+            'first_accrual_date': first_day.isoformat(),
+            'last_accrual_date': last_day.isoformat(),
+            'accrual_days': day_count, 'ledger_entries': entry_count,
+            'accrued_amount': str(amount), 'source': 'crm_daily_penalty_ledger',
+            'event_code_candidate': '2.3', 'event_code_confirmed': False,
+            'historical_debt_confirmed': False, 'xml_ready': False,
+        })
     return {'total': len(rows), 'rows': rows,
             'schedule_due_review_total': len(schedule_due_review),
             'schedule_due_review': schedule_due_review,
+            'penalty_accrual_review_total': len(penalty_accrual_review),
+            'penalty_accrual_review': penalty_accrual_review,
             'acceptance_basis': 'operator_assumed',
             'note': ('Однодневные совпадения с датой события не включены. '
                      'Сроки по текущему графику требуют проверки исторического состояния; '
+                     'дневная пеня показана отдельно по журналу CRM; '
                      'начисления процентов и просрочка вне графика пока не покрыты.')}

@@ -341,6 +341,20 @@ const AdminNbkiTab = () => {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle className="text-base">Ежедневная пеня CRM после события 1С · {paymentCandidates?.penalty_accrual_review_total ?? "…"} договоров</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">Только фактические начисления из нового журнала CRM, сгруппированные по договору. Исторические начисления до включения журнала отсутствуют; сводка не равна числу событий 2.3 и не разрешает XML.</p>
+          <div className="max-h-60 overflow-y-auto">
+            {paymentCandidates?.penalty_accrual_review.map(row => <div key={row.loan_id} className="border-b py-2">
+              <span className="font-medium">{row.contract_no}</span> · {Number(row.accrued_amount).toLocaleString("ru-RU")} ₽ · {row.accrual_days} дн.
+              <div className="text-xs text-muted-foreground">{row.first_accrual_date} — {row.last_accrual_date} · {row.ledger_entries} записей · УИД {row.uid}. Требуется сверка задолженности на дату; XML заблокирован.</div>
+            </div>)}
+            {paymentCandidates && !paymentCandidates.penalty_accrual_review_total && <p className="text-muted-foreground">Новых начислений после события 1С пока нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="text-base">Изменения CRM для НБКИ · {changeCandidateTotal}</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">При сохранении нового снимка сопоставленного договора фиксируются отличия от предыдущего: реквизиты, платежи, график и обеспечение. Это кандидаты на события, а не готовые файлы ГУТДФ; тип события и корректность данных ещё нужно определить.</p>

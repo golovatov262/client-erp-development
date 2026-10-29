@@ -221,6 +221,16 @@ export type NbkiReconciliationReport = {
 
 export type NbkiPaymentCandidates = {
   total: number;
+  penalty_accrual_review_total: number;
+  penalty_accrual_review: {
+    loan_id: number; contract_no: string; uid: string;
+    baseline_event_time: string; first_accrual_date: string;
+    last_accrual_date: string; accrual_days: number;
+    ledger_entries: number; accrued_amount: string;
+    source: "crm_daily_penalty_ledger";
+    event_code_candidate: "2.3"; event_code_confirmed: false;
+    historical_debt_confirmed: false; xml_ready: false;
+  }[];
   schedule_due_review_total: number;
   schedule_due_review: {
     loan_id: number; contract_no: string; uid: string;
