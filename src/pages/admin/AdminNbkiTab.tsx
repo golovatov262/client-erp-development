@@ -331,10 +331,10 @@ const AdminNbkiTab = () => {
           {factsResult && <p role="status" className="text-sm">{factsResult}</p>}
           <Button variant="outline" disabled={readinessLoading} onClick={() => void loadReconciliation()}>Сверить с CRM</Button>
           {reconciliation && <div className="rounded-md border p-3 text-sm">
-            <p>Сопоставлено {reconciliation.total_loans} договоров; по {reconciliation.review_loans} нужно проверить платежи. Различие дат окончания (договор 1С / график CRM): {reconciliation.different_end_dates}, показано справочно. Учётные данные не меняются; приём НБКИ не подтверждается.</p>
+            <p>Сопоставлено {reconciliation.total_loans} договоров; по {reconciliation.review_loans} нужно проверить платежи: {reconciliation.candidate_loans} вероятных расхождений дат или разнесённых платежей и {reconciliation.unexplained_loans} без объяснения. Различие дат окончания (договор 1С / график CRM): {reconciliation.different_end_dates}, показано справочно. Учётные данные не меняются; приём НБКИ не подтверждается.</p>
             <div className="mt-2 max-h-56 overflow-y-auto">
-              {reconciliation.rows.filter(row => row.checks.some(check => check.status === "review" || check.status === "missing_in_crm")).map(row => <div key={row.loan_id} className="border-t py-2">
-                <span className="font-medium">{row.contract_no}</span> · событие {row.event_time.slice(0, 10)} · платёж требует проверки
+              {reconciliation.rows.filter(row => row.checks.some(check => check.field === "last_payment" && check.status !== "same")).map(row => <div key={row.loan_id} className="border-t py-2">
+                <span className="font-medium">{row.contract_no}</span> · событие {row.event_time.slice(0, 10)} · {row.checks.find(check => check.field === "last_payment")?.status === "date_shift_candidate" ? "вероятно, отличается дата" : row.checks.find(check => check.field === "last_payment")?.status === "adjacent_sum_candidate" ? "вероятно, платёж разнесён на два дня" : "сумма требует проверки"}
               </div>)}
             </div>
           </div>}

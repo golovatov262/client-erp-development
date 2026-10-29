@@ -13,8 +13,8 @@ class ReconciliationTests(unittest.TestCase):
         result = compare_fact({'111': {'value': '14.10.2026'},
                                '112': {'value': '14 150,00'}},
                               event_date=date(2026, 10, 14), crm_end_date=None,
-                              payments=[(date(2026, 10, 14), Decimal('10000')),
-                                        (date(2026, 10, 14), Decimal('4150'))])
+                              payments=[(1, date(2026, 10, 14), Decimal('10000')),
+                                        (2, date(2026, 10, 14), Decimal('4150'))])
         self.assertEqual(result[0]['status'], 'same')
 
     def test_missing_payment_is_review_signal(self):
@@ -36,6 +36,31 @@ class ReconciliationTests(unittest.TestCase):
                               event_date=date(2026, 10, 1),
                               crm_end_date=date(2027, 1, 30), payments=[])
         self.assertEqual(result[0]['status'], 'different_definition')
+
+    def test_one_day_shift_is_candidate_not_confirmed_match(self):
+        result = compare_fact({'111': {'value': '01.10.2026'},
+                               '112': {'value': '4 900,00'}},
+                              event_date=date(2026, 10, 1), crm_end_date=None,
+                              payments=[(2493, date(2026, 9, 30), Decimal('4900'))])
+        self.assertEqual(result[0]['status'], 'date_shift_candidate')
+        self.assertEqual(result[0]['candidate_payments'][0]['id'], 2493)
+
+    def test_adjacent_payments_candidate(self):
+        result = compare_fact({'111': {'value': '23.10.2026'},
+                               '112': {'value': '35 600,00'}},
+                              event_date=date(2026, 10, 23), crm_end_date=None,
+                              payments=[(2638, date(2026, 10, 22), Decimal('15600')),
+                                        (2639, date(2026, 10, 23), Decimal('20000'))])
+        self.assertEqual(result[0]['status'], 'adjacent_sum_candidate')
+        self.assertEqual([p['id'] for p in result[0]['candidate_payments']], [2638, 2639])
+
+    def test_ambiguous_nearby_matches_stay_unresolved(self):
+        result = compare_fact({'111': {'value': '01.10.2026'},
+                               '112': {'value': '4 900,00'}},
+                              event_date=date(2026, 10, 1), crm_end_date=None,
+                              payments=[(1, date(2026, 9, 29), Decimal('4900')),
+                                        (2, date(2026, 9, 30), Decimal('4900'))])
+        self.assertEqual(result[0]['status'], 'missing_in_crm')
 
 
 if __name__ == '__main__':

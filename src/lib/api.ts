@@ -197,6 +197,8 @@ export type Nbki1CFactsSync = {
 export type NbkiReconciliationReport = {
   total_loans: number;
   review_loans: number;
+  candidate_loans: number;
+  unexplained_loans: number;
   different_end_dates: number;
   basis: string;
   rows: {
@@ -206,7 +208,10 @@ export type NbkiReconciliationReport = {
     event_time: string;
     source_row_num: number;
     checks: { field: string; source: string; crm: string | null;
-      payment_date?: string; status: "same" | "review" | "missing_in_crm" | "different_definition"; note: string }[];
+      payment_date?: string;
+      status: "same" | "review" | "missing_in_crm" | "different_definition" | "date_shift_candidate" | "adjacent_sum_candidate";
+      candidate_payments?: { id: number; date: string; amount: string }[];
+      note: string }[];
   }[];
 };
 
