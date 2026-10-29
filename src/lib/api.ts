@@ -479,6 +479,7 @@ export const api = {
     paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
     crmEvents: () => request<NbkiCrmEvents>("GET", { entity: "nbki", action: "crm_events" }),
     event23Xml: (eventId: number) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string }>("POST", { event_id: eventId }, { entity: "nbki", action: "event23_xml" }),
+    event23BatchXml: (eventIds: number[]) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string; events: { event_id: number; contract_no: string; uid: string }[]; excluded: { event_id: number; reason: string }[] }>("POST", { event_ids: eventIds }, { entity: "nbki", action: "event23_batch_xml" }),
     sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {

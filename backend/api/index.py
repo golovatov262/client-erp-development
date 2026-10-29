@@ -59,9 +59,9 @@ try:
 except ImportError:
     from backend.nbki_crm_export_facts import payment_event_facts
 try:
-    from nbki_event23_xml import build_event23_xml
+    from nbki_event23_xml import build_event23_xml, build_event23_batch_xml
 except ImportError:
-    from backend.nbki_event23_xml import build_event23_xml
+    from backend.nbki_event23_xml import build_event23_xml, build_event23_batch_xml
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9746,6 +9746,13 @@ def handle_nbki(method, params, body, staff, cur, conn):
             return build_event23_xml(cur, org_id, int(body.get('event_id')))
         except (ValueError, TypeError) as exc:
             return {'_status': 422, 'error': str(exc)[:300]}
+    if action == 'event23_batch_xml':
+        if method != 'POST':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        try:
+            return build_event23_batch_xml(cur, org_id, body.get('event_ids') or [])
+        except (ValueError, TypeError) as exc:
+            return {'_status': 422, 'error': str(exc)[:500]}
     if action == 'sync_1c_facts':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

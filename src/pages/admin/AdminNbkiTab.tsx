@@ -76,6 +76,7 @@ const AdminNbkiTab = () => {
   const [paymentCandidates, setPaymentCandidates] = useState<NbkiPaymentCandidates | null>(null);
   const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
   const [buildingEventId, setBuildingEventId] = useState<number | null>(null);
+  const [buildingEventBatch, setBuildingEventBatch] = useState(false);
 
   const refreshOutbox = async () => {
     try {
@@ -238,6 +239,29 @@ const AdminNbkiTab = () => {
     finally { setBuildingEventId(null); }
   };
 
+  const downloadEvent23Batch = async () => {
+    const ids = (crmEvents?.rows || []).filter(event => event.source_type === "loan_payment").map(event => event.id);
+    if (!ids.length) return;
+    setBuildingEventBatch(true);
+    setError("");
+    try {
+      const result = await api.nbki.event23BatchXml(ids);
+      const binary = atob(result.content_base64);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/xml;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.file_name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const excludedNote = result.excluded.length
+        ? ` Причины исключения: ${result.excluded.slice(0, 5).map(event => `#${event.event_id}: ${event.reason}`).join("; ")}${result.excluded.length > 5 ? `; ещё ${result.excluded.length - 5}` : ""}.`
+        : "";
+      setFactsResult(`Пакет XML 2.3: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setBuildingEventBatch(false); }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -260,7 +284,10 @@ const AdminNbkiTab = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Эта очередь формируется из операций CRM и не зависит от новых выгрузок 1С. Время, части платежа и контрольный снимок сохраняются вместе с операцией.</p>
+          <p className="text-muted-foreground">Очередь формируется из операций CRM и не зависит от 1С. Пакет собирается по отображаемым событиям (до 100 последних); записи, не прошедшие проверку CRM или XSD, будут перечислены отдельно.</p>
+          <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.source_type === "loan_payment") || buildingEventId !== null || buildingEventBatch}>
+            {buildingEventBatch ? "Формирую пакет XML…" : "Сформировать XML 2.3 по текущим событиям"}
+          </Button>
           <div className="max-h-56 overflow-y-auto">
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽

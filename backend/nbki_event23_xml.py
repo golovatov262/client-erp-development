@@ -7,6 +7,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import base64
+import hashlib
+import copy
 import xml.etree.ElementTree as ET
 
 try:
@@ -112,9 +114,12 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     security = _add(event, 'FL_19_1_AmountInfo')
     _add(security, 'securityFact_0')
 
+    # Event 2.3 is generated after the payment was posted on payment['date'].
+    # The installment due on that same date is part of the just-processed
+    # obligation, not the next payment term to report.
     cur.execute("""SELECT payment_date,principal_amount,interest_amount,payment_amount,
         COALESCE(paid_amount,0),status FROM loan_schedule
-        WHERE loan_id=%s AND payment_date>=%s AND status NOT IN ('holiday','holiday_pending')
+        WHERE loan_id=%s AND payment_date>%s AND status NOT IN ('holiday','holiday_pending')
         ORDER BY payment_date,id LIMIT 1""", (facts['loan_id'], payment['date']))
     next_row = cur.fetchone()
     payterms = _add(event, 'FL_21_PaymentTerms')
@@ -254,3 +259,69 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
             'event_id': event_id, 'contract_no': facts['contract_no'], 'uid': facts['uid'],
             'debt': debt_preview, 'interest': interest, 'smp': smp,
             'psk_status': facts['loan'].get('psk', {}).get('status')}
+
+
+def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
+    """Build one XSD-validated document from individually eligible CRM events.
+
+    Events that cannot be generated are reported and excluded; the caller gets
+    a file only when at least one event is fully generated and validated.
+    """
+    ids = list(dict.fromkeys(int(value) for value in event_ids))
+    if not ids or len(ids) > 100 or any(value <= 0 for value in ids):
+        raise ValueError('Укажите от 1 до 100 корректных ID событий')
+
+    first_root = None
+    grouped = {}
+    exported = []
+    excluded = []
+    for event_id in ids:
+        try:
+            result = build_event23_xml(cur, org_id, event_id)
+            root = ET.fromstring(base64.b64decode(result['content_base64']))
+            subject_node = root.find('./Data/Subject_FL')
+            event_node = subject_node.find('./Events/FL_Event_2_3') if subject_node is not None else None
+            title_node = subject_node.find('./Title') if subject_node is not None else None
+            if subject_node is None or event_node is None or title_node is None:
+                raise ValueError('Не удалось прочитать сформированное событие 2.3')
+            if root.find('./Source') is None:
+                raise ValueError('В документе отсутствует источник кредитной информации')
+            if first_root is None:
+                first_root = root
+
+            uid = result['uid']
+            existing = grouped.get(uid)
+            if existing and ET.tostring(existing['title'], encoding='utf-8') != ET.tostring(title_node, encoding='utf-8'):
+                raise ValueError('Для одного УИД CRM содержит разные идентификационные данные заёмщика')
+            if not existing:
+                grouped[uid] = {'title': copy.deepcopy(title_node), 'events': []}
+            grouped[uid]['events'].append(copy.deepcopy(event_node))
+            exported.append({'event_id': event_id, 'contract_no': result['contract_no'], 'uid': uid})
+        except (ValueError, TypeError) as exc:
+            excluded.append({'event_id': event_id, 'reason': str(exc)[:240]})
+
+    if not exported or first_root is None:
+        reasons = '; '.join(f"{item['event_id']}: {item['reason']}" for item in excluded[:5])
+        raise ValueError('Нет готовых CRM-событий для XML' + (': ' + reasons if reasons else ''))
+
+    data = first_root.find('./Data')
+    for child in list(data):
+        data.remove(child)
+    total_events = 0
+    for group in grouped.values():
+        subject_node = ET.SubElement(data, 'Subject_FL')
+        subject_node.append(group['title'])
+        events_node = ET.SubElement(subject_node, 'Events')
+        for event in sorted(group['events'], key=lambda item: datetime.fromisoformat(
+                item.get('eventDateTime', '')).timestamp()):
+            events_node.append(event)
+            total_events += 1
+    first_root.set('subjectsCount', str(len(grouped)))
+    first_root.set('groupBlocksCount', str(total_events))
+    raw = ET.tostring(first_root, encoding='utf-8', xml_declaration=True)
+    _validate_xsd(raw)
+    return {'file_name': f"NBKI_2_3_batch_{len(exported)}_events.xml",
+            'content_base64': base64.b64encode(raw).decode('ascii'),
+            'sha256': hashlib.sha256(raw).hexdigest(), 'xsd_version': '5.1',
+            'xsd_valid': True, 'business_status': 'candidate_requires_regulatory_review',
+            'events': exported, 'excluded': excluded}
