@@ -296,7 +296,7 @@ export type NbkiPaymentCandidates = {
       issues: string[];
     };
     interest_candidate: {
-      status: "candidate_from_crm_formula" | "unavailable";
+      status: "candidate_from_crm_formula" | "unavailable" | "review";
       basis: string; period_start: string | null;
       accrued_before_payment: string | null;
       interest_covered_in_period: string | null;
