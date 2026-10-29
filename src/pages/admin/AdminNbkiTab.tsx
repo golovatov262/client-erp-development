@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiChangeCandidate, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiPaymentCandidates, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiChangeCandidate, NbkiCrmEvents, NbkiDeal, NbkiDraft, NbkiEventDeal, NbkiEventImportResult, NbkiImportResult, NbkiInspection, NbkiPaymentCandidates, NbkiReadinessReport, NbkiReconciliationReport, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -74,14 +74,16 @@ const AdminNbkiTab = () => {
   const [factsResult, setFactsResult] = useState("");
   const [reconciliation, setReconciliation] = useState<NbkiReconciliationReport | null>(null);
   const [paymentCandidates, setPaymentCandidates] = useState<NbkiPaymentCandidates | null>(null);
+  const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
 
   const refreshOutbox = async () => {
     try {
-      const [outbox, candidates, payments] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates(), api.nbki.paymentCandidates()]);
+      const [outbox, candidates, payments, events] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates(), api.nbki.paymentCandidates(), api.nbki.crmEvents()]);
       setDrafts(outbox.rows);
       setChangeCandidates(candidates.rows);
       setChangeCandidateTotal(candidates.total);
       setPaymentCandidates(payments);
+      setCrmEvents(events);
     }
     catch (e) { setError(humanizeError(e)); }
   };
@@ -236,6 +238,20 @@ const AdminNbkiTab = () => {
       </div>
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">Эта очередь формируется из операций CRM и не зависит от новых выгрузок 1С. Время, части платежа и контрольный снимок сохраняются вместе с операцией.</p>
+          <div className="max-h-56 overflow-y-auto">
+            {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
+              <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
+              <div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.components_match ? "части платежа сходятся" : "проверить части платежа"}</div>
+            </div>)}
+            {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Новых событий после запуска журнала пока нет.</p>}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Черновики будущей выгрузки</CardTitle></CardHeader>

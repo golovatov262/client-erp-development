@@ -5,9 +5,11 @@ import re
 from zoneinfo import ZoneInfo
 
 try:
-    from nbki_payment_posting_snapshot import capture_loan_state, store_payment_snapshot
+    from nbki_payment_posting_snapshot import (capture_loan_state, store_payment_snapshot,
+                                               record_payment_event)
 except ImportError:
-    from backend.nbki_payment_posting_snapshot import capture_loan_state, store_payment_snapshot
+    from backend.nbki_payment_posting_snapshot import (capture_loan_state, store_payment_snapshot,
+                                                       record_payment_event)
 
 CENT = Decimal('0.01')
 EPS = Decimal('0.005')
@@ -336,8 +338,10 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         else:
             new_monthly = _recalculate_future_in_place(cur, loan_id, new_balance, payment_date, had_overdue)
     nbki_state_after = capture_loan_state(cur, loan_id)
-    store_payment_snapshot(cur, payment_id, loan_id, payment_date,
-                           nbki_state_before, nbki_state_after)
+    evidence_sha256 = store_payment_snapshot(cur, payment_id, loan_id, payment_date,
+                                             nbki_state_before, nbki_state_after)
+    record_payment_event(cur, payment_id, loan_id, event_occurred_at,
+                         evidence_sha256)
     return {'payment_id': payment_id, 'principal_part': float(principal_total),
             'interest_part': float(totals['interest']), 'penalty_part': float(totals['penalty']),
             'early_principal': float(totals['early_principal']), 'unapplied': float(max(remaining, 0)),

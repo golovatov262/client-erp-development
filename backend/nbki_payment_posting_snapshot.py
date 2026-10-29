@@ -51,3 +51,25 @@ def store_payment_snapshot(cur, payment_id: int, loan_id: int,
         VALUES (%s,%s,%s,%s,%s)""",
         (payment_id, loan_id, payment_date, digest, Json(json.loads(encoded))))
     return digest
+
+
+def record_payment_event(cur, payment_id: int, loan_id: int,
+                         event_occurred_at, evidence_sha256: str) -> int:
+    """Queue the CRM operation atomically with its payment and frozen evidence.
+
+    No imported 1C file or assumed receipt participates in this decision.
+    Unknown bank-event time remains NULL until established from the bank record.
+    """
+    cur.execute("SELECT org_id FROM loans WHERE id=%s", (loan_id,))
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError('Займ не найден при регистрации события НБКИ')
+    cur.execute("""INSERT INTO nbki_crm_events
+        (org_id,loan_id,source_type,source_id,event_kind,event_occurred_at,
+         evidence_sha256,status)
+        VALUES (%s,%s,'loan_payment',%s,'payment',%s,%s,'new')
+        ON CONFLICT (source_type,source_id) DO UPDATE SET
+            source_id=EXCLUDED.source_id
+        RETURNING id""",
+        (row[0], loan_id, payment_id, event_occurred_at, evidence_sha256))
+    return cur.fetchone()[0]

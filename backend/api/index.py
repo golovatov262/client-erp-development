@@ -50,6 +50,14 @@ try:
     from nbki_payment_candidates import list_payment_candidates
 except ImportError:
     from backend.nbki_payment_candidates import list_payment_candidates
+try:
+    from nbki_crm_events import list_crm_events
+except ImportError:
+    from backend.nbki_crm_events import list_crm_events
+try:
+    from nbki_crm_export_facts import payment_event_facts
+except ImportError:
+    from backend.nbki_crm_export_facts import payment_event_facts
 
 INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
@@ -9712,6 +9720,13 @@ def handle_nbki(method, params, body, staff, cur, conn):
         return reconciliation_report(cur, org_id)
     if action == 'payment_candidates':
         return list_payment_candidates(cur, org_id)
+    if action == 'crm_events':
+        return list_crm_events(cur, org_id)
+    if action == 'crm_event_facts':
+        try:
+            return payment_event_facts(cur, org_id, int(params.get('event_id')))
+        except (ValueError, TypeError) as exc:
+            return {'_status': 400, 'error': str(exc)[:180]}
     if action == 'sync_1c_facts':
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}

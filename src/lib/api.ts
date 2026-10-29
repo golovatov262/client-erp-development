@@ -359,6 +359,22 @@ export type NbkiPaymentCandidates = {
   }[];
 };
 
+export type NbkiCrmEvents = {
+  total: number;
+  rows: {
+    id: number; loan_id: number; contract_no: string;
+    source_type: string; source_id: number; event_kind: string;
+    event_occurred_at: string | null; recorded_at: string; status: string;
+    evidence_sha256: string | null; uid: string | null;
+    payment_date: string | null;
+    payment: { amount: string | null; principal: string | null;
+      interest: string | null; penalty: string | null };
+    original_principal: string; current_principal: string;
+    components_match: boolean; has_posting_snapshot: boolean;
+    export_candidate: boolean;
+  }[];
+};
+
 function getStaffToken(): string {
   return sessionStorage.getItem("staff_token") || "";
 }
@@ -455,6 +471,7 @@ export const api = {
     readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
     reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", action: "reconciliation_report" }),
     paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
+    crmEvents: () => request<NbkiCrmEvents>("GET", { entity: "nbki", action: "crm_events" }),
     sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),
     inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
     createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
