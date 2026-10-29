@@ -19,15 +19,23 @@ def capture_loan_state(cur, loan_id: int) -> dict:
         raise ValueError('Договор займа не найден при фиксации платежа')
     loan_fields = ('amount','balance','rate','term_months','schedule_type',
                    'monthly_payment','start_date','end_date','status')
-    cur.execute("""SELECT id,payment_no,payment_date,payment_amount,
-        principal_amount,interest_amount,balance_after,status,paid_amount,
-        paid_date,overdue_days,penalty_amount FROM loan_schedule
-        WHERE loan_id=%s ORDER BY payment_no,id""", (loan_id,))
+    cur.execute("""SELECT s.id,s.payment_no,s.payment_date,s.payment_amount,
+        s.principal_amount,s.interest_amount,s.balance_after,s.status,s.paid_amount,
+        s.paid_date,s.overdue_days,s.penalty_amount,
+        COALESCE(SUM(a.amount) FILTER (WHERE a.component='interest'),0),
+        COALESCE(SUM(a.amount) FILTER (WHERE a.component='principal'),0),
+        COALESCE(SUM(a.amount),0)
+        FROM loan_schedule s LEFT JOIN loan_payment_allocations a ON a.schedule_id=s.id
+        WHERE s.loan_id=%s GROUP BY s.id ORDER BY s.payment_no,s.id""", (loan_id,))
     schedule_fields = ('id','payment_no','payment_date','payment_amount',
                        'principal_amount','interest_amount','balance_after',
-                       'status','paid_amount','paid_date','overdue_days','penalty_amount')
+                       'status','paid_amount','paid_date','overdue_days','penalty_amount',
+                       'covered_interest_v2','covered_principal_v2','covered_total_v2')
+    schedule = [dict(zip(schedule_fields, row)) for row in cur.fetchall()]
+    cur.execute("""SELECT COALESCE(SUM(penalty_part),0) FROM loan_payments
+        WHERE loan_id=%s""", (loan_id,))
     return {'loan': dict(zip(loan_fields, loan)),
-            'schedule': [dict(zip(schedule_fields, row)) for row in cur.fetchall()]}
+            'schedule': schedule, 'paid_penalty_to_date': cur.fetchone()[0]}
 
 
 def store_payment_snapshot(cur, payment_id: int, loan_id: int,

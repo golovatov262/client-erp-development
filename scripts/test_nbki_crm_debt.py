@@ -1,8 +1,11 @@
 import unittest
+import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 
-from backend.nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+from backend.nbki_crm_debt import (split_latest_crm_debt,
+                                   split_posting_snapshot_debt, estimate_current_interest)
 
 
 class Cursor:
@@ -15,6 +18,10 @@ class Cursor:
         self.query = query
 
     def fetchone(self):
+        if 'SUM(penalty_amount)' in self.query:
+            return (Decimal('0'), date(2030, 1, 31))
+        if 'SUM(penalty_part)' in self.query:
+            return (Decimal('0'),)
         return (self.later,)
 
     def fetchall(self):
@@ -46,11 +53,11 @@ class DebtTest(unittest.TestCase):
         self.assertEqual(result['status'], 'unavailable')
         self.assertIsNone(result['overdue_principal'])
 
-    def test_unpaid_penalty_is_separate_and_due_status_unconfirmed(self):
+    def test_unpaid_penalty_is_due_with_final_installment(self):
         class PenaltyCursor(Cursor):
             def fetchone(self):
                 if 'SUM(penalty_amount)' in self.query:
-                    return (Decimal('305.73'),)
+                    return (Decimal('305.73'), date(2030, 5, 31))
                 if 'SUM(penalty_part)' in self.query:
                     return (Decimal('120.71'),)
                 return super().fetchone()
@@ -58,8 +65,35 @@ class DebtTest(unittest.TestCase):
         result = split_latest_crm_debt(PenaltyCursor(0, []), 87, 2649,
                                        date(2026, 10, 26), '321425.56')
         self.assertEqual(result['penalty_candidate']['remaining'], '185.02')
-        self.assertEqual(result['penalty_candidate']['due_classification'], 'unconfirmed')
+        self.assertEqual(result['penalty_candidate']['due_classification'], 'term_until_final_scheduled_payment')
+        self.assertEqual(result['penalty_candidate']['due_at'], '2030-05-31')
         self.assertIsNone(result['total_debt'])
+
+    def test_posting_snapshot_survives_future_schedule_changes(self):
+        evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-01',
+                    'after': {'loan': {'balance': '900.00'},
+                              'paid_penalty_to_date': '2.00',
+                              'schedule': [{'id': 10, 'payment_date': '2026-09-30',
+                                            'principal_amount': '100.00', 'interest_amount': '50.00',
+                                            'paid_amount': '90.00', 'covered_interest_v2': '10.00',
+                                            'covered_principal_v2': '40.00', 'covered_total_v2': '50.00',
+                                            'penalty_amount': '7.00', 'status': 'partial'},
+                                           {'id': 11, 'payment_date': '2026-11-30',
+                                            'principal_amount': '800.00', 'interest_amount': '20.00',
+                                            'paid_amount': '0.00', 'covered_interest_v2': '0.00',
+                                            'covered_principal_v2': '0.00', 'covered_total_v2': '0.00',
+                                            'penalty_amount': '0.00', 'status': 'pending'}]}}
+        digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                                           separators=(',', ':')).encode()).hexdigest()
+        result = split_posting_snapshot_debt(evidence, digest, 1, 2, date(2026, 10, 1))
+        self.assertEqual(result['status'], 'calculated_from_posting_snapshot')
+        self.assertEqual(result['overdue_principal'], '60.00')
+        self.assertEqual(result['overdue_interest'], '0.00')
+        self.assertEqual(result['term_principal'], '840.00')
+        self.assertEqual(result['penalty_candidate']['remaining'], '5.00')
+        self.assertEqual(result['penalty_candidate']['due_at'], '2026-11-30')
+        self.assertEqual(split_posting_snapshot_debt(evidence, '0' * 64, 1, 2,
+                         date(2026, 10, 1))['status'], 'unavailable')
 
     def test_actual_period_interest_is_not_future_scheduled_interest(self):
         class InterestCursor:

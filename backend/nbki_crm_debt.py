@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+import hashlib
+import json
 
 
 ZERO = Decimal('0.00')
@@ -16,6 +18,85 @@ CENT = Decimal('0.01')
 
 def _money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
+                                loan_id: int, payment_id: int,
+                                event_date: date) -> dict:
+    """Split due claims from immutable CRM posting evidence, never from later rows."""
+    result = {'status': 'unavailable', 'basis': 'Неизменяемый снимок CRM после проведения платежа',
+              'overdue_principal': None, 'overdue_interest': None,
+              'term_principal': None, 'penalty_candidate': None,
+              'rows': [], 'issues': []}
+    encoded = json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                         separators=(',', ':')).encode('utf-8')
+    if hashlib.sha256(encoded).hexdigest() != expected_sha256.strip():
+        result['issues'].append('Контрольная сумма снимка графика не совпала')
+        return result
+    if (evidence.get('loan_id') != loan_id or evidence.get('payment_id') != payment_id or
+            evidence.get('payment_date') != event_date.isoformat()):
+        result['issues'].append('Снимок относится к другому займу, платежу или дате')
+        return result
+    after = evidence.get('after') or {}
+    loan = after.get('loan') or {}
+    schedule = after.get('schedule') or []
+    if not schedule or 'paid_penalty_to_date' not in after:
+        result['issues'].append('Старый снимок не содержит распределения и пени; восстановление невозможно')
+        return result
+    balance = _money(loan.get('balance'))
+    if balance < ZERO:
+        result['issues'].append('Отрицательный основной долг в снимке')
+        return result
+    overdue_principal = overdue_interest = assessed_penalty = ZERO
+    last_due = None
+    for row in schedule:
+        if not all(key in row for key in ('covered_interest_v2','covered_principal_v2','covered_total_v2')):
+            result['issues'].append('Снимок не содержит точного распределения')
+            return result
+        due = date.fromisoformat(str(row['payment_date']))
+        last_due = max(last_due, due) if last_due else due
+        principal, interest, paid = map(_money, (row['principal_amount'],
+                                                  row['interest_amount'], row['paid_amount']))
+        v2_interest, v2_principal, v2_total = map(_money, (row['covered_interest_v2'],
+                                                           row['covered_principal_v2'],
+                                                           row['covered_total_v2']))
+        assessed_penalty += _money(row['penalty_amount'])
+        if min(principal, interest, paid, v2_interest, v2_principal, v2_total) < ZERO or v2_total > paid + CENT:
+            result['issues'].append(f'Несогласованные суммы строки графика {row["id"]}')
+            continue
+        legacy_paid = max(ZERO, paid - v2_total)
+        covered_interest = min(interest, legacy_paid) + v2_interest
+        covered_principal = min(principal, max(ZERO, legacy_paid - interest)) + v2_principal
+        if covered_interest > interest + CENT or covered_principal > principal + CENT:
+            result['issues'].append(f'Оплата превышает сумму строки графика {row["id"]}')
+            continue
+        if due < event_date and row['status'] not in ('holiday','holiday_pending'):
+            remaining_principal = max(ZERO, principal - covered_principal)
+            remaining_interest = max(ZERO, interest - covered_interest)
+            overdue_principal += remaining_principal
+            overdue_interest += remaining_interest
+            result['rows'].append({'schedule_id': row['id'], 'due': due.isoformat(),
+                                   'overdue_principal': str(remaining_principal),
+                                   'overdue_interest': str(remaining_interest)})
+    paid_penalty = _money(after['paid_penalty_to_date'])
+    if assessed_penalty < paid_penalty:
+        result['issues'].append('Оплаченная пеня превышает начисленную')
+    if overdue_principal > balance + CENT:
+        result['issues'].append('Просроченный основной долг превышает остаток')
+    if result['issues']:
+        result['status'] = 'review'
+        return result
+    penalty_remaining = assessed_penalty - paid_penalty
+    result.update({'status': 'calculated_from_posting_snapshot',
+                   'overdue_principal': str(overdue_principal),
+                   'overdue_interest': str(overdue_interest),
+                   'term_principal': str(balance - overdue_principal),
+                   'penalty_candidate': {'assessed_crm': str(assessed_penalty),
+                       'paid_crm': str(paid_penalty), 'remaining': str(penalty_remaining),
+                       'due_at': last_due.isoformat(),
+                       'due_classification': ('term_until_final_scheduled_payment'
+                                              if last_due > event_date else 'review_after_final_due')}})
+    return result
 
 
 def estimate_current_interest(cur, loan_id: int, payment_id: int,
@@ -174,24 +255,27 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
     result['overdue_principal'] = str(overdue_principal)
     result['overdue_interest'] = str(overdue_interest)
     result['term_principal'] = str(principal - overdue_principal)
-    # Penalties are accounted separately from schedule paid_amount in CRM.
-    # Their contractual due date is not encoded, so do not label them overdue.
-    if overdue_principal == ZERO:
-        cur.execute("""SELECT COALESCE(SUM(penalty_amount),0)
-            FROM loan_schedule WHERE loan_id=%s""", (loan_id,))
-        assessed_penalty = _money(cur.fetchone()[0])
-        cur.execute("""SELECT COALESCE(SUM(penalty_part),0)
-            FROM loan_payments WHERE loan_id=%s
-              AND (payment_date,id)<=(%s,%s)""",
-            (loan_id, event_date, payment_id))
-        paid_penalty = _money(cur.fetchone()[0])
-        if assessed_penalty < paid_penalty:
-            result['status'] = 'review'
-            result['issues'].append('Погашенные пени превышают начисленные в графике CRM')
-        else:
-            result['penalty_candidate'] = {
-                'assessed_crm': str(assessed_penalty),
-                'paid_crm': str(paid_penalty),
-                'remaining': str(assessed_penalty - paid_penalty),
-                'due_classification': 'unconfirmed'}
+    # Penalties are separate from paid_amount. Operator confirmed that they
+    # accrue daily and become payable with the final scheduled installment.
+    # The current schedule is mutable, so this remains an event-date candidate.
+    cur.execute("""SELECT COALESCE(SUM(penalty_amount),0),MAX(payment_date)
+        FROM loan_schedule WHERE loan_id=%s""", (loan_id,))
+    assessed_raw, last_due = cur.fetchone()
+    assessed_penalty = _money(assessed_raw)
+    cur.execute("""SELECT COALESCE(SUM(penalty_part),0)
+        FROM loan_payments WHERE loan_id=%s
+          AND (payment_date,id)<=(%s,%s)""",
+        (loan_id, event_date, payment_id))
+    paid_penalty = _money(cur.fetchone()[0])
+    if assessed_penalty < paid_penalty or last_due is None:
+        result['status'] = 'review'
+        result['issues'].append('Пени или дата последнего платежа не согласованы с графиком CRM')
+    else:
+        result['penalty_candidate'] = {
+            'assessed_crm': str(assessed_penalty),
+            'paid_crm': str(paid_penalty),
+            'remaining': str(assessed_penalty - paid_penalty),
+            'due_at': last_due.isoformat(),
+            'due_classification': ('term_until_final_scheduled_payment'
+                                   if last_due > event_date else 'review_after_final_due')}
     return result

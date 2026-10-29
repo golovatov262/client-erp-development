@@ -53,12 +53,12 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
                                if posting_snapshot_sha256 else
                                'Исторического снимка графика на момент проведения нет'),
-        'FL_22_TotalCost': ('ПСК найден в реестре 1С и совпал по дате/сумме с CRM; требуется сверка с подписанным договором и условием обязательности'
-                            if psk_candidate_status == 'source_consistent' else
-                            'ПСК найден в реестре 1С с расхождением реквизитов CRM; требуется ручная сверка'
+        'FL_22_TotalCost': ('ПСК рассчитана по первоначальным реквизитам CRM и согласуется с историческим расчётом; для XML требуется сверка с подписанным договором и условием обязательности'
+                            if psk_candidate_status == 'cross_checked' else
+                            'Расчёт ПСК по CRM имеет расхождение или недостаточную историческую проверку; требуется ручная сверка'
                             if psk_candidate_status == 'review' else
                             'ПСК и условие обязательности требуют подтверждённого расчёта'),
-        'FL_25_26_27_28_Group': 'Есть часть по основному долгу и платежам CRM; нет полного расчёта процентов, срочной и просроченной задолженности и кодов платежа',
+        'FL_25_26_27_28_Group': 'Есть часть по основному долгу и платежам CRM; нет полного расчёта процентов, срочной и просроченной задолженности. Коды ФЛ_28.10/28.11 с 29.12.2025 не направляются по письму ЦБ; опубликованная XSD 5.1 требует отдельной проверки представления пустых значений',
         'FL_29_MonthlyPayment': 'Нормативный среднемесячный платёж не рассчитан',
         'FL_29_1_DebtBurdenInfo': 'Не проверены условия обязательности и данные долговой нагрузки',
         'FL_20_JointDebtors': 'Нужно подтвердить состав солидарных должников или признак их отсутствия',
@@ -84,19 +84,20 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         blockers.append('Не подтверждён остаток основного долга по журналу CRM')
     if allocation.get('status') != 'checked':
         blockers.append('Не подтверждено распределение платежа CRM')
-    blockers.extend(('Не рассчитана полная задолженность по процентам на дату события; из текущего графика CRM можно восстановить только просроченную часть для последнего платежа',
-                     'Не рассчитаны ПСК, среднемесячный платёж и коды соблюдения платежей',
+    blockers.extend(('Не рассчитана полная задолженность по процентам на дату события; текущий график CRM не является историческим снимком',
+                     'Не подтверждены ПСК и среднемесячный платёж для XML',
+                     'Нужно согласовать представление ФЛ_28.10/28.11 в XSD 5.1 с письмом ЦБ от 09.12.2025: числовые коды передавать нельзя',
                      'Не проверены условные и обязательные блоки события 2.3'))
     return {'event_code_candidate': '2.3', 'xsd_version': XSD_VERSION,
             'xsd_archive_sha256': XSD_ARCHIVE_SHA256,
             'blocks': blocks, 'blockers': blockers,
             'debt_evidence': {'principal_after_crm': principal,
                               'term_principal_crm': (crm_debt.get('term_principal')
-                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
+                                if crm_debt and crm_debt.get('status') in ('calculated_from_current_crm','calculated_from_posting_snapshot') else None),
                               'overdue_principal_crm': (crm_debt.get('overdue_principal')
-                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
+                                if crm_debt and crm_debt.get('status') in ('calculated_from_current_crm','calculated_from_posting_snapshot') else None),
                               'overdue_interest_crm': (crm_debt.get('overdue_interest')
-                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
+                                if crm_debt and crm_debt.get('status') in ('calculated_from_current_crm','calculated_from_posting_snapshot') else None),
                               'interest_debt': None, 'other_debt': None,
                               'total_debt': None, 'due_debt': None,
                               'overdue_debt': None,

@@ -13,13 +13,13 @@ try:
     from nbki_outbox import inspect_loan
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from nbki_event23_readiness import assess_event23
-    from nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
     from nbki_smp import preview_smp
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
-    from backend.nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from backend.nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
     from backend.nbki_smp import preview_smp
 
 
@@ -28,13 +28,13 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         f.source_row_num,p.id,p.payment_date,p.amount,p.principal_part,
         p.interest_part,p.penalty_part,p.payment_type,p.source,
         p.nbki_event_occurred_at,p.nbki_recorded_at,p.nbki_event_time_basis,
-        ps.evidence_sha256,ps.captured_at,
-        cf.psk_percent,cf.psk_amount,cf.calculated_on,cf.status
+        ps.evidence_sha256,ps.evidence,ps.captured_at,
+        pc.psk_percent,pc.psk_amount,pc.calculated_on,pc.verification_status
         FROM nbki_1c_loan_facts f
         JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
         JOIN loan_payments p ON p.loan_id=l.id
         LEFT JOIN nbki_payment_posting_snapshots ps ON ps.payment_id=p.id
-        LEFT JOIN nbki_contract_cost_facts cf ON cf.loan_id=l.id AND cf.org_id=l.org_id AND cf.uid=f.uid
+        LEFT JOIN loan_psk_calculations pc ON pc.loan_id=l.id AND pc.org_id=l.org_id
         WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
           AND p.payment_date>f.event_time::date AND p.payment_date<=CURRENT_DATE
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
@@ -47,7 +47,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
     for (loan_id, contract_no, uid, event_time, source_id, row_num,
          payment_id, payment_date, amount, principal, interest, penalty,
          payment_type, payment_source, event_occurred_at, recorded_at,
-         event_time_basis, posting_snapshot_sha256, posting_captured_at,
+         event_time_basis, posting_snapshot_sha256, posting_evidence, posting_captured_at,
          psk_percent, psk_amount, psk_calculated_on, psk_status) in cur.fetchall():
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
@@ -69,12 +69,22 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             LEFT JOIN loan_schedule s ON s.id=a.schedule_id
             WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
         allocation_audit = audit_payment_allocations(payment, cur.fetchall(), loan_id)
-        crm_debt = split_latest_crm_debt(
-            cur, loan_id, payment_id, payment_date,
-            accounting.get('principal_after') if accounting.get('status') == 'checked' else None)
+        if posting_snapshot_sha256 and posting_evidence:
+            crm_debt = split_posting_snapshot_debt(
+                posting_evidence, posting_snapshot_sha256, loan_id, payment_id, payment_date)
+            if crm_debt['status'] == 'calculated_from_posting_snapshot' and accounting.get('status') == 'checked':
+                from decimal import Decimal
+                split_principal = Decimal(crm_debt['term_principal']) + Decimal(crm_debt['overdue_principal'])
+                if abs(split_principal - Decimal(accounting['principal_after'])) > Decimal('0.01'):
+                    crm_debt['status'] = 'review'
+                    crm_debt['issues'].append('Основной долг снимка не равен журналу платежей CRM')
+        else:
+            crm_debt = split_latest_crm_debt(
+                cur, loan_id, payment_id, payment_date,
+                accounting.get('principal_after') if accounting.get('status') == 'checked' else None)
         interest_candidate = estimate_current_interest(
             cur, loan_id, payment_id, payment_date,
-            latest_payment=crm_debt['later_payments'] == 0,
+            latest_payment=ledgers[loan_id][-1][0] == payment_id,
             principal_checked=accounting.get('status') == 'checked')
         smp_candidate = preview_smp(cur, loan_id, payment_date, crm_debt)
         event23 = assess_event23(inspection, accounting, allocation_audit,
@@ -108,7 +118,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                                         'amount': str(psk_amount),
                                         'calculated_on': psk_calculated_on.isoformat(),
                                         'status': psk_status,
-                                        'basis': 'Реестр 1С; не подтверждено договором и не допущено в XML'}
+                                        'basis': 'Расчёт по исходным условиям CRM; статус сверки не разрешает XML автоматически'}
                                        if psk_percent is not None else None),
                      'event23_readiness': event23,
                      'gutdf_event_code': None, 'event_code_confirmed': False,

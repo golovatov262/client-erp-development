@@ -116,11 +116,13 @@ class ReconciliationTests(unittest.TestCase):
                 return [(17, '123', 'uid', datetime(2026, 9, 30, 12), 2, 3,
                          2656, date(2026, 10, 28), Decimal('28888.97'),
                          Decimal('1000'), Decimal('27888.97'), Decimal('0'),
-                         'early_partial', 'bank', None, None, None, None, None,
+                         'early_partial', 'bank', None, None, None, None, None, None,
                          Decimal('19.487'), Decimal('1966676.01'), date(2022, 4, 4),
-                         'source_consistent')]
+                         'cross_checked')]
 
             def fetchone(self):
+                if 'SUM(penalty_amount)' in self.query:
+                    return (Decimal('0'), date(2032, 4, 30))
                 return (0,)
 
         cur = Cursor()
@@ -144,7 +146,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertFalse(result['rows'][0]['event23_readiness']['xml_ready'])
         self.assertIsNone(result['rows'][0]['event23_readiness']['debt_evidence']['total_debt'])
         self.assertFalse(result['rows'][0]['xml_ready'])
-        self.assertEqual(result['rows'][0]['psk_candidate']['status'], 'source_consistent')
+        self.assertEqual(result['rows'][0]['psk_candidate']['status'], 'cross_checked')
         self.assertIn('подписанным договором', next(block['note'] for block in
                       result['rows'][0]['event23_readiness']['blocks']
                       if block['name'] == 'FL_22_TotalCost'))

@@ -262,12 +262,13 @@ export type NbkiPaymentCandidates = {
       basis: string;
     };
     crm_debt_reconstruction: {
-      status: "calculated_from_current_crm" | "unavailable" | "review";
-      basis: string; later_payments: number;
+      status: "calculated_from_current_crm" | "calculated_from_posting_snapshot" | "unavailable" | "review";
+      basis: string; later_payments?: number;
       overdue_principal: string | null; overdue_interest: string | null;
       term_principal: string | null; interest_debt: null; total_debt: null;
       penalty_candidate: { assessed_crm: string; paid_crm: string;
-        remaining: string; due_classification: "unconfirmed" } | null;
+        remaining: string; due_at: string;
+        due_classification: "term_until_final_scheduled_payment" | "review_after_final_due" } | null;
       rows: { schedule_id: number; due: string;
         overdue_principal: string; overdue_interest: string }[];
       issues: string[];
