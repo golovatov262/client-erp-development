@@ -2,6 +2,7 @@
 
 import copy
 import unittest
+from decimal import Decimal
 
 from backend.nbki_outbox import (event_hints, extract_historical_indicators,
                                  schedule_integrity_issues, source_readiness,
@@ -35,6 +36,22 @@ class ChangeSummaryTests(unittest.TestCase):
             schedule, holiday_end='2026-07-01', holiday_months=3, term_months=27)
         self.assertEqual(len(issues), 1)
         self.assertIn('Каникулярное продление', issues[0])
+
+    def test_schedule_principal_lower_bound_flags_certain_excess(self):
+        schedule = [
+            {'id': 1, 'payment_no': 1, 'payment_date': '2026-10-01',
+             'status': 'overdue', 'principal_amount': Decimal('40000.00'),
+             'paid_amount': Decimal('2000.00')},
+            {'id': 2, 'payment_no': 2, 'payment_date': '2026-11-01',
+             'status': 'pending', 'principal_amount': Decimal('25000.00'),
+             'paid_amount': Decimal('0.00')},
+        ]
+        issues = schedule_integrity_issues(schedule, loan_balance=Decimal('33351.88'))
+        self.assertTrue(any('Нижняя оценка' in issue for issue in issues))
+        self.assertFalse(any('Нижняя оценка' in issue for issue in
+                             schedule_integrity_issues(schedule, loan_balance=Decimal('65000'))))
+        self.assertFalse(any('Нижняя оценка' in issue for issue in
+                             schedule_integrity_issues(schedule, loan_balance=Decimal('62500'))))
 
     def setUp(self):
         self.before = {

@@ -186,7 +186,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             'crm_schedule_issues': [issue for issue in
                 inspections[loan_id]['checks']['crm_issues']
                 if issue.startswith(('Повтор номера платежа графика',
-                                     'Дата строки графика', 'Каникулярное продление'))],
+                                     'Дата строки графика', 'Каникулярное продление',
+                                     'Нижняя оценка непогашенного основного долга'))],
             'event_code_candidate': '2.3', 'event_code_confirmed': False,
             'historical_state_confirmed': False, 'xml_ready': False,
         })

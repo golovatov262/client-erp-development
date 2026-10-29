@@ -78,7 +78,8 @@ def event_hints(change_summary: dict | None) -> list[dict]:
 
 
 def schedule_integrity_issues(schedule: list[dict], *, holiday_end=None,
-                              holiday_months=0, term_months=None) -> list[str]:
+                              holiday_months=0, term_months=None,
+                              loan_balance=None) -> list[str]:
     """Separate CRM holiday extension ordering from unexplained reversals."""
     issues = []
     seen_numbers = set()
@@ -101,6 +102,24 @@ def schedule_integrity_issues(schedule: list[dict], *, holiday_end=None,
                     f'Дата строки графика № {number} ({due}) раньше строки '
                     f'№ {previous["payment_no"]} ({previous["payment_date"]})')
         previous = row
+    if loan_balance is not None:
+        # Subtract the *whole* paid amount, including interest. This deliberately
+        # understates remaining scheduled principal; a positive excess is thus
+        # certain even when legacy component allocations are unavailable.
+        lower_bound = sum((max(Decimal('0'), Decimal(str(row['principal_amount'] or 0)) -
+                               Decimal(str(row['paid_amount'] or 0)))
+                           for row in schedule
+                           if row['status'] not in ('paid', 'holiday', 'holiday_pending')),
+                          Decimal('0'))
+        balance = Decimal(str(loan_balance))
+        # Small legacy rounding/reallocation differences are handled by the
+        # later exact payment audit. Here flag only a material schedule excess.
+        threshold = max(Decimal('1.00'), abs(balance) * Decimal('0.01'))
+        if lower_bound > balance + threshold:
+            issues.append(
+                f'Нижняя оценка непогашенного основного долга графика '
+                f'{lower_bound:.2f} ₽ существенно превышает остаток займа CRM '
+                f'{balance:.2f} ₽')
     return issues
 
 
@@ -257,7 +276,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     issues = []
     issues.extend(schedule_integrity_issues(
         schedule, holiday_end=data['holiday_end'],
-        holiday_months=data['holiday_months'], term_months=data['term_months']))
+        holiday_months=data['holiday_months'], term_months=data['term_months'],
+        loan_balance=data['balance']))
     eligible = data['status'] in ('active', 'overdue', 'holiday')
     if not eligible:
         issues.append('Закрытый договор исключен из исходящей выгрузки')
