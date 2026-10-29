@@ -13,10 +13,12 @@ try:
     from nbki_outbox import inspect_loan
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from nbki_event23_readiness import assess_event23
+    from nbki_crm_debt import split_latest_crm_debt
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
+    from backend.nbki_crm_debt import split_latest_crm_debt
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -65,9 +67,12 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             LEFT JOIN loan_schedule s ON s.id=a.schedule_id
             WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
         allocation_audit = audit_payment_allocations(payment, cur.fetchall(), loan_id)
+        crm_debt = split_latest_crm_debt(
+            cur, loan_id, payment_id, payment_date,
+            accounting.get('principal_after') if accounting.get('status') == 'checked' else None)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
-                                psk_candidate_status=psk_status)
+                                psk_candidate_status=psk_status, crm_debt=crm_debt)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -88,6 +93,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'crm_issues': inspection['checks']['crm_issues'],
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
+                     'crm_debt_reconstruction': crm_debt,
                      'allocation_audit': allocation_audit,
                      'psk_candidate': ({'percent': str(psk_percent),
                                         'amount': str(psk_amount),

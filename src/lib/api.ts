@@ -261,6 +261,15 @@ export type NbkiPaymentCandidates = {
       status: "checked" | "review";
       basis: string;
     };
+    crm_debt_reconstruction: {
+      status: "calculated_from_current_crm" | "unavailable" | "review";
+      basis: string; later_payments: number;
+      overdue_principal: string | null; overdue_interest: string | null;
+      term_principal: string | null; interest_debt: null; total_debt: null;
+      rows: { schedule_id: number; due: string;
+        overdue_principal: string; overdue_interest: string }[];
+      issues: string[];
+    };
     allocation_audit: {
       payment_id: number;
       status: "checked" | "review" | "unavailable";
@@ -282,6 +291,9 @@ export type NbkiPaymentCandidates = {
       blockers: string[];
       debt_evidence: {
         principal_after_crm: string | null;
+        term_principal_crm: string | null;
+        overdue_principal_crm: string | null;
+        overdue_interest_crm: string | null;
         interest_debt: null; other_debt: null; total_debt: null;
         due_debt: null; overdue_debt: null;
         cumulative_payments_crm: Record<string, string | null> | null;

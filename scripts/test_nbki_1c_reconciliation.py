@@ -105,6 +105,8 @@ class ReconciliationTests(unittest.TestCase):
                 self.query, self.params = query, params
 
             def fetchall(self):
+                if 'FROM loan_schedule s LEFT JOIN loan_payment_allocations a' in self.query:
+                    return []
                 if 'WHERE loan_id=%s ORDER BY payment_date,id' in self.query:
                     return [(2656, date(2026, 10, 28), Decimal('28888.97'),
                              Decimal('1000'), Decimal('27888.97'), Decimal('0'), 'v2')]
@@ -117,6 +119,9 @@ class ReconciliationTests(unittest.TestCase):
                          'early_partial', 'bank', None, None, None, None, None,
                          Decimal('19.487'), Decimal('1966676.01'), date(2022, 4, 4),
                          'source_consistent')]
+
+            def fetchone(self):
+                return (0,)
 
         cur = Cursor()
         with patch('backend.nbki_payment_candidates.inspect_loan', return_value={

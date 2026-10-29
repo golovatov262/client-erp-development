@@ -35,7 +35,7 @@ MONETARY_BLOCKS = (
 
 def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                    event_occurred_at, posting_snapshot_sha256,
-                   psk_candidate_status=None) -> dict:
+                   psk_candidate_status=None, crm_debt=None) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -84,13 +84,19 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         blockers.append('Не подтверждён остаток основного долга по журналу CRM')
     if allocation.get('status') != 'checked':
         blockers.append('Не подтверждено распределение платежа CRM')
-    blockers.extend(('Не рассчитаны проценты, срочная и просроченная задолженность на дату события',
+    blockers.extend(('Не рассчитана полная задолженность по процентам на дату события; из текущего графика CRM можно восстановить только просроченную часть для последнего платежа',
                      'Не рассчитаны ПСК, среднемесячный платёж и коды соблюдения платежей',
                      'Не проверены условные и обязательные блоки события 2.3'))
     return {'event_code_candidate': '2.3', 'xsd_version': XSD_VERSION,
             'xsd_archive_sha256': XSD_ARCHIVE_SHA256,
             'blocks': blocks, 'blockers': blockers,
             'debt_evidence': {'principal_after_crm': principal,
+                              'term_principal_crm': (crm_debt.get('term_principal')
+                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
+                              'overdue_principal_crm': (crm_debt.get('overdue_principal')
+                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
+                              'overdue_interest_crm': (crm_debt.get('overdue_interest')
+                                if crm_debt and crm_debt.get('status') == 'calculated_from_current_crm' else None),
                               'interest_debt': None, 'other_debt': None,
                               'total_debt': None, 'due_debt': None,
                               'overdue_debt': None,
