@@ -168,6 +168,11 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         schedule_due_review.append({
             'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
             'baseline_event_time': baseline_time.isoformat(),
+            'holiday_start': (str(inspections[loan_id]['snapshot']['loan']['holiday_start'])
+                              if inspections[loan_id]['snapshot']['loan'].get('holiday_start') else None),
+            'holiday_end': (str(inspections[loan_id]['snapshot']['loan']['holiday_end'])
+                            if inspections[loan_id]['snapshot']['loan'].get('holiday_end') else None),
+            'holiday_months': inspections[loan_id]['snapshot']['loan'].get('holiday_months') or 0,
             'schedule_id': schedule_id, 'due_date': due.isoformat(),
             'current_schedule_status': status,
             'current_payment_amount': str(amount),
@@ -180,7 +185,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                 else None),
             'crm_schedule_issues': [issue for issue in
                 inspections[loan_id]['checks']['crm_issues']
-                if issue.startswith(('Повтор номера платежа графика', 'Дата строки графика'))],
+                if issue.startswith(('Повтор номера платежа графика',
+                                     'Дата строки графика', 'Каникулярное продление'))],
             'event_code_candidate': '2.3', 'event_code_confirmed': False,
             'historical_state_confirmed': False, 'xml_ready': False,
         })

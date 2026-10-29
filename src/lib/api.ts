@@ -225,6 +225,7 @@ export type NbkiPaymentCandidates = {
   schedule_due_review: {
     loan_id: number; contract_no: string; uid: string;
     baseline_event_time: string; schedule_id: number; due_date: string;
+    holiday_start: string | null; holiday_end: string | null; holiday_months: number;
     current_schedule_status: string; current_payment_amount: string;
     current_paid_amount: string; same_day_crm_payment_count: number;
     overdue_transition_review_date: string | null;

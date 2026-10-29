@@ -331,6 +331,7 @@ const AdminNbkiTab = () => {
             {paymentCandidates?.schedule_due_review.map(row => <div key={row.schedule_id} className="border-b py-2">
               <span className="font-medium">{row.contract_no}</span> · {row.due_date} · план {Number(row.current_payment_amount).toLocaleString("ru-RU")} ₽ · строка #{row.schedule_id}
               <div className="text-xs text-muted-foreground">УИД {row.uid} · текущий статус {row.current_schedule_status} · зачтено {Number(row.current_paid_amount).toLocaleString("ru-RU")} ₽ · платежей CRM в этот день {row.same_day_crm_payment_count}. Код 2.3 и состояние на дату не подтверждены; XML заблокирован.</div>
+              {row.holiday_start && row.holiday_end && <div className="text-xs text-muted-foreground">Кредитные каникулы CRM: {row.holiday_start} — {row.holiday_end} ({row.holiday_months} мес.). Добавленные после каникул строки проверяются отдельно от обычного графика.</div>}
               {row.overdue_transition_review_date && <div className="text-xs text-muted-foreground">Возможное возникновение просрочки: {row.overdue_transition_review_date} (только по текущему состоянию графика).</div>}
               {row.crm_schedule_issues.map((issue, index) => <div key={`${row.schedule_id}-issue-${index}`} className="text-xs text-destructive">Проверить график: {issue}</div>)}
             </div>)}

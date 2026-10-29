@@ -77,8 +77,9 @@ def event_hints(change_summary: dict | None) -> list[dict]:
     return hints
 
 
-def schedule_integrity_issues(schedule: list[dict]) -> list[str]:
-    """Flag ordering defects without rewriting contractual schedule history."""
+def schedule_integrity_issues(schedule: list[dict], *, holiday_end=None,
+                              holiday_months=0, term_months=None) -> list[str]:
+    """Separate CRM holiday extension ordering from unexplained reversals."""
     issues = []
     seen_numbers = set()
     previous = None
@@ -88,9 +89,17 @@ def schedule_integrity_issues(schedule: list[dict]) -> list[str]:
             issues.append(f'Повтор номера платежа графика {number}')
         seen_numbers.add(number)
         if previous and due < previous['payment_date']:
-            issues.append(
-                f'Дата строки графика № {number} ({due}) раньше строки '
-                f'№ {previous["payment_no"]} ({previous["payment_date"]})')
+            if (holiday_end and holiday_months and term_months and
+                    number > term_months - holiday_months and due >= holiday_end):
+                issues.append(
+                    f'Каникулярное продление: строка № {number} ({due}) добавлена '
+                    f'после строки № {previous["payment_no"]} '
+                    f'({previous["payment_date"]}); порядок дат требует '
+                    'отдельного учёта при формировании событий')
+            else:
+                issues.append(
+                    f'Дата строки графика № {number} ({due}) раньше строки '
+                    f'№ {previous["payment_no"]} ({previous["payment_date"]})')
         previous = row
     return issues
 
@@ -195,7 +204,8 @@ def historical_context(cur, org_id: int, uid: str | None) -> dict | None:
 def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,l.amount,l.rate,l.term_months,
         l.schedule_type,l.monthly_payment,l.start_date,
-        l.end_date,l.balance,l.status,l.updated_at,m.id,m.member_type,m.last_name,
+        l.end_date,l.balance,l.status,l.updated_at,l.holiday_start,
+        l.holiday_end,l.holiday_months,m.id,m.member_type,m.last_name,
         m.first_name,m.middle_name,m.company_name,m.birth_date,m.birth_place,
         m.passport_series,m.passport_number,m.passport_issue_date,m.passport_issued_by,
         m.registration_address,m.inn,m.updated_at
@@ -206,7 +216,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         raise ValueError('Договор не найден в организации источника')
     keys = ('id','contract_no','amount','rate','term_months','schedule_type',
             'monthly_payment','start_date','end_date',
-            'balance','status','updated_at','member_id','member_type','last_name',
+            'balance','status','updated_at','holiday_start','holiday_end',
+            'holiday_months','member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
             'registration_address','inn','member_updated_at')
@@ -244,7 +255,9 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     name = (' '.join(filter(None, (data['last_name'],data['first_name'],data['middle_name'])))
             if data['member_type'] == 'FL' else data['company_name'])
     issues = []
-    issues.extend(schedule_integrity_issues(schedule))
+    issues.extend(schedule_integrity_issues(
+        schedule, holiday_end=data['holiday_end'],
+        holiday_months=data['holiday_months'], term_months=data['term_months']))
     eligible = data['status'] in ('active', 'overdue', 'holiday')
     if not eligible:
         issues.append('Закрытый договор исключен из исходящей выгрузки')
@@ -274,7 +287,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     snapshot = {
         'loan': {key: data[key] for key in ('id','contract_no','amount','rate','term_months',
             'schedule_type','monthly_payment',
-            'start_date','end_date','balance','status','updated_at')},
+            'start_date','end_date','balance','status','updated_at',
+            'holiday_start','holiday_end','holiday_months')},
         'member': {key: data[key] for key in ('member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',

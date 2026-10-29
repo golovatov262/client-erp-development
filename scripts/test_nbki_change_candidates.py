@@ -26,6 +26,16 @@ class ChangeSummaryTests(unittest.TestCase):
         ]
         self.assertIn('Повтор номера платежа графика 1', schedule_integrity_issues(schedule))
 
+    def test_schedule_integrity_identifies_documented_holiday_extension(self):
+        schedule = [
+            {'id': 1, 'payment_no': 24, 'payment_date': '2027-06-28'},
+            {'id': 2, 'payment_no': 25, 'payment_date': '2026-08-31'},
+        ]
+        issues = schedule_integrity_issues(
+            schedule, holiday_end='2026-07-01', holiday_months=3, term_months=27)
+        self.assertEqual(len(issues), 1)
+        self.assertIn('Каникулярное продление', issues[0])
+
     def setUp(self):
         self.before = {
             'loan': {'id': 7, 'balance': '1000', 'updated_at': '2026-10-01'},
