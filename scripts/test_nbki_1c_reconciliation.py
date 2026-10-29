@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from backend.nbki_1c_reconciliation import apply_crm_decision, apply_global_crm_policy, compare_fact, parse_money
 from backend.nbki_payment_candidates import list_payment_candidates
-from backend.nbki_accounting_snapshot import build_accounting_snapshot
+from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
 from scripts.record_nbki_crm_payment_decisions import validate_targets
 
 
@@ -107,7 +107,10 @@ class ReconciliationTests(unittest.TestCase):
             def fetchall(self):
                 if 'WHERE loan_id=%s ORDER BY payment_date,id' in self.query:
                     return [(2656, date(2026, 10, 28), Decimal('28888.97'),
-                             Decimal('1000'), Decimal('27888.97'), Decimal('0'))]
+                             Decimal('1000'), Decimal('27888.97'), Decimal('0'), 'v2')]
+                if 'loan_payment_allocations a' in self.query:
+                    return [(1, None, 'interest', Decimal('27888.97'), 'automatic', None),
+                            (2, None, 'early_principal', Decimal('1000'), 'automatic', None)]
                 return [(17, '123', 'uid', datetime(2026, 9, 30, 12), 2, 3,
                          2656, date(2026, 10, 28), Decimal('28888.97'),
                          Decimal('1000'), Decimal('27888.97'), Decimal('0'),
@@ -125,6 +128,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertFalse(result['rows'][0]['xml_ready'])
         self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
         self.assertEqual(result['rows'][0]['accounting_snapshot']['status'], 'checked')
+        self.assertEqual(result['rows'][0]['allocation_audit']['status'], 'checked')
 
     def test_principal_snapshot_checks_payment_parts(self):
         payments = [(1, date(2026, 9, 1), Decimal('100'), Decimal('40'),
@@ -136,6 +140,16 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(result['principal_after'], '860')
         self.assertEqual(result['status'], 'review')
         self.assertIn('Сумма частей платежа', result['issues'][0])
+
+    def test_v2_allocation_audit_detects_unapplied(self):
+        payment = (1, date(2026, 10, 28), Decimal('100'), Decimal('60'),
+                   Decimal('30'), Decimal('0'), 'v2')
+        allocations = [(10, None, 'interest', Decimal('30'), 'automatic', None),
+                       (11, None, 'early_principal', Decimal('60'), 'automatic', None),
+                       (12, None, 'unapplied', Decimal('10'), 'automatic', None)]
+        result = audit_payment_allocations(payment, allocations, 17)
+        self.assertEqual(result['status'], 'review')
+        self.assertTrue(any('нераспределённая' in item for item in result['issues']))
 
 
 if __name__ == '__main__':

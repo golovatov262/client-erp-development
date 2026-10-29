@@ -252,6 +252,14 @@ export type NbkiPaymentCandidates = {
       status: "checked" | "review";
       basis: string;
     };
+    allocation_audit: {
+      payment_id: number;
+      status: "checked" | "review" | "unavailable";
+      issues: string[];
+      components: Record<string, string>;
+      allocations: { id: number; schedule_id: number | null;
+        component: string; amount: string; mode: string }[];
+    };
     gutdf_event_code: null;
     event_code_confirmed: false;
     xml_ready: false;

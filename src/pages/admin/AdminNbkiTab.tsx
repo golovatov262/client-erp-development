@@ -298,7 +298,9 @@ const AdminNbkiTab = () => {
               <div className="text-xs text-muted-foreground">УИД {payment.uid} · последнее событие 1С {payment.baseline_event_time.slice(0, 10)} · код события ещё не определён</div>
               <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">Предварительная проверка: {payment.crm_issues.length} замечаний CRM, {payment.missing_fields.length} блокирующих пунктов</summary>
                 <p className="mt-1">По журналу CRM: основной долг до платежа {payment.accounting_snapshot.principal_before ?? "не рассчитан"} ₽, после {payment.accounting_snapshot.principal_after ?? "не рассчитан"} ₽; сумма частей платежа {payment.accounting_snapshot.components_total ?? "не рассчитана"} ₽. {payment.accounting_snapshot.status === "checked" ? "Внутренние арифметические проверки пройдены." : "Есть арифметические замечания."} Это не расчёт задолженности для НБКИ.</p>
+                <p>Распределение v2: {payment.allocation_audit.status === "checked" ? "проверено" : payment.allocation_audit.status === "unavailable" ? "нет данных" : "требует проверки"}; проценты {payment.allocation_audit.components.interest ?? "—"} ₽, основной долг {payment.allocation_audit.components.principal ?? "—"} ₽, досрочно {payment.allocation_audit.components.early_principal ?? "—"} ₽.</p>
                 {payment.accounting_snapshot.issues.map((issue, index) => <p key={`accounting-${payment.payment_id}-${index}`} className="text-destructive">{issue}</p>)}
+                {payment.allocation_audit.issues.map((issue, index) => <p key={`allocation-${payment.payment_id}-${index}`} className="text-destructive">{issue}</p>)}
                 <ul className="ml-5 mt-1 list-disc">{[...payment.crm_issues, ...payment.missing_fields].map((issue, index) => <li key={`${payment.payment_id}-${index}`}>{issue}</li>)}</ul>
               </details>
             </div>)}

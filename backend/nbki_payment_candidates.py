@@ -7,10 +7,10 @@ from __future__ import annotations
 
 try:
     from nbki_outbox import inspect_loan
-    from nbki_accounting_snapshot import build_accounting_snapshot
+    from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
 except ImportError:
     from backend.nbki_outbox import inspect_loan
-    from backend.nbki_accounting_snapshot import build_accounting_snapshot
+    from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
 
 
 def list_payment_candidates(cur, org_id: int) -> dict:
@@ -40,12 +40,18 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             continue
         if loan_id not in ledgers:
             cur.execute("""SELECT id,payment_date,amount,principal_part,
-                interest_part,penalty_part FROM loan_payments
+                interest_part,penalty_part,engine_version FROM loan_payments
                 WHERE loan_id=%s ORDER BY payment_date,id""", (loan_id,))
             ledgers[loan_id] = cur.fetchall()
         loan = inspection['snapshot']['loan']
         accounting = build_accounting_snapshot(loan['amount'], loan['balance'],
                                                ledgers[loan_id], payment_id)
+        payment = next(row for row in ledgers[loan_id] if row[0] == payment_id)
+        cur.execute("""SELECT a.id,a.schedule_id,a.component,a.amount,
+            a.allocation_mode,s.loan_id FROM loan_payment_allocations a
+            LEFT JOIN loan_schedule s ON s.id=a.schedule_id
+            WHERE a.payment_id=%s ORDER BY a.id""", (payment_id,))
+        allocation_audit = audit_payment_allocations(payment, cur.fetchall(), loan_id)
         rows.append({'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
                      'baseline_event_time': event_time.isoformat(),
                      'baseline_source_id': source_id, 'baseline_source_row_num': row_num,
@@ -57,6 +63,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                      'crm_issues': inspection['checks']['crm_issues'],
                      'missing_fields': inspection['readiness']['missing_fields'],
                      'accounting_snapshot': accounting,
+                     'allocation_audit': allocation_audit,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
                      'xml_ready': False})
     return {'total': len(rows), 'rows': rows,
