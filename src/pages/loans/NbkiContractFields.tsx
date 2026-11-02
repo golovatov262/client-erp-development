@@ -10,6 +10,10 @@ import { useToast } from "@/hooks/use-toast";
 const FIELDS = [
   ["deal_code", "Код вида сделки"], ["kind_code", "Код вида займа"], ["purpose_code", "Код цели займа"],
   ["payment_size_code", "Код размера платежа"], ["payment_schedule_code", "Код периодичности платежа"],
+  ["birth_date", "Дата рождения заёмщика", "date"], ["birth_place", "Место рождения заёмщика"],
+  ["passport_series", "Серия паспорта"], ["passport_number", "Номер паспорта"],
+  ["passport_issue_date", "Дата выдачи паспорта", "date"], ["passport_issued_by", "Кем выдан паспорт"],
+  ["registration_address", "Адрес регистрации"], ["inn", "ИНН заёмщика"],
 ] as const;
 
 export default function NbkiContractFields({ loanId }: { loanId: number }) {
@@ -25,8 +29,8 @@ export default function NbkiContractFields({ loanId }: { loanId: number }) {
     finally { setSaving(false); }
   };
   return <div className="rounded-md border p-3 space-y-3">
-    <div><div className="text-sm font-medium">Реквизиты для формирования НБКИ</div><div className="text-xs text-muted-foreground">Заполняются по документам/подтверждённым справочникам. Эти значения отдельно от условий договора CRM.</div></div>
-    <div className="grid gap-3 sm:grid-cols-2">{FIELDS.map(([key, label]) => <div key={key} className="space-y-1"><Label className="text-xs">{label}</Label><Input value={values[key] || ""} onChange={e => set(key, e.target.value)} /></div>)}</div>
+    <div><div className="text-sm font-medium">Реквизиты для формирования НБКИ</div><div className="text-xs text-muted-foreground">Коды сделки — отдельные реквизиты НБКИ; паспортные данные сохраняются в карточке заёмщика и будут видны по всем его договорам. Заполняйте по подтверждающим документам.</div></div>
+    <div className="grid gap-3 sm:grid-cols-2">{FIELDS.map(([key, label, kind]) => <div key={key} className="space-y-1"><Label className="text-xs">{label}</Label><Input type={kind || "text"} value={values[key] || ""} onChange={e => set(key, e.target.value)} /></div>)}</div>
     <div className="space-y-1"><Label className="text-xs">Основание / примечание менеджера</Label><Textarea value={values.note || ""} onChange={e => set("note", e.target.value)} rows={2} placeholder="Документ и реквизит, по которому внесено значение" /></div>
     <div className="flex justify-end"><Button size="sm" onClick={save} disabled={saving}>{saving ? <Icon name="Loader2" size={14} className="mr-1 animate-spin" /> : <Icon name="Save" size={14} className="mr-1" />}Сохранить реквизиты НБКИ</Button></div>
   </div>;

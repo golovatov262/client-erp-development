@@ -9785,18 +9785,36 @@ def handle_nbki(method, params, body, staff, cur, conn):
         loan_id = body.get('loan_id') or params.get('loan_id')
         if not loan_id:
             return {'_status': 400, 'error': 'loan_id обязателен'}
-        cur.execute("SELECT id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
-        if not cur.fetchone():
+        cur.execute("SELECT id,member_id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
+        loan_row = cur.fetchone()
+        if not loan_row:
             return {'_status': 404, 'error': 'Договор не найден'}
+        member_id = loan_row[1]
         if method == 'GET':
             cur.execute("SELECT deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at FROM nbki_loan_manual_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
             row = cur.fetchone()
             keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note','updated_at')
-            return dict(zip(keys, (serialize(value) for value in row))) if row else {}
+            result = dict(zip(keys, (serialize(value) for value in row))) if row else {}
+            cur.execute("SELECT birth_date,birth_place,passport_series,passport_number,passport_issue_date,passport_issued_by,registration_address,inn FROM members WHERE id=%s", (member_id,))
+            identity_keys = ('birth_date','birth_place','passport_series','passport_number','passport_issue_date','passport_issued_by','registration_address','inn')
+            result.update(dict(zip(identity_keys, (serialize(value) for value in cur.fetchone()))))
+            return result
         if method != 'PUT':
             return {'_status': 405, 'error': 'Неверный метод'}
         keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note')
         values = [body.get(key) or None for key in keys]
+        identity_fields = {'birth_date': 'date', 'birth_place': 'text', 'passport_series': 'text',
+            'passport_number': 'text', 'passport_issue_date': 'date', 'passport_issued_by': 'text',
+            'registration_address': 'text', 'inn': 'text'}
+        identity_updates = []
+        for key, kind in identity_fields.items():
+            if key not in body: continue
+            value = body.get(key)
+            if value in (None, ''): identity_updates.append(key + '=NULL')
+            elif kind == 'date': identity_updates.append(key + "='%s'::date" % esc(value))
+            else: identity_updates.append(key + "='%s'" % esc(value))
+        if identity_updates:
+            cur.execute("UPDATE members SET %s,updated_at=NOW() WHERE id=%s" % (','.join(identity_updates), member_id))
         cur.execute("""INSERT INTO nbki_loan_manual_fields
             (loan_id,org_id,deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
