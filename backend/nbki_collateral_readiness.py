@@ -12,7 +12,9 @@ def collateral_readiness(cur, org_id: int) -> dict:
     cur.execute("""SELECT l.id,l.contract_no,l.status,lc.id,lc.collateral_type,
         lc.pledger_name,lc.description,lc.collateral_value,lc.identifier,
         lc.nbki_guarantee_uid,lc.nbki_guarantee_amount,lc.nbki_guarantee_currency,
-        lc.nbki_guarantee_start,lc.nbki_guarantee_end,lc.nbki_event_source_id
+        lc.nbki_guarantee_start,lc.nbki_guarantee_end,lc.nbki_event_source_id,
+        EXISTS (SELECT 1 FROM nbki_collateral_facts f
+                WHERE f.collateral_id=lc.id AND f.match_status='matched')
         FROM loans l JOIN loan_collateral lc ON lc.loan_id=l.id
         WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,lc.id""", (org_id,))
@@ -21,7 +23,7 @@ def collateral_readiness(cur, org_id: int) -> dict:
     for row in cur.fetchall():
         (loan_id, contract_no, loan_status, collateral_id, kind, pledger,
          description, value, identifier, guarantee_uid, guarantee_amount,
-         guarantee_currency, guarantee_start, guarantee_end, source_id) = row
+         guarantee_currency, guarantee_start, guarantee_end, source_id, has_xml_history) = row
         missing = []
         if kind == 'Поручительство':
             if not guarantee_uid:
@@ -49,7 +51,7 @@ def collateral_readiness(cur, org_id: int) -> dict:
                 missing.append('стоимость предмета залога')
             if not pledger:
                 missing.append('залогодатель')
-        if not source_id:
+        if not source_id and not has_xml_history:
             missing.append('снимок исходных сведений, ранее переданных в БКИ')
         missing.append('снимок сведений до и после изменения для события 2.4')
         kind_report = by_type.setdefault(kind, {'type': kind, 'count': 0,
@@ -62,7 +64,7 @@ def collateral_readiness(cur, org_id: int) -> dict:
         rows.append({'loan_id': loan_id, 'contract_no': contract_no,
             'loan_status': loan_status, 'collateral_id': collateral_id,
             'collateral_type': kind, 'missing_fields': missing,
-            'has_previous_source': bool(source_id)})
+            'has_previous_source': bool(source_id or has_xml_history)})
     cur.execute("""SELECT COUNT(*) FROM loans
         WHERE org_id=%s AND status IN ('active','overdue','holiday')""", (org_id,))
     active_loans = cur.fetchone()[0]

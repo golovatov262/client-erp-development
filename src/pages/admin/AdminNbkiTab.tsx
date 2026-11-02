@@ -484,7 +484,7 @@ const AdminNbkiTab = () => {
             <Button disabled={!xmlFiles.length || importing} onClick={() => void importFiles()}>{importing ? "Сопоставляем…" : "Импортировать и сопоставить"}</Button>
             <span className="text-xs text-muted-foreground">Выбрано: {xmlFiles.length} XML, {receiptFiles.length} квитанций</span>
           </div>
-          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров заемщиков не найдены в CRM, {importResult.guarantors} поручителей. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
+          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено, {importResult.review} требуют проверки, {importResult.not_in_crm} договоров заемщиков не найдены в CRM, {importResult.guarantors} поручителей. Сведения об обеспечении: {importResult.collateral_matched} сопоставлено, {importResult.collateral_review} требуют проверки, {importResult.collateral_not_in_crm} не найдены в CRM; заполнено пустых оценок CRM: {importResult.collateral_crm_values_filled}. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
         </CardContent>
       </Card>
 

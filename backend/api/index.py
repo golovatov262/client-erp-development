@@ -8140,8 +8140,23 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             SELECT id, loan_id, collateral_type, pledger_name, description, collateral_value, identifier,
                    nbki_guarantee_uid, nbki_guarantee_amount, nbki_guarantee_currency,
                    nbki_guarantee_start, nbki_guarantee_end, nbki_event_source_id,
+                   source_facts.facts AS nbki_source_facts,
                    created_at, updated_at
             FROM loan_collateral
+            LEFT JOIN LATERAL (
+                SELECT jsonb_build_object(
+                    'uid', f.uid, 'contract_no', f.contract_no,
+                    'event_order', f.event_order, 'event_time', f.event_time,
+                    'operation_code', f.operation_code, 'property_id', f.property_id,
+                    'collateral_code', f.collateral_code, 'payload', f.payload,
+                    'match_status', f.match_status, 'match_reason', f.match_reason,
+                    'document_number', sf.reg_number, 'document_sha256', sf.xml_sha256
+                ) AS facts
+                FROM nbki_collateral_facts f
+                JOIN nbki_source_files sf ON sf.id=f.source_file_id
+                WHERE f.collateral_id=loan_collateral.id
+                ORDER BY f.event_time DESC NULLS LAST, f.id DESC LIMIT 1
+            ) source_facts ON TRUE
             WHERE loan_id=%s
             ORDER BY id
         """ % loan_id)

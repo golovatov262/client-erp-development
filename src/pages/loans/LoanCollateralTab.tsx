@@ -204,6 +204,20 @@ const LoanCollateralTab = ({ loanId }: Props) => {
                   {item.pledger_name && <div className="font-medium text-sm">{item.pledger_name}</div>}
                   {item.description && <div className="text-xs text-muted-foreground">{item.description}</div>}
                   {item.identifier && <div className="text-xs text-muted-foreground">Идентификатор: {item.identifier}</div>}
+                  {item.nbki_source_facts && (() => {
+                    const source = item.nbki_source_facts;
+                    const facts = source.payload?.collateral || {};
+                    const value = facts.Sum_group_FL_32_35_Group || {};
+                    return <div className="mt-2 space-y-1 rounded border bg-muted/30 px-2 py-1.5 text-xs">
+                      <div className="font-medium">Сведения из XML НБКИ · событие 2.4 №{source.event_order}</div>
+                      <div>Код предмета: {source.collateral_code}; дата события: {source.event_time ? new Date(source.event_time).toLocaleString("ru-RU") : "—"}</div>
+                      <div>Идентификатор в XML: <span className="font-mono">{source.property_id || "—"}</span></div>
+                      <div>Сумма обеспечения: {value.sum || "—"} {value.currency || ""}; дата оценки: {value.assessDate || "—"}; код стоимости: {value.priceCode || "—"}</div>
+                      <div>Фактическая стоимость: {facts.actualCost || "—"}; дата расчёта: {facts.calcDate || "—"}; срок залога: {facts.startDate || "—"} — {facts.collateralEndDate || "—"}</div>
+                      {source.match_reason && <div className="text-amber-700">{source.match_reason}</div>}
+                      <div className="text-muted-foreground">Источник: {source.document_number}; CRM-идентификатор и существующая стоимость сохранены.</div>
+                    </div>;
+                  })()}
                   {item.collateral_type === "Поручительство" && item.nbki_guarantee_uid && <div className="space-y-0.5 rounded border px-2 py-1.5 text-xs">
                     <div>УИД поручительства: <span className="break-all font-mono">{item.nbki_guarantee_uid}</span></div>
                     {item.nbki_guarantee_amount != null && <div>Размер ответственности: {fmt(item.nbki_guarantee_amount)}</div>}

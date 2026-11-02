@@ -55,6 +55,51 @@ def _norm(value: str | None) -> str:
     return re.sub(r"\s+", " ", (value or "").replace("Ё", "Е").replace("ё", "е")).strip().upper()
 
 
+def _xml_value(element: ET.Element) -> object:
+    """Preserve GUTDF presence flags as True and nested groups as dictionaries."""
+    children = list(element)
+    if not children:
+        return (element.text or "").strip() or True
+    result = {}
+    for child in children:
+        value = _xml_value(child)
+        if child.tag in result:
+            previous = result[child.tag]
+            result[child.tag] = previous + [value] if isinstance(previous, list) else [previous, value]
+        else:
+            result[child.tag] = value
+    return result
+
+
+def _collateral_event_items(event: ET.Element, uid: str, number: str,
+                            when: datetime | None) -> list[dict]:
+    if event.tag != "FL_Event_2_4":
+        return []
+    items = []
+    for group in event.findall("./FL_32_35_Group"):
+        collateral = group.find("./FL_32_Collateral")
+        if collateral is None:
+            continue
+        items.append({
+            "order_num": int(event.attrib["orderNum"]),
+            "uid": uid,
+            "contract_no": number,
+            "event_time": when,
+            "operation_code": event.attrib.get("operationCode"),
+            "property_id": _text(group, "propertyId"),
+            "collateral_code": _text(collateral, "code"),
+            "payload": {
+                "asset_kind": _xml_value(group.find("assetKind_1")) if group.find("assetKind_1") is not None else None,
+                "property_id": _text(group, "propertyId"),
+                "collateral": _xml_value(collateral),
+                "warranty": _xml_value(event.find("FL_33_Warranty")) if event.find("FL_33_Warranty") is not None else None,
+                "guarantee": _xml_value(event.find("FL_34_Guarantee")) if event.find("FL_34_Guarantee") is not None else None,
+                "provision_payment": _xml_value(event.find("FL_36_ProvisionPayment")) if event.find("FL_36_ProvisionPayment") is not None else None,
+            },
+        })
+    return items
+
+
 @dataclass
 class Deal:
     uid: str
@@ -95,6 +140,7 @@ def parse_source_xml(raw: bytes) -> dict:
 
     deals: dict[str, Deal] = {}
     events: list[dict] = []
+    collateral_events: list[dict] = []
     event_count = 0
     subjects = list(root.findall("./Data/Subject_FL")) + list(root.findall("./Data/Subject_UL"))
     for subject in subjects:
@@ -129,12 +175,17 @@ def parse_source_xml(raw: bytes) -> dict:
             if not uid or not number:
                 raise ValueError("В событии договора отсутствует УИД или номер")
             deal_block = event.find("FL_18_Deal" if is_fl else "UL_11_Deal")
+            when = _datetime(event.attrib.get("eventDateTime"))
+            if event.tag == "FL_Event_2_4" and deal_block is None:
+                # GUTDF event 2.4 carries the deal UID and security state but
+                # does not repeat the participant role/type block.
+                collateral_events.extend(_collateral_event_items(event, uid, number, when))
+                continue
             role_code = _text(deal_block, "role")
             if role_code not in ('1', '2'):
                 raise ValueError('Неизвестная роль участника сделки в XML')
             role = 'borrower' if role_code == '1' else 'guarantor'
             amount_block = event.find("FL_19_Amount" if is_fl else "UL_12_Amount")
-            when = _datetime(event.attrib.get("eventDateTime"))
             current = Deal(uid, number, "FL" if is_fl else "UL", role, name, inn, birth,
                            _date(_text(uid_block, "openDate")), _amount(_text(amount_block, "sum")),
                            _text(amount_block, "currency"), _text(deal_block, "code"),
@@ -148,6 +199,7 @@ def parse_source_xml(raw: bytes) -> dict:
                     previous.last_event_time = when
             else:
                 deals[uid] = current
+            collateral_events.extend(_collateral_event_items(event, uid, number, when))
     if len(subjects) != int(attrs.get("subjectsCount", -1)) or event_count != int(attrs.get("groupBlocksCount", -1)):
         raise ValueError("Количество субъектов или событий не совпадает с заголовком")
     if len({item["order_num"] for item in events}) != len(events):
@@ -160,7 +212,8 @@ def parse_source_xml(raw: bytes) -> dict:
     return {"reg_number": reg_number, "document_time": _datetime(attrs.get("dateTimeDoc")),
             "schema_version": attrs["schemaVersion"], "subjects_count": len(subjects),
             "events_count": event_count, "xml_sha256": hashlib.sha256(raw).hexdigest(),
-            "xml_gzip": gzip.compress(raw), "deals": deals, "events": events}
+            "xml_gzip": gzip.compress(raw), "deals": deals, "events": events,
+            "collateral_events": collateral_events}
 
 
 def parse_receipt_zip(payload: bytes | Path) -> dict:
@@ -227,6 +280,86 @@ def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | No
     return loan_id, "matched", None
 
 
+def _sync_collateral_events(cur, org_id: int, file_id: int, source: dict,
+                            deal_statuses: dict[str, str]) -> Counter:
+    counts: Counter = Counter()
+    for item in source.get("collateral_events", []):
+        loan_id = None
+        collateral_id = None
+        match_status = "not_in_crm"
+        match_reason = "Договор не сопоставлен с CRM"
+        cur.execute("""SELECT l.id,
+            (EXISTS (SELECT 1 FROM nbki_deals d WHERE d.org_id=l.org_id
+                     AND d.uid=%s AND d.contract_no=l.contract_no)
+             OR EXISTS (SELECT 1 FROM nbki_event_deals d WHERE d.org_id=l.org_id
+                        AND d.uid=%s AND d.contract_no=l.contract_no)) AS uid_confirmed
+            FROM loans l WHERE l.org_id=%s AND l.contract_no=%s""",
+            (item["uid"], item["uid"], org_id, item["contract_no"]))
+        loans = cur.fetchall()
+        if len(loans) == 1 and (deal_statuses.get(item["uid"]) == "matched" or loans[0][1]):
+            loan_id = loans[0][0]
+            cur.execute("""SELECT id,identifier,collateral_type FROM loan_collateral
+                           WHERE loan_id=%s ORDER BY id""", (loan_id,))
+            collateral_rows = cur.fetchall()
+            exact = [row for row in collateral_rows
+                     if item["property_id"] and row[1] == item["property_id"]]
+            if len(exact) == 1:
+                collateral_id = exact[0][0]
+                match_status = "matched"
+                match_reason = None
+            else:
+                family = ("Залог недвижимого имущества" if (item.get("collateral_code") or "").startswith("1.")
+                          else "Залог движимого имущества" if (item.get("collateral_code") or "").startswith("2.")
+                          else None)
+                family_rows = [row for row in collateral_rows if family and row[2] == family]
+                if len(family_rows) == 1:
+                    collateral_id = family_rows[0][0]
+                    if item["property_id"] and family_rows[0][1] and family_rows[0][1] != item["property_id"]:
+                        match_status = "review"
+                        match_reason = "Связано по договору и единственной записи этого вида; идентификатор источника отличается от CRM и сохранен отдельно"
+                    else:
+                        match_status = "matched"
+                        match_reason = "Связано по договору и единственной записи этого вида залога"
+                else:
+                    match_status = "review"
+                    match_reason = "Не удалось однозначно сопоставить предмет залога в карточке CRM"
+        else:
+            match_status = "review" if loans else "not_in_crm"
+            if not loans:
+                match_reason = "Договор отсутствует в CRM"
+            elif len(loans) > 1:
+                match_reason = "Номер договора неоднозначен в CRM"
+            else:
+                match_reason = "УИД события не подтверждён среди ранее сопоставленных договоров CRM"
+
+        cur.execute("""INSERT INTO nbki_collateral_facts
+            (source_file_id,org_id,loan_id,collateral_id,uid,contract_no,event_order,
+             event_time,operation_code,property_id,collateral_code,payload,match_status,match_reason)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (source_file_id,event_order,property_id,collateral_code) DO UPDATE SET
+             loan_id=EXCLUDED.loan_id,collateral_id=EXCLUDED.collateral_id,
+             payload=EXCLUDED.payload,match_status=EXCLUDED.match_status,
+             match_reason=EXCLUDED.match_reason""",
+            (file_id, org_id, loan_id, collateral_id, item["uid"], item["contract_no"],
+             item["order_num"], item["event_time"], item["operation_code"],
+             item["property_id"], item["collateral_code"], json.dumps(item["payload"], ensure_ascii=False),
+             match_status, match_reason))
+        counts[match_status] += 1
+
+        # The XML's actual-cost valuation fills only an empty CRM value, and only
+        # after the property identifier matched exactly. Existing CRM values stay authoritative.
+        if collateral_id and match_status == "matched" and item["property_id"]:
+            collateral_data = item["payload"].get("collateral", {})
+            actual_cost = collateral_data.get("actualCost") if isinstance(collateral_data, dict) else None
+            if actual_cost not in (None, True, ""):
+                cur.execute("""UPDATE loan_collateral SET collateral_value=%s,updated_at=NOW()
+                               WHERE id=%s AND loan_id=%s AND identifier=%s AND collateral_value IS NULL""",
+                            (actual_cost, collateral_id, loan_id, item["property_id"]))
+                if cur.rowcount:
+                    counts["crm_values_filled"] += cur.rowcount
+    return counts
+
+
 def resolve_source_org_id(cur) -> int:
     """Resolve the source to its sole organization with loans if INN is duplicated."""
     cur.execute("""SELECT o.id, COUNT(l.id) AS loan_count
@@ -265,6 +398,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
             seen_number[deal.contract_no] = uid
 
     statuses: dict[str, str] = {}
+    collateral_totals: Counter = Counter()
     with conn.cursor() as cur:
         org_id = resolve_source_org_id(cur)
         for source in files:
@@ -342,19 +476,31 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                     VALUES(%s,%s,%s,%s) ON CONFLICT(source_file_id, deal_id) DO NOTHING""",
                             (file_id, deal_id, deal.event_count, deal.last_event_time))
             for event in source["events"]:
+                event_deal_id = deal_ids.get(event["uid"])
+                if event_deal_id is None and event["uid"]:
+                    cur.execute("SELECT id FROM nbki_deals WHERE org_id=%s AND uid=%s",
+                                (org_id, event["uid"]))
+                    previous_deal = cur.fetchone()
+                    event_deal_id = previous_deal[0] if previous_deal else None
                 cur.execute("""INSERT INTO nbki_file_events
                     (source_file_id, order_num, deal_id, event_name, event_time,
                      operation_code, reported_accepted)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (source_file_id, order_num) DO UPDATE SET
                         reported_accepted=nbki_file_events.reported_accepted OR EXCLUDED.reported_accepted""",
-                    (file_id, event["order_num"], deal_ids.get(event["uid"]),
+                    (file_id, event["order_num"], event_deal_id,
                      event["event_name"], event["event_time"], event["operation_code"],
-                     bool(receipt and receipt["kind"] == 2 and receipt["status"] == "accepted")))
+                    bool(receipt and receipt["kind"] == 2 and receipt["status"] == "accepted")))
+            collateral_totals.update(_sync_collateral_events(cur, org_id, file_id, source, statuses))
     counts = Counter(statuses.values())
     return {"files": len(files), "unique_deals": len(seen_uid),
             "matched": counts["matched"], "review": counts["review"],
             "not_in_crm": counts["not_in_crm"], "guarantors": counts["guarantor"],
+            "collateral_events": sum(collateral_totals.values()),
+            "collateral_matched": collateral_totals["matched"],
+            "collateral_review": collateral_totals["review"],
+            "collateral_not_in_crm": collateral_totals["not_in_crm"],
+            "collateral_crm_values_filled": collateral_totals["crm_values_filled"],
             "reported_accepted_deals": len({uid for f in files if receipts.get(f["reg_number"], {}).get("kind") == 2
                                             and receipts[f["reg_number"]]["status"] == "accepted"
                                             for uid in f["deals"]})}

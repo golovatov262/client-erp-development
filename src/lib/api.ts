@@ -93,6 +93,11 @@ export type NbkiImportResult = {
   not_in_crm: number;
   guarantors: number;
   reported_accepted_deals: number;
+  collateral_events: number;
+  collateral_matched: number;
+  collateral_review: number;
+  collateral_not_in_crm: number;
+  collateral_crm_values_filled: number;
 };
 
 export type NbkiDraft = {
@@ -1185,6 +1190,20 @@ export interface LoanCollateral {
   nbki_guarantee_start?: string | null;
   nbki_guarantee_end?: string | null;
   nbki_event_source_id?: number | null;
+  nbki_source_facts?: {
+    uid: string;
+    contract_no: string;
+    event_order: number;
+    event_time: string | null;
+    operation_code: string | null;
+    property_id: string | null;
+    collateral_code: string;
+    payload: Record<string, any>;
+    match_status: string;
+    match_reason: string | null;
+    document_number: string;
+    document_sha256: string;
+  } | null;
   created_at?: string;
   updated_at?: string;
 }
