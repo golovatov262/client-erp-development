@@ -243,7 +243,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
             <TabsTrigger value="schedule">График</TabsTrigger>
             <TabsTrigger value="payments">Платежи</TabsTrigger>
             <TabsTrigger value="collateral">Обеспечение</TabsTrigger>
-            {(isAdmin || isManager) && <TabsTrigger value="nbki">НБКИ / 1С</TabsTrigger>}
+            {(isAdmin || isManager) && <TabsTrigger value="nbki">БКИ</TabsTrigger>}
             {(isAdmin || isManager) && <TabsTrigger value="docs">Справки</TabsTrigger>}
           </TabsList>
 
@@ -260,7 +260,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           </TabsContent>
 
           {(isAdmin || isManager) && <TabsContent value="nbki" className="space-y-3">
-            <p className="text-sm text-muted-foreground">Показатели последнего сопоставленного события 1С. Данные хранятся отдельно от учётного остатка, графика и платежей CRM. Приём НБКИ без проверенной квитанции не подтверждён.</p>
+            <p className="text-sm text-muted-foreground">Реквизиты бюро кредитных историй хранятся отдельно по каждому бюро. Персональные сведения заёмщика подставляются из карточки пайщика, условия и события — из договора, платежей и графика CRM. Исторические сведения источников показываются отдельно; приём файла подтверждается квитанцией конкретного бюро.</p>
             <NbkiContractFields loanId={detail.id} />
             {detail.nbki_1c_facts ? <>
               <div className="rounded-md border p-3 text-sm">

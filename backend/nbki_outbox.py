@@ -144,7 +144,8 @@ def source_readiness(snapshot: dict, issues: list[str], changes: dict | None = N
                            ('passport_series', 'Серия паспорта'),
                            ('passport_number', 'Номер паспорта'),
                            ('passport_issue_date', 'Дата выдачи паспорта'),
-                           ('passport_issued_by', 'Кем выдан паспорт')):
+                           ('passport_issued_by', 'Кем выдан паспорт'),
+                           ('passport_dept_code', 'Код подразделения паспорта')):
             if not member.get(key):
                 missing.append(label)
     if not member.get('inn'):
@@ -226,7 +227,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         l.end_date,l.balance,l.status,l.updated_at,l.holiday_start,
         l.holiday_end,l.holiday_months,m.id,m.member_type,m.last_name,
         m.first_name,m.middle_name,m.company_name,m.birth_date,m.birth_place,
-        m.passport_series,m.passport_number,m.passport_issue_date,m.passport_issued_by,
+        m.passport_series,m.passport_number,m.passport_issue_date,m.passport_issued_by,m.passport_dept_code,
         m.registration_address,m.inn,m.updated_at
         FROM loans l JOIN members m ON m.id=l.member_id
         WHERE l.id=%s AND l.org_id=%s""", (loan_id, org_id))
@@ -239,7 +240,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'holiday_months','member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
-            'registration_address','inn','member_updated_at')
+            'passport_dept_code','registration_address','inn','member_updated_at')
     data = dict(zip(keys, row))
     cur.execute("""SELECT uid,match_status,subject_name FROM nbki_deals
         WHERE org_id=%s AND deal_role='borrower'
@@ -290,6 +291,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
                              ('passport_series','серия паспорта'),('passport_number','номер паспорта'),
                              ('passport_issue_date','дата выдачи паспорта'),
                              ('passport_issued_by','кем выдан паспорт'),
+                             ('passport_dept_code','код подразделения паспорта'),
                              ('registration_address','адрес регистрации')):
             if not data[field]:
                 issues.append('Отсутствует ' + label)
@@ -312,7 +314,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         'member': {key: data[key] for key in ('member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
-            'registration_address','inn','member_updated_at')},
+            'passport_dept_code','registration_address','inn','member_updated_at')},
         'uid': next(iter(matched_uids)) if len(matched_uids) == 1 else None,
         'uid_sources': {'xml': [list(x) for x in xml_matches],
                         'mxl': [list(x) for x in mxl_matches]},

@@ -8693,7 +8693,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki', 'bureau_fields'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -10041,6 +10041,47 @@ def handle_nbki(method, params, body, staff, cur, conn):
     return {'error': 'Неизвестное действие'}
 
 
+def handle_bureau_fields(method, params, body, staff, cur, conn, ip=''):
+    """Store codes in a bureau-specific namespace; personal data stays in members."""
+    if staff.get('role') not in ('admin', 'manager'):
+        return {'_status': 403, 'error': 'Недостаточно прав'}
+    bureau = (params.get('bureau_code') or body.get('bureau_code') or 'NBKI').upper()
+    if bureau not in ('NBKI', 'OKB'):
+        return {'_status': 400, 'error': 'Неизвестное бюро'}
+    loan_id = params.get('loan_id') or body.get('loan_id')
+    if not loan_id:
+        return {'_status': 400, 'error': 'loan_id обязателен'}
+    try:
+        org_id = resolve_source_org_id(cur)
+    except ValueError as exc:
+        return {'_status': 409, 'error': str(exc)}
+    cur.execute("SELECT id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
+    if not cur.fetchone():
+        return {'_status': 404, 'error': 'Договор не найден'}
+    if method == 'GET':
+        cur.execute("""SELECT deal_code,kind_code,purpose_code,payment_size_code,
+            payment_schedule_code,note,updated_at FROM bureau_loan_fields
+            WHERE loan_id=%s AND org_id=%s AND bureau_code=%s""", (loan_id,org_id,bureau))
+        row = cur.fetchone()
+        if not row: return {'bureau_code': bureau}
+        keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note','updated_at')
+        return {'bureau_code': bureau, **dict(zip(keys, (serialize(value) for value in row)))}
+    if method != 'PUT':
+        return {'_status': 405, 'error': 'Неверный метод'}
+    keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note')
+    values = [body.get(key) or None for key in keys]
+    cur.execute("""INSERT INTO bureau_loan_fields
+        (loan_id,org_id,bureau_code,deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+        ON CONFLICT (loan_id,bureau_code) DO UPDATE SET org_id=EXCLUDED.org_id,
+        deal_code=EXCLUDED.deal_code,kind_code=EXCLUDED.kind_code,purpose_code=EXCLUDED.purpose_code,
+        payment_size_code=EXCLUDED.payment_size_code,payment_schedule_code=EXCLUDED.payment_schedule_code,
+        note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,bureau,*values))
+    audit_log(cur, staff, 'update', 'bureau_loan_fields', loan_id, bureau, '', ip)
+    conn.commit()
+    return {'success': True, 'bureau_code': bureau}
+
+
 def handler(event, context):
     """API ERP: пайщики, займы, сбережения, паи, ЛК, авторизация, банк v4"""
     if event.get('httpMethod') == 'OPTIONS':
@@ -10128,6 +10169,8 @@ def handler(event, context):
             result = handle_integration_secrets(method, body, staff, cur, conn)
         elif entity == 'nbki':
             result = handle_nbki(method, params, body, staff, cur, conn)
+        elif entity == 'bureau_fields':
+            result = handle_bureau_fields(method, params, body, staff, cur, conn, src_ip)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         elif entity == 'agents':

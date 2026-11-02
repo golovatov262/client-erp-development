@@ -22,7 +22,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
     cur.execute("""SELECT e.loan_id,e.source_id,e.event_occurred_at,
         e.evidence_sha256,l.contract_no,l.amount,l.balance,l.status,
         l.rate,l.start_date,l.end_date,l.schedule_type,
-        m.id,m.last_name,m.first_name,m.middle_name,m.birth_date,m.inn,
+        m.id,m.last_name,m.first_name,m.middle_name,m.birth_date,m.birth_place,m.inn,
         m.passport_series,m.passport_number,m.passport_issue_date,
         m.passport_issued_by,m.passport_dept_code,m.registration_address,
         o.inn,o.ogrn,o.name,o.short_name
@@ -36,7 +36,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         raise ValueError('Событие платежа CRM не найдено')
     (loan_id,payment_id,occurred_at,digest,contract_no,original,balance,status,
      rate,start_date,end_date,schedule_type,member_id,last_name,first_name,
-     middle_name,birth_date,member_inn,passport_series,passport_number,
+     middle_name,birth_date,birth_place,member_inn,passport_series,passport_number,
      passport_issue_date,passport_issued_by,passport_dept_code,
      registration_address,org_inn,org_ogrn,org_name,org_short_name) = row
     if status not in ('active','overdue','holiday'):
@@ -111,6 +111,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         'subject': {'member_id': member_id, 'last_name': last_name,
                     'first_name': first_name, 'middle_name': middle_name,
                     'birth_date': birth_date.isoformat() if birth_date else None,
+                    'birth_place': birth_place,
                     'inn': member_inn, 'passport_series': passport_series,
                     'passport_number': passport_number,
                     'passport_issue_date': passport_issue_date.isoformat() if passport_issue_date else None,

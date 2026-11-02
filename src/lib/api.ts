@@ -580,9 +580,9 @@ export const api = {
     remove: (loanId: number, id: number) =>
       request<{ success: boolean }>("DELETE", { entity: "loan_collateral", loan_id: loanId, id }),
   },
-  nbkiManualFields: {
-    get: (loanId: number) => request<Record<string, string | null>>("GET", { entity: "nbki", action: "manual_contract_fields", loan_id: loanId }),
-    save: (loanId: number, data: Record<string, string>) => request<{ success: boolean }>("PUT", { entity: "nbki", action: "manual_contract_fields" }, { entity: "nbki", action: "manual_contract_fields", loan_id: loanId, ...data }),
+  bureauFields: {
+    get: (loanId: number, bureauCode: "NBKI" | "OKB") => request<Record<string, string | null>>("GET", { entity: "bureau_fields", loan_id: loanId, bureau_code: bureauCode }),
+    save: (loanId: number, bureauCode: "NBKI" | "OKB", data: Record<string, string>) => request<{ success: boolean }>("PUT", { entity: "bureau_fields" }, { entity: "bureau_fields", loan_id: loanId, bureau_code: bureauCode, ...data }),
   },
 
   savings: {

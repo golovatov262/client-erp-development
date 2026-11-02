@@ -196,7 +196,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
               </div>
             </div>
             <div className="rounded-md border p-3 space-y-2">
-              <div><div className="text-sm font-medium">Реквизиты обеспечения для НБКИ</div><div className="text-xs text-muted-foreground">Отдельные поля; не меняют стоимость и данные, ранее импортированные из XML.</div></div>
+              <div><div className="text-sm font-medium">Реквизиты обеспечения для файла БКИ</div><div className="text-xs text-muted-foreground">Поля текущего этапа НБКИ; отделены от CRM-стоимости и ранее импортированных фактов. Схему для ОКБ настроим отдельно.</div></div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{NBKI_FIELDS.filter(([key]) => collateralType === "Поручительство" ? key.startsWith("nbki_guarantee") : !key.startsWith("nbki_guarantee")).map(([key, label, kind]) => <div key={key} className="space-y-1"><Label className="text-xs">{label}</Label><Input type={kind || "text"} value={nbki[key] || ""} onChange={e => setNbki(prev => ({ ...prev, [key]: e.target.value }))} /></div>)}</div>
             </div>
             <div className="flex gap-2 justify-end">
