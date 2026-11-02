@@ -28,7 +28,7 @@ def _read_rows(cur, org_id: int, status: str, source: str) -> list[tuple]:
             FROM nbki_deals d
             LEFT JOIN loans l ON l.org_id=d.org_id AND l.contract_no=d.contract_no
             LEFT JOIN members m ON m.id=l.member_id
-            WHERE d.org_id=%s AND d.match_status=%s ORDER BY d.contract_no,d.uid""",
+            WHERE d.org_id=%s AND d.match_status=%s AND (l.id IS NULL OR l.bki_enabled IS TRUE) ORDER BY d.contract_no,d.uid""",
             (org_id, status))
     else:
         cur.execute("""SELECT d.contract_no,d.uid,d.subject_name,d.deal_date,
@@ -39,6 +39,7 @@ def _read_rows(cur, org_id: int, status: str, source: str) -> list[tuple]:
             LEFT JOIN loans l ON l.org_id=d.org_id AND l.contract_no=d.contract_no
             LEFT JOIN members m ON m.id=l.member_id
             WHERE d.org_id=%s AND d.match_status=%s AND d.role='borrower'
+              AND (l.id IS NULL OR l.bki_enabled IS TRUE)
             ORDER BY d.contract_no,d.uid""", (org_id, status))
     result = []
     for row in cur.fetchall():
@@ -101,7 +102,7 @@ def make_missing_uid_xlsx(cur, org_id: int) -> bytes:
             FROM nbki_event_deals d WHERE d.org_id=l.org_id AND d.contract_no=l.contract_no
             AND d.role='borrower'),'') AS mxl_candidates
         FROM loans l JOIN members m ON m.id=l.member_id
-        WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE l.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         AND NOT EXISTS (SELECT 1 FROM nbki_deals d
             WHERE d.loan_id=l.id AND d.match_status='matched')
         AND NOT EXISTS (SELECT 1 FROM nbki_event_deals d

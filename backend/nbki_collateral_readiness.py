@@ -20,7 +20,7 @@ def collateral_readiness(cur, org_id: int) -> dict:
             WHERE f.collateral_id=lc.id AND f.match_status='matched'
             ORDER BY f.event_time DESC NULLS LAST,f.id DESC LIMIT 1
         ) source_facts ON TRUE
-        WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE l.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,lc.id""", (org_id,))
     rows = []
     by_type: dict[str, dict] = {}
@@ -78,7 +78,7 @@ def collateral_readiness(cur, org_id: int) -> dict:
             'collateral_type': kind, 'missing_fields': missing,
             'has_previous_source': bool(source_id or has_xml_history)})
     cur.execute("""SELECT COUNT(*) FROM loans
-        WHERE org_id=%s AND status IN ('active','overdue','holiday')""", (org_id,))
+        WHERE org_id=%s AND bki_enabled IS TRUE AND status IN ('active','overdue','holiday')""", (org_id,))
     active_loans = cur.fetchone()[0]
     return {'active_loans': active_loans, 'collateral_records': len(rows),
             'ready_for_event24': 0, 'event24_status': 'not_implemented_pending_field_mapping',

@@ -561,6 +561,7 @@ export const api = {
         entity: "loans", action: "schedule", amount, rate, term, schedule_type: scheduleType, start_date: startDate,
       }),
     create: (data: CreateLoanData) => request<{ id: number; schedule: ScheduleItem[]; monthly_payment: number }>("POST", undefined, { entity: "loans", action: "create", ...data }),
+    setBkiEnabled: (loanId: number, enabled: boolean) => request<{ success: boolean; enabled: boolean }>("POST", undefined, { entity: "loans", action: "set_bki_enabled", loan_id: loanId, enabled }),
     payment: (data: { loan_id: number; payment_date: string; amount: number; event_time_msk?: string; overpay_strategy?: string; forced_distribution?: { principal: number; interest: number; penalty: number } }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string; event_time_msk?: string; full_repayment?: boolean; expected_preview?: EarlyRepaymentPreview }) =>
@@ -1121,6 +1122,7 @@ export interface Loan {
   monthly_payment: number;
   balance: number;
   status: string;
+  bki_enabled?: boolean;
   org_id?: number;
   org_name?: string;
   org_short_name?: string;

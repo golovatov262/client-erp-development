@@ -114,7 +114,7 @@ def reconciliation_report(cur, org_id: int) -> dict:
     cur.execute("""SELECT f.loan_id,l.contract_no,f.uid,f.event_time,f.source_id,f.source_row_num,
         f.indicators,l.end_date
         FROM nbki_1c_loan_facts f JOIN loans l ON l.id=f.loan_id
-        WHERE f.org_id=%s AND l.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE f.org_id=%s AND l.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,l.id""", (org_id, org_id))
     facts = cur.fetchall()
     rows = []

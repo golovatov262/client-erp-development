@@ -977,6 +977,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type,
                        l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
                        l.org_id, l.holiday_start, l.holiday_months, l.holiday_end,
+                       l.bki_enabled,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                             ELSE m.company_name END as member_name, m.id as member_id,
                        o.name as org_name, o.short_name as org_short_name,
@@ -1000,6 +1001,28 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
     elif method == 'POST':
         action = body.get('action', 'create')
+        if action == 'set_bki_enabled':
+            if not staff or staff.get('role') not in ('admin', 'manager'):
+                return {'error': 'Недостаточно прав', '_status': 403}
+            loan_id = body.get('loan_id')
+            enabled = body.get('enabled')
+            if not loan_id or not isinstance(enabled, bool):
+                return {'error': 'Укажите договор и состояние переключателя БКИ', '_status': 400}
+            try:
+                org_id = resolve_source_org_id(cur)
+            except ValueError as exc:
+                return {'error': str(exc), '_status': 409}
+            cur.execute("""UPDATE loans SET bki_enabled=%s,updated_at=NOW()
+                WHERE id=%s AND org_id=%s RETURNING contract_no""", (enabled,loan_id,org_id))
+            row = cur.fetchone()
+            if not row:
+                return {'error': 'Договор не найден', '_status': 404}
+            if not enabled:
+                cur.execute("UPDATE nbki_outbox_drafts SET status='excluded' WHERE loan_id=%s AND org_id=%s AND status<>'excluded'", (loan_id,org_id))
+            audit_log(cur, staff, 'update', 'loan_bki_participation', loan_id,
+                      row[0], 'Участие в выгрузках БКИ: %s' % ('включено' if enabled else 'отключено'), ip)
+            conn.commit()
+            return {'success': True, 'enabled': enabled}
         removed_actions = {
             'modify', 'update_loan', 'delete_payment',
             'delete_contract', 'delete_all_payments', 'reapply_payments',

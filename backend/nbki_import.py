@@ -251,7 +251,7 @@ def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | No
     cur.execute("""SELECT l.id, l.amount, l.start_date, m.member_type, m.inn,
                           m.birth_date, m.last_name, m.first_name, m.middle_name, m.company_name
                    FROM loans l JOIN members m ON m.id=l.member_id
-                   WHERE l.org_id=%s AND l.contract_no=%s""", (org_id, deal.contract_no))
+                   WHERE l.org_id=%s AND l.contract_no=%s AND l.bki_enabled IS TRUE""", (org_id, deal.contract_no))
     rows = cur.fetchall()
     if not rows:
         return None, "not_in_crm", "Номер договора отсутствует в CRM"
@@ -293,7 +293,7 @@ def _sync_collateral_events(cur, org_id: int, file_id: int, source: dict,
                      AND d.uid=%s AND d.contract_no=l.contract_no)
              OR EXISTS (SELECT 1 FROM nbki_event_deals d WHERE d.org_id=l.org_id
                         AND d.uid=%s AND d.contract_no=l.contract_no)) AS uid_confirmed
-            FROM loans l WHERE l.org_id=%s AND l.contract_no=%s""",
+            FROM loans l WHERE l.org_id=%s AND l.contract_no=%s AND l.bki_enabled IS TRUE""",
             (item["uid"], item["uid"], org_id, item["contract_no"]))
         loans = cur.fetchall()
         if len(loans) == 1 and (deal_statuses.get(item["uid"]) == "matched" or loans[0][1]):

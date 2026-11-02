@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import Icon from "@/components/ui/icon";
 import DataTable, { Column } from "@/components/ui/data-table";
 import api, { LoanDetail, LoanPayment, ScheduleItem, Organization } from "@/lib/api";
@@ -144,6 +145,24 @@ const LoanPaymentQR = ({ detail, orgs }: { detail: LoanDetail; orgs?: Organizati
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
   const { open, onOpenChange, detail, isAdmin, isManager } = props;
+  const [bkiEnabled, setBkiEnabled] = useState(true);
+  const [bkiToggleSaving, setBkiToggleSaving] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => { setBkiEnabled(detail?.bki_enabled !== false); }, [detail?.id, detail?.bki_enabled]);
+
+  const toggleBkiParticipation = async (enabled: boolean) => {
+    if (!detail) return;
+    setBkiToggleSaving(true);
+    try {
+      await api.loans.setBkiEnabled(detail.id, enabled);
+      setBkiEnabled(enabled);
+      toast({ title: enabled ? "Договор включён в выгрузки БКИ" : "Договор исключён из выгрузок БКИ",
+        description: enabled ? "Новые выгрузки будут учитывать договор." : "Существующие черновики помечены как исключённые." });
+    } catch (e) {
+      toast({ title: "Не удалось изменить участие в БКИ", description: String(e), variant: "destructive" });
+    } finally { setBkiToggleSaving(false); }
+  };
 
   if (!detail) return null;
 
@@ -260,7 +279,11 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           </TabsContent>
 
           {(isAdmin || isManager) && <TabsContent value="nbki" className="space-y-3">
-            <p className="text-sm text-muted-foreground">Реквизиты бюро кредитных историй хранятся отдельно по каждому бюро. Персональные сведения заёмщика подставляются из карточки пайщика, условия и события — из договора, платежей и графика CRM. Исторические сведения источников показываются отдельно; приём файла подтверждается квитанцией конкретного бюро.</p>
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div><div className="text-sm font-medium">Участвует в выгрузках БКИ</div><div className="text-xs text-muted-foreground">При Off договор исключается из очередей, проверок готовности и формирования новых файлов.</div></div>
+              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-muted-foreground">{bkiEnabled ? "On" : "Off"}</span><Switch checked={bkiEnabled} disabled={bkiToggleSaving} onCheckedChange={toggleBkiParticipation} aria-label="Участие договора в выгрузках БКИ" /></div>
+            </div>
+            <p className="text-sm text-muted-foreground">Персональные сведения заёмщика подставляются из карточки пайщика, условия и события — из договора, платежей и графика CRM. Исторические сведения источников показываются отдельно; приём файла подтверждается квитанцией конкретного бюро.</p>
             <NbkiContractFields loanId={detail.id} />
             {detail.nbki_1c_facts ? <>
               <div className="rounded-md border p-3 text-sm">

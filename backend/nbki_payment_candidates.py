@@ -48,7 +48,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         JOIN loan_payments p ON p.loan_id=l.id
         LEFT JOIN nbki_payment_posting_snapshots ps ON ps.payment_id=p.id
         LEFT JOIN loan_psk_calculations pc ON pc.loan_id=l.id AND pc.org_id=l.org_id
-        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE f.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
           AND p.payment_date>f.event_time::date
           AND p.payment_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
@@ -175,7 +175,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         FROM nbki_1c_loan_facts f
         JOIN loans l ON l.id=f.loan_id AND l.org_id=f.org_id
         JOIN loan_schedule s ON s.loan_id=l.id
-        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE f.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
           AND s.payment_date>f.event_time::date
           AND s.payment_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND s.status NOT IN ('holiday','holiday_pending')
@@ -226,7 +226,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         FROM loan_penalty_daily_accruals a
         JOIN loans l ON l.id=a.loan_id
         JOIN nbki_1c_loan_facts f ON f.loan_id=l.id AND f.org_id=l.org_id
-        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE f.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
           AND a.accrual_date>f.event_time::date
           AND a.accrual_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e

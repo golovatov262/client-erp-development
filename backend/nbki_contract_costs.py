@@ -48,7 +48,7 @@ def sync_cost_facts(cur, org_id: int, apply: bool = False) -> dict:
         FROM nbki_1c_loan_facts f JOIN loans l
           ON l.id=f.loan_id AND l.org_id=f.org_id
         JOIN nbki_event_sources s ON s.id=f.source_id AND s.org_id=f.org_id
-        WHERE f.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE f.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
             WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
               AND e.role='borrower' AND e.match_status='matched')

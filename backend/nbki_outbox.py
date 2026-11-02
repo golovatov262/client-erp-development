@@ -228,7 +228,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         l.holiday_end,l.holiday_months,m.id,m.member_type,m.last_name,
         m.first_name,m.middle_name,m.company_name,m.birth_date,m.birth_place,
         m.passport_series,m.passport_number,m.passport_issue_date,m.passport_issued_by,m.passport_dept_code,
-        m.registration_address,m.inn,m.updated_at
+        m.registration_address,m.inn,m.updated_at,l.bki_enabled
         FROM loans l JOIN members m ON m.id=l.member_id
         WHERE l.id=%s AND l.org_id=%s""", (loan_id, org_id))
     row = cur.fetchone()
@@ -240,7 +240,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'holiday_months','member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
-            'passport_dept_code','registration_address','inn','member_updated_at')
+            'passport_dept_code','registration_address','inn','member_updated_at','bki_enabled')
     data = dict(zip(keys, row))
     cur.execute("SELECT loan_uid FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
     manual_uid_row = cur.fetchone()
@@ -282,7 +282,9 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
         schedule, holiday_end=data['holiday_end'],
         holiday_months=data['holiday_months'], term_months=data['term_months'],
         loan_balance=data['balance']))
-    eligible = data['status'] in ('active', 'overdue', 'holiday')
+    eligible = data['status'] in ('active', 'overdue', 'holiday') and data['bki_enabled']
+    if not data['bki_enabled']:
+        issues.append('Участие договора в выгрузках БКИ отключено в CRM')
     if not eligible:
         issues.append('Закрытый договор исключен из исходящей выгрузки')
     if not data['contract_no'] or not data['amount'] or not data['start_date'] or not data['end_date']:
@@ -316,7 +318,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     snapshot = {
         'loan': {key: data[key] for key in ('id','contract_no','amount','rate','term_months',
             'schedule_type','monthly_payment',
-            'start_date','end_date','balance','status','updated_at',
+            'start_date','end_date','balance','status','bki_enabled','updated_at',
             'holiday_start','holiday_end','holiday_months')},
         'member': {key: data[key] for key in ('member_id','member_type','last_name',
             'first_name','middle_name','company_name','birth_date','birth_place',
@@ -344,7 +346,7 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
 
 def readiness_report(cur, org_id: int) -> dict:
     cur.execute("""SELECT id FROM loans WHERE org_id=%s
-        AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
+        AND bki_enabled IS TRUE AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
     loan_ids = [row[0] for row in cur.fetchall()]
     rows = []
     for loan_id in loan_ids:
@@ -366,6 +368,8 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
         ORDER BY created_at DESC,id DESC LIMIT 1""", (org_id, loan_id))
     previous = cur.fetchone()
     result = inspect_loan(cur, org_id, loan_id)
+    if not result['snapshot']['loan']['bki_enabled']:
+        raise ValueError('Договор отключен от выгрузок БКИ в карточке CRM')
     if result['snapshot']['loan']['status'] not in ('active', 'overdue', 'holiday'):
         raise ValueError('Закрытый договор исключен из исходящей выгрузки НБКИ')
     encoded = json.dumps(result['snapshot'], default=_json_default,
@@ -405,7 +409,7 @@ def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:
 
 def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
     cur.execute("""SELECT id FROM loans WHERE org_id=%s
-        AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
+        AND bki_enabled IS TRUE AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
     loan_ids = [row[0] for row in cur.fetchall()]
     if len(loan_ids) > 500:
         raise ValueError('Для пакетного черновика выберите не более 500 займов')
@@ -425,12 +429,12 @@ def create_all_drafts(cur, org_id: int, user_id: int | None) -> dict:
 def list_change_candidates(cur, org_id: int) -> dict:
     cur.execute("""SELECT COUNT(*) FROM nbki_change_candidates c
         JOIN loans l ON l.id=c.loan_id WHERE c.org_id=%s
-        AND l.status IN ('active','overdue','holiday')""", (org_id,))
+        AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')""", (org_id,))
     total = cur.fetchone()[0]
     cur.execute("""SELECT c.id,c.loan_id,l.contract_no,c.uid,c.change_summary,
         c.status,c.created_at,c.from_draft_id,c.to_draft_id
         FROM nbki_change_candidates c JOIN loans l ON l.id=c.loan_id
-        WHERE c.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE c.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         ORDER BY c.created_at DESC,c.id DESC LIMIT 100""", (org_id,))
     keys = ('id','loan_id','contract_no','uid','change_summary','status',
             'created_at','from_draft_id','to_draft_id')
@@ -440,7 +444,7 @@ def list_change_candidates(cur, org_id: int) -> dict:
 
 def list_drafts(cur, org_id: int) -> list[dict]:
     cur.execute("""SELECT d.id,d.loan_id,l.contract_no,d.snapshot_sha256,
-        d.checks,CASE WHEN l.status='closed' THEN 'excluded' ELSE d.status END,
+        d.checks,CASE WHEN l.status='closed' OR l.bki_enabled IS NOT TRUE THEN 'excluded' ELSE d.status END,
         d.created_at FROM nbki_outbox_drafts d
         JOIN loans l ON l.id=d.loan_id WHERE d.org_id=%s
         ORDER BY d.created_at DESC,d.id DESC LIMIT 100""", (org_id,))

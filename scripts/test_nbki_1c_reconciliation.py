@@ -134,6 +134,8 @@ class ReconciliationTests(unittest.TestCase):
                          'cross_checked')]
 
             def fetchone(self):
+                if 'FROM nbki_loan_terms_versions' in self.query:
+                    return None
                 if 'SUM(penalty_amount)' in self.query:
                     return (Decimal('0'), date(2032, 4, 30))
                 return (0,)
@@ -169,7 +171,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertIn('подписанным договором', next(block['note'] for block in
                       result['rows'][0]['event23_readiness']['blocks']
                       if block['name'] == 'FL_22_TotalCost'))
-        self.assertEqual(result['rows'][0]['missing_fields'], ['Код события'])
+        self.assertIn('Код события', result['rows'][0]['missing_fields'])
         self.assertEqual(result['rows'][0]['accounting_snapshot']['status'], 'checked')
         self.assertEqual(result['rows'][0]['accounting_snapshot']['cumulative_crm_payments']['amount'], '28888.97')
         self.assertEqual(result['rows'][0]['allocation_audit']['status'], 'checked')

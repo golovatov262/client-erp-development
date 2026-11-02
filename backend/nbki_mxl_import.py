@@ -125,7 +125,7 @@ def _match_borrower(cur, org_id: int, deal: dict) -> tuple[int | None, str, str 
     cur.execute("""SELECT l.id, l.amount, l.start_date, m.member_type,
                           m.last_name, m.first_name, m.middle_name, m.company_name
                    FROM loans l JOIN members m ON m.id=l.member_id
-                   WHERE l.org_id=%s AND l.contract_no=%s""", (org_id, deal['contract_no']))
+                   WHERE l.org_id=%s AND l.contract_no=%s AND l.bki_enabled IS TRUE""", (org_id, deal['contract_no']))
     matches = cur.fetchall()
     if not matches:
         return None, 'not_in_crm', 'Номер договора отсутствует в CRM'

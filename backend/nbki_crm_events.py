@@ -15,7 +15,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
         raise ValueError('Недопустимый размер страницы событий')
     cur.execute("""SELECT COUNT(*) FROM nbki_crm_events e
         JOIN loans l ON l.id=e.loan_id
-        WHERE e.org_id=%s AND l.status IN ('active','overdue','holiday')""", (org_id,))
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')""", (org_id,))
     total = cur.fetchone()[0]
     cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_type,e.source_id,
         e.event_kind,e.event_occurred_at,e.recorded_at,e.status,e.evidence_sha256,
@@ -26,7 +26,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
            AND d.role='borrower' AND d.match_status='matched') AS uids
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         LEFT JOIN loan_payments p ON e.source_type='loan_payment' AND p.id=e.source_id
-        WHERE e.org_id=%s AND l.status IN ('active','overdue','holiday')
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         ORDER BY e.recorded_at DESC,e.id DESC LIMIT %s""", (org_id, limit))
     rows = []
     for row in cur.fetchall():

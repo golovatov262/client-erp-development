@@ -34,7 +34,7 @@ class NbkiPaymentPostingSnapshotTests(unittest.TestCase):
                 self.calls.append((query, params))
 
             def fetchone(self):
-                return (2,) if len(self.calls) == 1 else (17,)
+                return (2, True) if len(self.calls) == 1 else (17,)
 
         cur = EventCursor()
         event_id = record_payment_event(cur, 2649, 87, None, 'a' * 64)
@@ -42,6 +42,21 @@ class NbkiPaymentPostingSnapshotTests(unittest.TestCase):
         self.assertEqual(cur.calls[0][1], (87,))
         self.assertEqual(cur.calls[1][1], (2, 87, 2649, None, 'a' * 64))
         self.assertIn("'loan_payment'", cur.calls[1][0])
+
+    def test_disabled_loan_does_not_create_bki_event(self):
+        class EventCursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, query, params):
+                self.calls.append((query, params))
+
+            def fetchone(self):
+                return (2, False)
+
+        cur = EventCursor()
+        self.assertIsNone(record_payment_event(cur, 2649, 87, None, 'a' * 64))
+        self.assertEqual(len(cur.calls), 1)
 
 
 if __name__ == '__main__':

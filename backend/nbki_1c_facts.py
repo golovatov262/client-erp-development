@@ -70,12 +70,12 @@ def sync_1c_facts(cur, org_id: int, source_id: int, *, apply: bool = False) -> d
         if status != 'matched' or loan_id is None:
             counts['unmatched'] += 1
             continue
-        cur.execute("""SELECT l.status,e.match_status FROM loans l
+        cur.execute("""SELECT l.status,e.match_status,l.bki_enabled FROM loans l
             JOIN nbki_event_deals e ON e.loan_id=l.id AND e.org_id=l.org_id
                 AND e.uid=%s AND e.role='borrower'
             WHERE l.id=%s AND l.org_id=%s""", (uid, loan_id, org_id))
         current = cur.fetchone()
-        if not current or current[1] != 'matched' or current[0] not in ('active', 'overdue', 'holiday'):
+        if not current or current[1] != 'matched' or current[0] not in ('active', 'overdue', 'holiday') or not current[2]:
             counts['excluded'] += 1
             continue
         cur.execute("""SELECT uid,source_id,source_row_num,event_time,indicators

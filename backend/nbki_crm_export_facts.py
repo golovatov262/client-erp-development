@@ -25,7 +25,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         m.id,m.last_name,m.first_name,m.middle_name,m.birth_date,m.birth_place,m.inn,
         m.passport_series,m.passport_number,m.passport_issue_date,
         m.passport_issued_by,m.passport_dept_code,m.registration_address,
-        o.inn,o.ogrn,o.name,o.short_name
+        o.inn,o.ogrn,o.name,o.short_name,l.bki_enabled
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         JOIN members m ON m.id=l.member_id
         JOIN organizations o ON o.id=l.org_id
@@ -34,11 +34,13 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
     row = cur.fetchone()
     if row is None:
         raise ValueError('Событие платежа CRM не найдено')
+    if not row[-1]:
+        raise ValueError('Договор отключен от выгрузок БКИ в карточке CRM')
     (loan_id,payment_id,occurred_at,digest,contract_no,original,balance,status,
      rate,start_date,end_date,schedule_type,member_id,last_name,first_name,
      middle_name,birth_date,birth_place,member_inn,passport_series,passport_number,
      passport_issue_date,passport_issued_by,passport_dept_code,
-     registration_address,org_inn,org_ogrn,org_name,org_short_name) = row
+     registration_address,org_inn,org_ogrn,org_name,org_short_name,bki_enabled) = row
     if status not in ('active','overdue','holiday'):
         raise ValueError('Закрытый договор исключён из исходящей выгрузки')
     cur.execute("""SELECT DISTINCT uid FROM (
