@@ -47,7 +47,9 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         UNION ALL
         SELECT uid FROM nbki_deals WHERE org_id=%s AND loan_id=%s
             AND deal_role='borrower' AND match_status='matched'
-        ) matched WHERE uid IS NOT NULL""", (org_id, loan_id, org_id, loan_id))
+        UNION ALL
+        SELECT loan_uid AS uid FROM loan_bki_fields WHERE org_id=%s AND loan_id=%s
+        ) matched WHERE uid IS NOT NULL""", (org_id, loan_id, org_id, loan_id, org_id, loan_id))
     uids = [value[0] for value in cur.fetchall()]
     if len(uids) != 1:
         raise ValueError('Для исходящей выгрузки нужен один сопоставленный УИД')

@@ -803,6 +803,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             if not nbki_row:
                 cur.execute("SELECT uid, CASE WHEN reported_accepted THEN 'ticket2_unverified' ELSE 'no_receipt' END FROM nbki_deals WHERE loan_id=%s", (loan['id'],))
                 nbki_row = cur.fetchone()
+            if not nbki_row:
+                cur.execute("SELECT loan_uid, 'manual_entry' FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s AND loan_uid IS NOT NULL", (loan['id'], loan.get('org_id')))
+                nbki_row = cur.fetchone()
             loan['nbki_uid'] = nbki_row[0] if nbki_row else None
             loan['nbki_acceptance_basis'] = nbki_row[1] if nbki_row else None
             cur.execute("""SELECT psk_percent,psk_amount,calculated_on,principal,annual_rate,
@@ -9790,9 +9793,9 @@ def handle_nbki(method, params, body, staff, cur, conn):
         if not loan_row:
             return {'_status': 404, 'error': 'Договор не найден'}
         if method == 'GET':
-            cur.execute("SELECT deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
+            cur.execute("SELECT loan_uid,deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
             row = cur.fetchone()
-            keys = ('deal_code','kind_code','purpose_code','note','updated_at')
+            keys = ('loan_uid','deal_code','kind_code','purpose_code','note','updated_at')
             result = dict(zip(keys, (serialize(value) for value in row))) if row else {}
             return result
         if method != 'PUT':
@@ -10039,22 +10042,31 @@ def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
     if not cur.fetchone():
         return {'_status': 404, 'error': 'Договор не найден'}
     if method == 'GET':
-        cur.execute("""SELECT deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields
+        cur.execute("""SELECT loan_uid,deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields
             WHERE loan_id=%s AND org_id=%s""", (loan_id,org_id))
         row = cur.fetchone()
         if not row: return {}
-        keys = ('deal_code','kind_code','purpose_code','note','updated_at')
+        keys = ('loan_uid','deal_code','kind_code','purpose_code','note','updated_at')
         return dict(zip(keys, (serialize(value) for value in row)))
     if method != 'PUT':
         return {'_status': 405, 'error': 'Неверный метод'}
+    loan_uid = (body.get('loan_uid') or '').strip() or None
+    if loan_uid and len(loan_uid) > 100:
+        return {'_status': 400, 'error': 'УИД займа не должен превышать 100 символов'}
+    if loan_uid:
+        cur.execute("""SELECT uid FROM nbki_deals WHERE org_id=%s AND loan_id=%s AND deal_role='borrower' AND match_status='matched'
+            UNION SELECT uid FROM nbki_event_deals WHERE org_id=%s AND loan_id=%s AND role='borrower' AND match_status='matched'""", (org_id,loan_id,org_id,loan_id))
+        imported_uids = {row[0] for row in cur.fetchall() if row[0]}
+        if imported_uids and imported_uids != {loan_uid}:
+            return {'_status': 409, 'error': 'УИД расходится с импортированным сопоставлением. Сначала проверьте реестр БКИ.'}
     keys = ('deal_code','kind_code','purpose_code','note')
     values = [body.get(key) or None for key in keys]
     cur.execute("""INSERT INTO loan_bki_fields
-        (loan_id,org_id,deal_code,kind_code,purpose_code,note,updated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,NOW())
+        (loan_id,org_id,deal_code,kind_code,purpose_code,note,loan_uid,updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
         ON CONFLICT (loan_id) DO UPDATE SET org_id=EXCLUDED.org_id,
         deal_code=EXCLUDED.deal_code,kind_code=EXCLUDED.kind_code,purpose_code=EXCLUDED.purpose_code,
-        note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,*values))
+        note=EXCLUDED.note,loan_uid=EXCLUDED.loan_uid,updated_at=NOW()""", (loan_id,org_id,*values,loan_uid))
     audit_log(cur, staff, 'update', 'loan_bki_fields', loan_id, '', '', ip)
     conn.commit()
     return {'success': True}

@@ -242,6 +242,9 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
             'passport_dept_code','registration_address','inn','member_updated_at')
     data = dict(zip(keys, row))
+    cur.execute("SELECT loan_uid FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
+    manual_uid_row = cur.fetchone()
+    manual_uid = manual_uid_row[0].strip() if manual_uid_row and manual_uid_row[0] else None
     cur.execute("""SELECT uid,match_status,subject_name FROM nbki_deals
         WHERE org_id=%s AND deal_role='borrower'
         AND (loan_id=%s OR contract_no=%s)""",
@@ -300,6 +303,10 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
     if any(status != 'matched' for _,status,_ in all_matches):
         issues.append('Есть УИД с неподтвержденным сопоставлением')
     matched_uids = {uid for uid,status,_ in all_matches if status == 'matched'}
+    if manual_uid:
+        matched_uids.add(manual_uid)
+    if manual_uid and any(uid != manual_uid for uid in matched_uids):
+        issues.append('Ручной УИД расходится с импортированным сопоставлением')
     if len(matched_uids) != 1:
         issues.append('Нет единственного сопоставленного УИД договора')
     if any(_norm(subject) != _norm(name) for _,status,subject in all_matches if status == 'matched'):
@@ -317,7 +324,8 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'passport_dept_code','registration_address','inn','member_updated_at')},
         'uid': next(iter(matched_uids)) if len(matched_uids) == 1 else None,
         'uid_sources': {'xml': [list(x) for x in xml_matches],
-                        'mxl': [list(x) for x in mxl_matches]},
+                        'mxl': [list(x) for x in mxl_matches],
+                        'manual': manual_uid},
         'payments': payments,
         'schedule': schedule,
         'collateral': collateral,
