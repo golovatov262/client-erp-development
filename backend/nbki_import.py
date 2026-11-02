@@ -496,7 +496,8 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
     return {"files": len(files), "unique_deals": len(seen_uid),
             "matched": counts["matched"], "review": counts["review"],
             "not_in_crm": counts["not_in_crm"], "guarantors": counts["guarantor"],
-            "collateral_events": sum(collateral_totals.values()),
+            "collateral_events": (collateral_totals["matched"] + collateral_totals["review"]
+                                  + collateral_totals["not_in_crm"]),
             "collateral_matched": collateral_totals["matched"],
             "collateral_review": collateral_totals["review"],
             "collateral_not_in_crm": collateral_totals["not_in_crm"],
