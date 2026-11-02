@@ -8140,6 +8140,11 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             SELECT id, loan_id, collateral_type, pledger_name, description, collateral_value, identifier,
                    nbki_guarantee_uid, nbki_guarantee_amount, nbki_guarantee_currency,
                    nbki_guarantee_start, nbki_guarantee_end, nbki_event_source_id,
+                   nbki_collateral_code, nbki_collateral_start, nbki_collateral_end,
+                   nbki_collateral_sum, nbki_collateral_currency, nbki_assess_date,
+                   nbki_price_code, nbki_actual_cost, nbki_calc_date,
+                   nbki_actual_price_code, nbki_contract_total_sum, nbki_contract_count,
+                   nbki_location,
                    source_facts.facts AS nbki_source_facts,
                    created_at, updated_at
             FROM loan_collateral
@@ -8170,10 +8175,26 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
         val = safe_float(body['collateral_value'], 'сумма залога') if body.get('collateral_value') not in (None, '') else None
         val_sql = str(val) if val is not None else 'NULL'
         ident = "'%s'" % esc(body.get('identifier')) if body.get('identifier') else 'NULL'
+        # NBKI manual fields are independent of CRM valuation and imported XML facts.
+        def text_sql(key): return "'%s'" % esc(body[key]) if body.get(key) not in (None, '') else 'NULL'
+        def number_sql(key): return str(safe_float(body[key], key)) if body.get(key) not in (None, '') else 'NULL'
+        def date_sql(key): return "'%s'::date" % esc(body[key]) if body.get(key) not in (None, '') else 'NULL'
+        nbki_columns = ('nbki_guarantee_uid, nbki_guarantee_amount, nbki_guarantee_currency, nbki_guarantee_start, nbki_guarantee_end, '
+            'nbki_collateral_code, nbki_collateral_start, nbki_collateral_end, nbki_collateral_sum, nbki_collateral_currency, '
+            'nbki_assess_date, nbki_price_code, nbki_actual_cost, nbki_calc_date, nbki_actual_price_code, '
+            'nbki_contract_total_sum, nbki_contract_count, nbki_location')
+        nbki_values = ', '.join((
+            text_sql('nbki_guarantee_uid'), number_sql('nbki_guarantee_amount'), text_sql('nbki_guarantee_currency'),
+            date_sql('nbki_guarantee_start'), date_sql('nbki_guarantee_end'), text_sql('nbki_collateral_code'),
+            date_sql('nbki_collateral_start'), date_sql('nbki_collateral_end'), number_sql('nbki_collateral_sum'),
+            text_sql('nbki_collateral_currency'), date_sql('nbki_assess_date'), text_sql('nbki_price_code'),
+            number_sql('nbki_actual_cost'), date_sql('nbki_calc_date'), text_sql('nbki_actual_price_code'),
+            number_sql('nbki_contract_total_sum'), str(int(body['nbki_contract_count'])) if body.get('nbki_contract_count') not in (None, '') else 'NULL',
+            text_sql('nbki_location')))
         cur.execute("""
-            INSERT INTO loan_collateral (loan_id, collateral_type, pledger_name, description, collateral_value, identifier)
-            VALUES (%s, '%s', %s, %s, %s, %s) RETURNING id
-        """ % (loan_id, esc(ctype), pledger, desc, val_sql, ident))
+            INSERT INTO loan_collateral (loan_id, collateral_type, pledger_name, description, collateral_value, identifier, %s)
+            VALUES (%s, '%s', %s, %s, %s, %s, %s) RETURNING id
+        """ % (nbki_columns, loan_id, esc(ctype), pledger, desc, val_sql, ident, nbki_values))
         row_id = cur.fetchone()[0]
         audit_log(cur, staff, 'create', 'loan_collateral', row_id, esc(ctype), '', ip)
         conn.commit()
@@ -8197,6 +8218,25 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
                 updates.append("collateral_value=NULL")
         if 'identifier' in body:
             updates.append("identifier='%s'" % esc(body['identifier']) if body['identifier'] else "identifier=NULL")
+        fields = {
+            'nbki_guarantee_uid': ('text', 'nbki_guarantee_uid'), 'nbki_guarantee_amount': ('number', 'nbki_guarantee_amount'),
+            'nbki_guarantee_currency': ('text', 'nbki_guarantee_currency'), 'nbki_guarantee_start': ('date', 'nbki_guarantee_start'),
+            'nbki_guarantee_end': ('date', 'nbki_guarantee_end'), 'nbki_collateral_code': ('text', 'nbki_collateral_code'),
+            'nbki_collateral_start': ('date', 'nbki_collateral_start'), 'nbki_collateral_end': ('date', 'nbki_collateral_end'),
+            'nbki_collateral_sum': ('number', 'nbki_collateral_sum'), 'nbki_collateral_currency': ('text', 'nbki_collateral_currency'),
+            'nbki_assess_date': ('date', 'nbki_assess_date'), 'nbki_price_code': ('text', 'nbki_price_code'),
+            'nbki_actual_cost': ('number', 'nbki_actual_cost'), 'nbki_calc_date': ('date', 'nbki_calc_date'),
+            'nbki_actual_price_code': ('text', 'nbki_actual_price_code'), 'nbki_contract_total_sum': ('number', 'nbki_contract_total_sum'),
+            'nbki_contract_count': ('int', 'nbki_contract_count'), 'nbki_location': ('text', 'nbki_location'),
+        }
+        for key, (kind, column) in fields.items():
+            if key not in body: continue
+            value = body[key]
+            if value in (None, ''): updates.append(column + '=NULL')
+            elif kind == 'number': updates.append(column + '=%s' % safe_float(value, key))
+            elif kind == 'int': updates.append(column + '=%s' % int(value))
+            elif kind == 'date': updates.append(column + "='%s'::date" % esc(value))
+            else: updates.append(column + "='%s'" % esc(value))
         if updates:
             updates.append("updated_at=NOW()")
             cur.execute("UPDATE loan_collateral SET %s WHERE id=%s AND loan_id=%s" % (', '.join(updates), row_id, loan_id))
@@ -9734,13 +9774,39 @@ def handle_agent_cabinet(method, params, body, ev_headers, cur, conn):
 
 def handle_nbki(method, params, body, staff, cur, conn):
     """Historical NBKI imports and contract reconciliation."""
-    if staff.get('role') != 'admin':
-        return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
     action = params.get('action') or body.get('action', 'summary')
+    if staff.get('role') != 'admin' and not (staff.get('role') == 'manager' and action == 'manual_contract_fields'):
+        return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
     try:
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
+    if action == 'manual_contract_fields':
+        loan_id = body.get('loan_id') or params.get('loan_id')
+        if not loan_id:
+            return {'_status': 400, 'error': 'loan_id обязателен'}
+        cur.execute("SELECT id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
+        if not cur.fetchone():
+            return {'_status': 404, 'error': 'Договор не найден'}
+        if method == 'GET':
+            cur.execute("SELECT deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at FROM nbki_loan_manual_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
+            row = cur.fetchone()
+            keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note','updated_at')
+            return dict(zip(keys, (serialize(value) for value in row))) if row else {}
+        if method != 'PUT':
+            return {'_status': 405, 'error': 'Неверный метод'}
+        keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note')
+        values = [body.get(key) or None for key in keys]
+        cur.execute("""INSERT INTO nbki_loan_manual_fields
+            (loan_id,org_id,deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (loan_id) DO UPDATE SET org_id=EXCLUDED.org_id,deal_code=EXCLUDED.deal_code,
+            kind_code=EXCLUDED.kind_code,purpose_code=EXCLUDED.purpose_code,
+            payment_size_code=EXCLUDED.payment_size_code,payment_schedule_code=EXCLUDED.payment_schedule_code,
+            note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,*values))
+        audit_log(cur, staff, 'update', 'nbki_loan_manual_fields', loan_id, '', '', '')
+        conn.commit()
+        return {'success': True}
     if action == 'outbox':
         return {'rows': list_drafts(cur, org_id)}
     if action == 'change_candidates':

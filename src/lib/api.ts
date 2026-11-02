@@ -573,12 +573,16 @@ export const api = {
 
   loanCollateral: {
     list: (loanId: number) => request<LoanCollateral[]>("GET", { entity: "loan_collateral", loan_id: loanId }),
-    create: (data: { loan_id: number; collateral_type: string; pledger_name?: string; description?: string; collateral_value?: number; identifier?: string }) =>
+    create: (data: Record<string, any> & { loan_id: number; collateral_type: string }) =>
       request<{ id: number }>("POST", undefined, { entity: "loan_collateral", ...data }),
-    update: (data: { loan_id: number; id: number; collateral_type?: string; pledger_name?: string; description?: string; collateral_value?: number | null; identifier?: string }) =>
+    update: (data: Record<string, any> & { loan_id: number; id: number }) =>
       request<{ success: boolean }>("PUT", { entity: "loan_collateral" }, { entity: "loan_collateral", ...data }),
     remove: (loanId: number, id: number) =>
       request<{ success: boolean }>("DELETE", { entity: "loan_collateral", loan_id: loanId, id }),
+  },
+  nbkiManualFields: {
+    get: (loanId: number) => request<Record<string, string | null>>("GET", { entity: "nbki", action: "manual_contract_fields", loan_id: loanId }),
+    save: (loanId: number, data: Record<string, string>) => request<{ success: boolean }>("PUT", { entity: "nbki", action: "manual_contract_fields" }, { entity: "nbki", action: "manual_contract_fields", loan_id: loanId, ...data }),
   },
 
   savings: {
@@ -1189,6 +1193,19 @@ export interface LoanCollateral {
   nbki_guarantee_currency?: string | null;
   nbki_guarantee_start?: string | null;
   nbki_guarantee_end?: string | null;
+  nbki_collateral_code?: string | null;
+  nbki_collateral_start?: string | null;
+  nbki_collateral_end?: string | null;
+  nbki_collateral_sum?: number | null;
+  nbki_collateral_currency?: string | null;
+  nbki_assess_date?: string | null;
+  nbki_price_code?: string | null;
+  nbki_actual_cost?: number | null;
+  nbki_calc_date?: string | null;
+  nbki_actual_price_code?: string | null;
+  nbki_contract_total_sum?: number | null;
+  nbki_contract_count?: number | null;
+  nbki_location?: string | null;
   nbki_event_source_id?: number | null;
   nbki_source_facts?: {
     uid: string;

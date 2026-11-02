@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
 import LoanCollateralTab from "./LoanCollateralTab";
+import NbkiContractFields from "./NbkiContractFields";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -260,6 +261,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
           {(isAdmin || isManager) && <TabsContent value="nbki" className="space-y-3">
             <p className="text-sm text-muted-foreground">Показатели последнего сопоставленного события 1С. Данные хранятся отдельно от учётного остатка, графика и платежей CRM. Приём НБКИ без проверенной квитанции не подтверждён.</p>
+            <NbkiContractFields loanId={detail.id} />
             {detail.nbki_1c_facts ? <>
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium">{detail.nbki_1c_facts.event_type} · {new Date(detail.nbki_1c_facts.event_time).toLocaleString("ru-RU")}</div>

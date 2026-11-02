@@ -28,6 +28,27 @@ const TYPE_ICONS: Record<string, string> = {
   "Иное": "FileText",
 };
 
+const NBKI_FIELDS = [
+  ["nbki_collateral_code", "Код конкретного вида предмета"],
+  ["nbki_collateral_start", "Дата возникновения залога", "date"],
+  ["nbki_collateral_end", "Дата окончания залога", "date"],
+  ["nbki_collateral_sum", "Сумма обеспечения", "number"],
+  ["nbki_collateral_currency", "Валюта (код)"],
+  ["nbki_assess_date", "Дата оценки", "date"],
+  ["nbki_price_code", "Код вида стоимости"],
+  ["nbki_actual_cost", "Фактическая стоимость", "number"],
+  ["nbki_calc_date", "Дата расчёта стоимости", "date"],
+  ["nbki_actual_price_code", "Код фактической стоимости"],
+  ["nbki_contract_total_sum", "Общая сумма договора залога", "number"],
+  ["nbki_contract_count", "Количество договоров в записи", "number"],
+  ["nbki_location", "Код местонахождения"],
+  ["nbki_guarantee_uid", "УИД договора поручительства"],
+  ["nbki_guarantee_amount", "Сумма ответственности поручителя", "number"],
+  ["nbki_guarantee_currency", "Валюта поручительства"],
+  ["nbki_guarantee_start", "Дата заключения поручительства", "date"],
+  ["nbki_guarantee_end", "Дата окончания поручительства", "date"],
+] as const;
+
 const fmt = (n?: number) => n === undefined || n === null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (value?: string | null) => value ? value.slice(0, 10).split("-").reverse().join(".") : "—";
 
@@ -43,6 +64,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
   const [description, setDescription] = useState("");
   const [collateralValue, setCollateralValue] = useState("");
   const [identifier, setIdentifier] = useState("");
+  const [nbki, setNbki] = useState<Record<string, string>>({});
 
   const { toast } = useToast();
 
@@ -61,6 +83,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
     setDescription("");
     setCollateralValue("");
     setIdentifier("");
+    setNbki({});
   };
 
   const openAdd = () => {
@@ -75,6 +98,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
     setDescription(item.description || "");
     setCollateralValue(item.collateral_value !== undefined && item.collateral_value !== null ? String(item.collateral_value) : "");
     setIdentifier(item.identifier || "");
+    setNbki(Object.fromEntries(NBKI_FIELDS.map(([key]) => [key, (item as any)[key] == null ? "" : String((item as any)[key]).slice(0, 10)])));
     setShowAdd(true);
   };
 
@@ -91,6 +115,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
         description: description || undefined,
         collateral_value: collateralValue ? Number(collateralValue.replace(",", ".")) : undefined,
         identifier: identifier || undefined,
+        ...Object.fromEntries(NBKI_FIELDS.map(([key, , kind]) => [key, nbki[key] ? (kind === "number" ? Number(nbki[key].replace(",", ".")) : nbki[key]) : null])),
       };
       if (editId) {
         await api.loanCollateral.update({ loan_id: loanId, id: editId, ...payload });
@@ -169,6 +194,10 @@ const LoanCollateralTab = ({ loanId }: Props) => {
                 <Label className="text-xs">Идентификатор (КН/VIN)</Label>
                 <Input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="Кадастровый номер или VIN" />
               </div>
+            </div>
+            <div className="rounded-md border p-3 space-y-2">
+              <div><div className="text-sm font-medium">Реквизиты обеспечения для НБКИ</div><div className="text-xs text-muted-foreground">Отдельные поля; не меняют стоимость и данные, ранее импортированные из XML.</div></div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{NBKI_FIELDS.filter(([key]) => collateralType === "Поручительство" ? key.startsWith("nbki_guarantee") : !key.startsWith("nbki_guarantee")).map(([key, label, kind]) => <div key={key} className="space-y-1"><Label className="text-xs">{label}</Label><Input type={kind || "text"} value={nbki[key] || ""} onChange={e => setNbki(prev => ({ ...prev, [key]: e.target.value }))} /></div>)}</div>
             </div>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" size="sm" onClick={resetForm}>Отмена</Button>
