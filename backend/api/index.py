@@ -8693,7 +8693,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki', 'bureau_fields'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki', 'bki_fields'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -9785,44 +9785,27 @@ def handle_nbki(method, params, body, staff, cur, conn):
         loan_id = body.get('loan_id') or params.get('loan_id')
         if not loan_id:
             return {'_status': 400, 'error': 'loan_id обязателен'}
-        cur.execute("SELECT id,member_id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
+        cur.execute("SELECT id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
         loan_row = cur.fetchone()
         if not loan_row:
             return {'_status': 404, 'error': 'Договор не найден'}
-        member_id = loan_row[1]
         if method == 'GET':
-            cur.execute("SELECT deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at FROM nbki_loan_manual_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
+            cur.execute("SELECT deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s", (loan_id, org_id))
             row = cur.fetchone()
-            keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note','updated_at')
+            keys = ('deal_code','kind_code','purpose_code','note','updated_at')
             result = dict(zip(keys, (serialize(value) for value in row))) if row else {}
-            cur.execute("SELECT birth_date,birth_place,passport_series,passport_number,passport_issue_date,passport_issued_by,registration_address,inn FROM members WHERE id=%s", (member_id,))
-            identity_keys = ('birth_date','birth_place','passport_series','passport_number','passport_issue_date','passport_issued_by','registration_address','inn')
-            result.update(dict(zip(identity_keys, (serialize(value) for value in cur.fetchone()))))
             return result
         if method != 'PUT':
             return {'_status': 405, 'error': 'Неверный метод'}
-        keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note')
+        keys = ('deal_code','kind_code','purpose_code','note')
         values = [body.get(key) or None for key in keys]
-        identity_fields = {'birth_date': 'date', 'birth_place': 'text', 'passport_series': 'text',
-            'passport_number': 'text', 'passport_issue_date': 'date', 'passport_issued_by': 'text',
-            'registration_address': 'text', 'inn': 'text'}
-        identity_updates = []
-        for key, kind in identity_fields.items():
-            if key not in body: continue
-            value = body.get(key)
-            if value in (None, ''): identity_updates.append(key + '=NULL')
-            elif kind == 'date': identity_updates.append(key + "='%s'::date" % esc(value))
-            else: identity_updates.append(key + "='%s'" % esc(value))
-        if identity_updates:
-            cur.execute("UPDATE members SET %s,updated_at=NOW() WHERE id=%s" % (','.join(identity_updates), member_id))
-        cur.execute("""INSERT INTO nbki_loan_manual_fields
-            (loan_id,org_id,deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+        cur.execute("""INSERT INTO loan_bki_fields
+            (loan_id,org_id,deal_code,kind_code,purpose_code,note,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,NOW())
             ON CONFLICT (loan_id) DO UPDATE SET org_id=EXCLUDED.org_id,deal_code=EXCLUDED.deal_code,
             kind_code=EXCLUDED.kind_code,purpose_code=EXCLUDED.purpose_code,
-            payment_size_code=EXCLUDED.payment_size_code,payment_schedule_code=EXCLUDED.payment_schedule_code,
             note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,*values))
-        audit_log(cur, staff, 'update', 'nbki_loan_manual_fields', loan_id, '', '', '')
+        audit_log(cur, staff, 'update', 'loan_bki_fields', loan_id, '', '', '')
         conn.commit()
         return {'success': True}
     if action == 'outbox':
@@ -10041,13 +10024,10 @@ def handle_nbki(method, params, body, staff, cur, conn):
     return {'error': 'Неизвестное действие'}
 
 
-def handle_bureau_fields(method, params, body, staff, cur, conn, ip=''):
-    """Store codes in a bureau-specific namespace; personal data stays in members."""
+def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
+    """Store one shared set of credit-information codes per loan."""
     if staff.get('role') not in ('admin', 'manager'):
         return {'_status': 403, 'error': 'Недостаточно прав'}
-    bureau = (params.get('bureau_code') or body.get('bureau_code') or 'NBKI').upper()
-    if bureau not in ('NBKI', 'OKB'):
-        return {'_status': 400, 'error': 'Неизвестное бюро'}
     loan_id = params.get('loan_id') or body.get('loan_id')
     if not loan_id:
         return {'_status': 400, 'error': 'loan_id обязателен'}
@@ -10059,27 +10039,25 @@ def handle_bureau_fields(method, params, body, staff, cur, conn, ip=''):
     if not cur.fetchone():
         return {'_status': 404, 'error': 'Договор не найден'}
     if method == 'GET':
-        cur.execute("""SELECT deal_code,kind_code,purpose_code,payment_size_code,
-            payment_schedule_code,note,updated_at FROM bureau_loan_fields
-            WHERE loan_id=%s AND org_id=%s AND bureau_code=%s""", (loan_id,org_id,bureau))
+        cur.execute("""SELECT deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields
+            WHERE loan_id=%s AND org_id=%s""", (loan_id,org_id))
         row = cur.fetchone()
-        if not row: return {'bureau_code': bureau}
-        keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note','updated_at')
-        return {'bureau_code': bureau, **dict(zip(keys, (serialize(value) for value in row)))}
+        if not row: return {}
+        keys = ('deal_code','kind_code','purpose_code','note','updated_at')
+        return dict(zip(keys, (serialize(value) for value in row)))
     if method != 'PUT':
         return {'_status': 405, 'error': 'Неверный метод'}
-    keys = ('deal_code','kind_code','purpose_code','payment_size_code','payment_schedule_code','note')
+    keys = ('deal_code','kind_code','purpose_code','note')
     values = [body.get(key) or None for key in keys]
-    cur.execute("""INSERT INTO bureau_loan_fields
-        (loan_id,org_id,bureau_code,deal_code,kind_code,purpose_code,payment_size_code,payment_schedule_code,note,updated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-        ON CONFLICT (loan_id,bureau_code) DO UPDATE SET org_id=EXCLUDED.org_id,
+    cur.execute("""INSERT INTO loan_bki_fields
+        (loan_id,org_id,deal_code,kind_code,purpose_code,note,updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,NOW())
+        ON CONFLICT (loan_id) DO UPDATE SET org_id=EXCLUDED.org_id,
         deal_code=EXCLUDED.deal_code,kind_code=EXCLUDED.kind_code,purpose_code=EXCLUDED.purpose_code,
-        payment_size_code=EXCLUDED.payment_size_code,payment_schedule_code=EXCLUDED.payment_schedule_code,
-        note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,bureau,*values))
-    audit_log(cur, staff, 'update', 'bureau_loan_fields', loan_id, bureau, '', ip)
+        note=EXCLUDED.note,updated_at=NOW()""", (loan_id,org_id,*values))
+    audit_log(cur, staff, 'update', 'loan_bki_fields', loan_id, '', '', ip)
     conn.commit()
-    return {'success': True, 'bureau_code': bureau}
+    return {'success': True}
 
 
 def handler(event, context):
@@ -10169,8 +10147,8 @@ def handler(event, context):
             result = handle_integration_secrets(method, body, staff, cur, conn)
         elif entity == 'nbki':
             result = handle_nbki(method, params, body, staff, cur, conn)
-        elif entity == 'bureau_fields':
-            result = handle_bureau_fields(method, params, body, staff, cur, conn, src_ip)
+        elif entity == 'bki_fields':
+            result = handle_bki_fields(method, params, body, staff, cur, conn, src_ip)
         elif entity == 'external':
             result = handle_external(method, params, body, ev_headers, cur, conn, src_ip)
         elif entity == 'agents':
