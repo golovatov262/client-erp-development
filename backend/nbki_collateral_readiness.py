@@ -13,9 +13,13 @@ def collateral_readiness(cur, org_id: int) -> dict:
         lc.pledger_name,lc.description,lc.collateral_value,lc.identifier,
         lc.nbki_guarantee_uid,lc.nbki_guarantee_amount,lc.nbki_guarantee_currency,
         lc.nbki_guarantee_start,lc.nbki_guarantee_end,lc.nbki_event_source_id,
-        EXISTS (SELECT 1 FROM nbki_collateral_facts f
-                WHERE f.collateral_id=lc.id AND f.match_status='matched')
+        source_facts.payload
         FROM loans l JOIN loan_collateral lc ON lc.loan_id=l.id
+        LEFT JOIN LATERAL (
+            SELECT f.payload FROM nbki_collateral_facts f
+            WHERE f.collateral_id=lc.id AND f.match_status='matched'
+            ORDER BY f.event_time DESC NULLS LAST,f.id DESC LIMIT 1
+        ) source_facts ON TRUE
         WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,lc.id""", (org_id,))
     rows = []
@@ -23,7 +27,8 @@ def collateral_readiness(cur, org_id: int) -> dict:
     for row in cur.fetchall():
         (loan_id, contract_no, loan_status, collateral_id, kind, pledger,
          description, value, identifier, guarantee_uid, guarantee_amount,
-         guarantee_currency, guarantee_start, guarantee_end, source_id, has_xml_history) = row
+         guarantee_currency, guarantee_start, guarantee_end, source_id, source_facts) = row
+        has_xml_history = isinstance(source_facts, dict)
         missing = []
         if kind == 'Поручительство':
             if not guarantee_uid:
@@ -41,13 +46,20 @@ def collateral_readiness(cur, org_id: int) -> dict:
         else:
             # CRM currently stores only broad pledge families; the GUTDF
             # reference distinguishes concrete asset types and legal facts.
-            missing.extend(['код конкретного вида предмета залога',
-                            'дата возникновения залога',
-                            'валюта и вид стоимости (оценка/актуальная стоимость)',
-                            'ранее переданное состояние обеспечения'])
+            source_collateral = (source_facts or {}).get('collateral', {})
+            source_value = source_collateral.get('Sum_group_FL_32_35_Group', {})
+            if not source_collateral.get('code'):
+                missing.append('код конкретного вида предмета залога')
+            if not source_collateral.get('startDate'):
+                missing.append('дата возникновения залога')
+            if not (source_value.get('currency') and source_value.get('priceCode')
+                    and (source_collateral.get('actualCost') or source_collateral.get('contractTotalSum'))):
+                missing.append('валюта и вид стоимости (оценка/актуальная стоимость)')
+            if not has_xml_history:
+                missing.append('ранее переданное состояние обеспечения')
             if not identifier:
                 missing.append('идентификатор предмета залога')
-            if value is None:
+            if value is None and not source_collateral.get('actualCost'):
                 missing.append('стоимость предмета залога')
             if not pledger:
                 missing.append('залогодатель')
