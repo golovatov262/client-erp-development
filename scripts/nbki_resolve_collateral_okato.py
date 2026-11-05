@@ -15,7 +15,7 @@ import psycopg2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'backend'))
-from fias_api import resolve_okato  # noqa: E402
+from fias_api import resolve_unique_building_okato  # noqa: E402
 
 
 def main() -> int:
@@ -53,18 +53,17 @@ def main() -> int:
                 addresses = list(by_address.items())
                 for index, (address, records) in enumerate(addresses, start=1):
                     try:
-                        matches = [item for item in resolve_okato(address, token, exact_only=True)
-                                   if item.get('okato')]
+                        match = resolve_unique_building_okato(address, token)
                     except Exception as exc:
                         failed += 1
                         print(f'FIAS error for address #{index}: {type(exc).__name__}', flush=True)
                         continue
 
-                    if len(matches) != 1:
+                    if not match:
                         ambiguous += len(records)
                         continue
 
-                    okato = matches[0]['okato']
+                    okato = match['okato']
                     for collateral_id, contract_no, old_okato in records:
                         cur.execute("""UPDATE loan_collateral SET nbki_location=%s,updated_at=NOW()
                             WHERE id=%s AND (nbki_location IS NULL OR nbki_location !~ '^[0-9]{11}$')""",

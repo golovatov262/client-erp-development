@@ -20,6 +20,17 @@ def _normalized(value: str) -> str:
     return re.sub(r'[^0-9a-zа-яё]+', ' ', (value or '').casefold()).strip()
 
 
+def _address_tokens(value: str) -> set[str]:
+    normalized = (value or '').casefold().replace('ё', 'е')
+    for full, short in (('город', 'г'), ('улица', 'ул'), ('площадь', 'пл'),
+                        ('проспект', 'пр'), ('переулок', 'пер'), ('дом', 'д'),
+                        ('квартира', 'кв'), ('корпус', 'корп'), ('строение', 'стр'),
+                        ('область', 'обл'), ('район', 'р-н'), ('поселок', 'п'),
+                        ('посёлок', 'п')):
+        normalized = normalized.replace(full, short)
+    return set(re.findall(r'[0-9a-zа-я]+', normalized))
+
+
 def _get(path: str, query: dict, token: str) -> dict:
     global _LAST_REQUEST
     with _REQUEST_LOCK:
@@ -69,4 +80,37 @@ def resolve_okato(address: str, token: str, *, exact_only: bool = False) -> list
     return result
 
 
-__all__ = ['resolve_okato']
+def resolve_unique_building_okato(address: str, token: str) -> dict | None:
+    """Resolve a unique house-level result when its normalized name is contained
+    in the CRM address. This permits harmless differences such as apartment
+    suffixes while requiring one unique FIAS building and a valid OKATO.
+    """
+    address_tokens = _address_tokens(address)
+    if not address_tokens:
+        return None
+    hints = _get('GetAddressHint', {'search_string': address, 'address_type': 1}, token).get('hints', [])[:5]
+    candidates = []
+    for hint in hints:
+        name = hint.get('full_name') or ''
+        tokens = _address_tokens(name)
+        digits = {token for token in tokens if token.isdigit()}
+        if tokens and tokens <= address_tokens and digits <= {token for token in address_tokens if token.isdigit()}:
+            candidates.append(hint)
+    unique = {(candidate.get('object_id'), candidate.get('full_name')): candidate for candidate in candidates}
+    if len(unique) != 1:
+        return None
+    hint = next(iter(unique.values()))
+    items = _get('GetAddressItemById', {'object_id': hint['object_id'], 'address_type': 1}, token).get('addresses', [])
+    if not items:
+        return None
+    item = items[0]
+    if item.get('object_level_id') != 10:
+        return None
+    okato = str((item.get('address_details') or {}).get('okato') or '')
+    if not re.fullmatch(r'\d{11}', okato):
+        return None
+    return {'address': item.get('full_name') or hint.get('full_name'),
+            'okato': okato, 'fias_guid': item.get('object_guid')}
+
+
+__all__ = ['resolve_okato', 'resolve_unique_building_okato']
