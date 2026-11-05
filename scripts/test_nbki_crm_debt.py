@@ -198,7 +198,7 @@ class DebtTest(unittest.TestCase):
         evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-26',
                     'before': {'loan': {'balance': '1000.00', 'rate': '36'}},
                     'after': {'loan': {'balance': '900.00', 'rate': '36',
-                                       'amount': '1000.00', 'start_date': '2026-01-01',
+                                       'amount': '1100.00', 'start_date': '2026-01-01',
                                        'end_date': '2027-01-31', 'schedule_type': 'annuity',
                                        'status': 'active'},
                               'schedule': [
@@ -213,6 +213,9 @@ class DebtTest(unittest.TestCase):
         class SnapshotCursor:
             def execute(self, query, params):
                 self.query = query
+
+            def fetchone(self):
+                return (Decimal('100.00'),)
 
             def fetchall(self):
                 return [(2, date(2026, 10, 26), Decimal('100'), digest, evidence)]

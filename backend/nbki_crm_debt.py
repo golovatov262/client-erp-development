@@ -245,7 +245,7 @@ def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str
     rate_value = loan.get('rate')
     start_value = loan.get('start_date')
     if (loan.get('schedule_type') != 'annuity' or rate_value is None or
-            not start_value or loan.get('status') == 'holiday'):
+            not start_value or loan.get('status') == 'holiday' or loan.get('amount') is None):
         result['issues'].append('Формула фактических дней по этому типу графика/статусу не подтверждена')
         return result
     rate = Decimal(str(rate_value))
@@ -288,17 +288,42 @@ def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str
     if covered_interest > scheduled_interest + CENT:
         return review('Зачтённые проценты превышают проценты текущей строки графика')
 
+    if event_date == anchor:
+        cur.execute("""SELECT COALESCE(SUM(principal_part),0) FROM loan_payments
+            WHERE loan_id=%s AND (payment_date,id)<(%s,%s)""",
+            (loan_id, anchor, payment_id))
+    else:
+        cur.execute("""SELECT COALESCE(SUM(principal_part),0) FROM loan_payments
+            WHERE loan_id=%s AND payment_date<=%s""", (loan_id, anchor))
+    principal_paid_at_anchor = _money(cur.fetchone()[0])
+    balance_at_anchor = _money(loan['amount']) - principal_paid_at_anchor
+    if balance_at_anchor < ZERO:
+        return review('Отрицательный остаток ОД по журналу платежей на начало периода')
+
     cur.execute("""SELECT p.id,p.payment_date,p.principal_part,
         ps.evidence_sha256,ps.evidence
         FROM loan_payments p LEFT JOIN nbki_payment_posting_snapshots ps
           ON ps.payment_id=p.id AND ps.loan_id=p.loan_id
-        WHERE p.loan_id=%s AND p.payment_date>=%s
+        WHERE p.loan_id=%s AND p.payment_date>%s
           AND (p.payment_date,p.id)<=(%s,%s)
         ORDER BY p.payment_date,p.id""",
         (loan_id, anchor, event_date, payment_id))
     payments = cur.fetchall()
-    if not payments or payments[-1][0] != payment_id:
+    if event_date > anchor and (not payments or payments[-1][0] != payment_id):
         return review('Целевой платёж или предшествующая часть периода отсутствует в журнале CRM')
+    if event_date == anchor:
+        before_loan = (evidence.get('before') or {}).get('loan') or {}
+        try:
+            before_balance = _money(before_loan['balance'])
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return review('В снимке целевого платежа нет остатка ОД на начало периода')
+        if abs(balance_at_anchor - before_balance) > CENT:
+            return review('Остаток по журналу CRM не равен снимку на начало периода')
+        result.update({'status': 'candidate_from_posting_snapshot_formula',
+                       'accrued_before_payment': str(ZERO),
+                       'interest_covered_in_period': str(covered_interest),
+                       'remaining_interest_candidate': str(max(ZERO, ZERO - covered_interest))})
+        return result
 
     accrued = ZERO
     prior_date = anchor
@@ -340,6 +365,8 @@ def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str
             return review(f'Снижение остатка в снимке платежа {pid} не равно части ОД журнала CRM')
         if running_balance is None:
             running_balance = before_balance
+            if abs(running_balance - balance_at_anchor) > CENT:
+                return review('Остаток ОД по журналу CRM не совпадает с первым снимком периода')
         elif abs(running_balance - before_balance) > CENT:
             return review(f'Разрыв остатков между снимками платежей до операции {pid}')
         days = (payment_day - prior_date).days
