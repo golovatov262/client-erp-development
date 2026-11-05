@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 
 BASE_URL = 'https://fias-public-service.nalog.ru/api/spas/v2.0/'
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST = 0.0
 
 
 def _normalized(value: str) -> str:
@@ -17,19 +21,28 @@ def _normalized(value: str) -> str:
 
 
 def _get(path: str, query: dict, token: str) -> dict:
+    global _LAST_REQUEST
+    with _REQUEST_LOCK:
+        wait = 0.65 - (time.monotonic() - _LAST_REQUEST)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_REQUEST = time.monotonic()
     url = BASE_URL + path + '?' + urllib.parse.urlencode(query)
     request = urllib.request.Request(url, headers={'master-token': token, 'Accept': 'application/json'})
     with urllib.request.urlopen(request, timeout=8) as response:
         return json.loads(response.read().decode('utf-8'))
 
 
-def resolve_okato(address: str, token: str) -> list[dict]:
+def resolve_okato(address: str, token: str, *, exact_only: bool = False) -> list[dict]:
     """Return official address candidates and their 11-digit OKATO, if assigned.
 
     The API's FIAS GUID is only returned as a reference for the UI. GUTDF's
     collateral location field itself requires the 11-digit OKATO code.
     """
     hints = _get('GetAddressHint', {'search_string': address, 'address_type': 1}, token).get('hints', [])[:5]
+    if exact_only:
+        hints = [hint for hint in hints
+                 if _normalized(hint.get('full_name') or '') == _normalized(address)]
     result = []
     seen = set()
     for hint in hints:
