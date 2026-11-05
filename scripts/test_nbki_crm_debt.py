@@ -144,6 +144,8 @@ class DebtTest(unittest.TestCase):
                     return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
                 if 'MAX(payment_date)' in self.query:
                     return (date(2026, 9, 30),)
+                if 'FROM loan_schedule s LEFT JOIN loan_payment_allocations a' in self.query:
+                    return (143567, Decimal('0'), Decimal('0'), Decimal('1'), Decimal('1'))
                 if 'FROM loan_payment_allocations a' in self.query:
                     return (1,)
                 raise AssertionError(self.query)
@@ -167,6 +169,8 @@ class DebtTest(unittest.TestCase):
                     return (date(2026, 9, 30),)
                 if 'FROM loan_payment_allocations a' in self.query:
                     return (0,)
+                if 'FROM loan_schedule s LEFT JOIN loan_payment_allocations a' in self.query:
+                    return (10, Decimal('5000'), Decimal('0'), Decimal('5001'), Decimal('5001'))
                 return (10, Decimal('5000'), Decimal('5000'), Decimal('0'), Decimal('0'))
 
             def fetchall(self):

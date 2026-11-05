@@ -163,11 +163,13 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
         _money, (scheduled_interest, paid_amount, v2_interest, v2_total))
     if v2_total > paid_amount + CENT or min(scheduled_interest, paid_amount, v2_interest, v2_total) < ZERO:
         result['issues'].append('Несогласованные суммы в строке графика CRM')
+        result['status'] = 'review'
         return result
     legacy_paid = max(ZERO, paid_amount - v2_total)
     covered_interest = min(legacy_paid, scheduled_interest) + v2_interest
     if covered_interest > scheduled_interest + CENT:
         result['issues'].append('Зачтённые проценты превышают проценты строки графика')
+        result['status'] = 'review'
         return result
     cur.execute("""SELECT id,payment_date,principal_part FROM loan_payments
         WHERE loan_id=%s AND (payment_date,id)<=(%s,%s)

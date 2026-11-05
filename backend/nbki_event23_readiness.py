@@ -96,7 +96,8 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
     interest_ready = bool(interest_candidate and
                           interest_candidate.get('status') == 'candidate_from_crm_formula')
     smp_ready = bool(smp_candidate and smp_candidate.get('status') in
-                     ('candidate_from_crm_schedule', 'candidate_from_crm_components'))
+                     ('candidate_from_crm_schedule', 'candidate_from_crm_components',
+                      'candidate_from_posting_snapshot_schedule'))
     if not debt_ready or not interest_ready:
         blockers.append('Расчёт задолженности по компонентам CRM на дату события не завершён')
     if psk_candidate_status != 'cross_checked' or not smp_ready:
