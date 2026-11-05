@@ -31,6 +31,47 @@ const LOAN_KINDS = [
   ["99", "Иной заем (кредит)"],
 ] as const;
 
+// Reference 2.4 from the local Bank of Russia GUTDF 5.1 schema.
+const LOAN_GOALS = [
+  ["1", "Пополнение оборотных средств"],
+  ["2", "Приобретение недвижимости"],
+  ["2.1", "Приобретение земельного участка"],
+  ["2.2", "Приобретение жилого здания"],
+  ["2.3", "Приобретение нежилого здания"],
+  ["2.4", "Приобретение жилого помещения на первичном рынке"],
+  ["2.5", "Приобретение жилого помещения на вторичном рынке"],
+  ["2.6", "Приобретение нежилого помещения"],
+  ["3", "Приобретение основных средств, кроме недвижимости"],
+  ["4", "Строительство или реконструкция здания"],
+  ["4.1", "Строительство или реконструкция жилого здания"],
+  ["4.3", "Строительство или реконструкция нежилого здания"],
+  ["4.5", "Права по договору участия в долевом строительстве жилого здания"],
+  ["4.6", "Права по договору участия в долевом строительстве нежилого здания"],
+  ["4.7", "Инвестиционный проект: строительство или реконструкция жилых зданий"],
+  ["4.8", "Инвестиционный проект: строительство или реконструкция нежилых зданий"],
+  ["4.9", "Инвестиционный проект: инженерно-техническая инфраструктура"],
+  ["5", "Приобретение ценных бумаг"],
+  ["6", "Участие в электронных торгах, аукционе или конкурсе"],
+  ["7", "Вклад в уставный капитал юридического лица"],
+  ["8", "Рефинансирование долга перед организацией-кредитором"],
+  ["9", "Рефинансирование долга перед другим лицом"],
+  ["10", "Погашение долга третьего лица"],
+  ["11", "Финансирование лизинговой деятельности"],
+  ["12", "Приобретение прав кредитора по займам (кредитам)"],
+  ["13", "Предоставление займа (кредита) иному лицу"],
+  ["14", "POS-заём"],
+  ["15", "Бытовые или текущие нужды"],
+  ["16", "Оплата образования"],
+  ["16.1", "Образовательный кредит с господдержкой"],
+  ["16.2", "Образовательный кредит без господдержки"],
+  ["19", "Цель не определена"],
+  ["20", "Заем, подлежащий компенсации по статье 11 закона № 181-ФЗ"],
+  ["21", "Приобретение авто- или мототранспортного средства"],
+  ["21.1", "Авто- или мототранспортное средство с пробегом до 1000 км включительно"],
+  ["21.2", "Авто- или мототранспортное средство с пробегом свыше 1000 км"],
+  ["99", "Иная цель"],
+] as const;
+
 export default function NbkiContractFields({ loanId }: { loanId: number }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -49,7 +90,7 @@ export default function NbkiContractFields({ loanId }: { loanId: number }) {
       <div className="space-y-1"><Label className="text-xs">УИД договора займа</Label><Input value={values.loan_uid || ""} onChange={e => set("loan_uid", e.target.value)} /></div>
       <div className="space-y-1"><Label className="text-xs">Тип сделки (справочник 2.2)</Label><Select value={values.deal_code || ""} onValueChange={value => set("deal_code", value)}><SelectTrigger><SelectValue placeholder="Выберите тип сделки" /></SelectTrigger><SelectContent>{DEAL_TYPES.map(([code, label]) => <SelectItem key={code} value={code}>{code} — {label}</SelectItem>)}</SelectContent></Select></div>
       <div className="space-y-1"><Label className="text-xs">Вид займа (справочник 2.3)</Label><Select value={values.kind_code || ""} onValueChange={value => set("kind_code", value)}><SelectTrigger><SelectValue placeholder="Выберите вид займа" /></SelectTrigger><SelectContent>{LOAN_KINDS.map(([code, label]) => <SelectItem key={code} value={code}>{code} — {label}</SelectItem>)}</SelectContent></Select></div>
-      <div className="space-y-1"><Label className="text-xs">Код цели займа</Label><Input value={values.purpose_code || ""} onChange={e => set("purpose_code", e.target.value)} /></div>
+      <div className="space-y-1"><Label className="text-xs">Код цели займа (справочник 2.4)</Label><Select value={values.purpose_code || ""} onValueChange={value => set("purpose_code", value)}><SelectTrigger><SelectValue placeholder="Выберите цель займа" /></SelectTrigger><SelectContent>{LOAN_GOALS.map(([code, label]) => <SelectItem key={code} value={code}>{code} — {label}</SelectItem>)}</SelectContent></Select></div>
     </div>
     <div className="space-y-1"><Label className="text-xs">Основание / примечание менеджера</Label><Textarea value={values.note || ""} onChange={e => set("note", e.target.value)} rows={2} placeholder="Документ и реквизит, по которому внесено значение" /></div>
     <div className="flex justify-end"><Button size="sm" onClick={save} disabled={saving}>{saving ? <Icon name="Loader2" size={14} className="mr-1 animate-spin" /> : <Icon name="Save" size={14} className="mr-1" />}Сохранить общие реквизиты</Button></div>
