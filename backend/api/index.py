@@ -66,8 +66,12 @@ try:
     from nbki_event23_xml import build_event23_xml, build_event23_batch_xml
 except ImportError:
     from backend.nbki_event23_xml import build_event23_xml, build_event23_batch_xml
+try:
+    from fias_api import resolve_okato as fias_resolve_okato
+except ImportError:
+    from backend.fias_api import resolve_okato as fias_resolve_okato
 
-INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
+INTEGRATION_SECRET_KEYS = {'SMSAERO_EMAIL','SMSAERO_API_KEY','TELEGRAM_BOT_TOKEN','MAX_BOT_TOKEN','VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_EMAIL','DADATA_API_KEY','CREDIT_CHECK_API_KEY','KVELL_API_KEY','KVELL_SECRET_KEY','FSSP_API_TOKEN','FIAS_MASTER_TOKEN','RFM_API_KEY','ANTHROPIC_API_KEY','BANK_IMAP_HOST','BANK_IMAP_PORT','BANK_IMAP_USER','BANK_IMAP_PASSWORD','SBER_CLIENT_ID_ORG2','SBER_CLIENT_SECRET_ORG2','SBER_CLIENT_ID_ORG3','SBER_CLIENT_SECRET_ORG3','S3_ENDPOINT_URL','S3_BUCKET','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY'}
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -789,6 +793,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
             nr = cur.fetchone()
             loan['member_name'] = nr[0] if nr else ''
+            if staff and staff.get('role') in ('admin', 'manager'):
+                cur.execute("SELECT registration_address FROM members WHERE id=%s", (loan['member_id'],))
+                address_row = cur.fetchone()
+                loan['member_registration_address'] = address_row[0] if address_row else None
             if loan.get('org_id'):
                 org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % loan['org_id'])
                 loan['org_name'] = org_row['name'] if org_row else ''
@@ -8157,6 +8165,28 @@ def handle_member_orgs(method, params, body, cur, conn, staff=None, ip=''):
 
 def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
     """CRUD для обеспечения по договору займа (залоги/поручительства)"""
+    if method == 'POST' and body.get('action') == 'resolve_fias_okato':
+        if not staff or staff.get('role') not in ('admin', 'manager'):
+            return {'error': 'Определение ОКАТО доступно администратору или менеджеру', '_status': 403}
+        address = str(body.get('address') or '').strip()
+        if not address or len(address) > 500:
+            return {'error': 'Укажите адрес длиной не более 500 символов'}
+        encryption_key = os.environ.get('APP_ENCRYPTION_KEY', '')
+        if not encryption_key:
+            return {'error': 'На сервере не настроено шифрование секретов', '_status': 503}
+        cur.execute("SELECT pgp_sym_decrypt(encrypted_value,%s) FROM integration_secrets WHERE key='FIAS_MASTER_TOKEN'", (encryption_key,))
+        token_row = cur.fetchone()
+        token = token_row[0] if token_row else None
+        if not token:
+            return {'error': 'Не настроен токен ФИАС. Добавьте его в Администрирование → Интеграции'}
+        try:
+            return {'results': fias_resolve_okato(address, token)}
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return {'error': 'ФИАС отклонил токен. Проверьте его в Администрирование → Интеграции', '_status': 502}
+            return {'error': 'Сервис ФИАС временно недоступен', '_status': 502}
+        except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+            return {'error': 'Не удалось получить адресные сведения из ФИАС', '_status': 502}
     loan_id = params.get('loan_id') or (body.get('loan_id') if body else None)
     if not loan_id:
         return {'error': 'loan_id обязателен'}
@@ -8170,7 +8200,7 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
                    nbki_collateral_sum, nbki_collateral_currency, nbki_assess_date,
                    nbki_price_code, nbki_actual_cost, nbki_calc_date,
                    nbki_actual_price_code, nbki_contract_total_sum, nbki_contract_count,
-                   nbki_location,
+                   nbki_location, nbki_location_address,
                    source_facts.facts AS nbki_source_facts,
                    created_at, updated_at
             FROM loan_collateral
@@ -8208,7 +8238,7 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
         nbki_columns = ('nbki_guarantee_uid, nbki_guarantee_amount, nbki_guarantee_currency, nbki_guarantee_start, nbki_guarantee_end, '
             'nbki_collateral_code, nbki_collateral_start, nbki_collateral_end, nbki_collateral_sum, nbki_collateral_currency, '
             'nbki_assess_date, nbki_price_code, nbki_actual_cost, nbki_calc_date, nbki_actual_price_code, '
-            'nbki_contract_total_sum, nbki_contract_count, nbki_location')
+            'nbki_contract_total_sum, nbki_contract_count, nbki_location, nbki_location_address')
         nbki_values = ', '.join((
             text_sql('nbki_guarantee_uid'), number_sql('nbki_guarantee_amount'), text_sql('nbki_guarantee_currency'),
             date_sql('nbki_guarantee_start'), date_sql('nbki_guarantee_end'), text_sql('nbki_collateral_code'),
@@ -8216,7 +8246,7 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             text_sql('nbki_collateral_currency'), date_sql('nbki_assess_date'), text_sql('nbki_price_code'),
             number_sql('nbki_actual_cost'), date_sql('nbki_calc_date'), text_sql('nbki_actual_price_code'),
             number_sql('nbki_contract_total_sum'), str(int(body['nbki_contract_count'])) if body.get('nbki_contract_count') not in (None, '') else 'NULL',
-            text_sql('nbki_location')))
+            text_sql('nbki_location'), text_sql('nbki_location_address')))
         cur.execute("""
             INSERT INTO loan_collateral (loan_id, collateral_type, pledger_name, description, collateral_value, identifier, %s)
             VALUES (%s, '%s', %s, %s, %s, %s, %s) RETURNING id
@@ -8254,6 +8284,7 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             'nbki_actual_cost': ('number', 'nbki_actual_cost'), 'nbki_calc_date': ('date', 'nbki_calc_date'),
             'nbki_actual_price_code': ('text', 'nbki_actual_price_code'), 'nbki_contract_total_sum': ('number', 'nbki_contract_total_sum'),
             'nbki_contract_count': ('int', 'nbki_contract_count'), 'nbki_location': ('text', 'nbki_location'),
+            'nbki_location_address': ('text', 'nbki_location_address'),
         }
         for key, (kind, column) in fields.items():
             if key not in body: continue

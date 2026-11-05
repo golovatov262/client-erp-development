@@ -574,6 +574,7 @@ export const api = {
 
   loanCollateral: {
     list: (loanId: number) => request<LoanCollateral[]>("GET", { entity: "loan_collateral", loan_id: loanId }),
+    resolveOkato: (address: string) => request<{ results: { address: string; okato: string | null; fias_guid: string | null; exact_match: boolean }[] }>("POST", undefined, { entity: "loan_collateral", action: "resolve_fias_okato", address }),
     create: (data: Record<string, any> & { loan_id: number; collateral_type: string }) =>
       request<{ id: number }>("POST", undefined, { entity: "loan_collateral", ...data }),
     update: (data: Record<string, any> & { loan_id: number; id: number }) =>
@@ -1152,6 +1153,7 @@ export interface ScheduleItem {
 export interface LoanDetail extends Loan {
   schedule: ScheduleItem[];
   payments: LoanPayment[];
+  member_registration_address?: string | null;
   nbki_purpose_confirmation?: {
     purpose: "consumer" | "business" | "unknown";
     basis: string;
@@ -1208,6 +1210,7 @@ export interface LoanCollateral {
   nbki_contract_total_sum?: number | null;
   nbki_contract_count?: number | null;
   nbki_location?: string | null;
+  nbki_location_address?: string | null;
   nbki_event_source_id?: number | null;
   nbki_source_facts?: {
     uid: string;

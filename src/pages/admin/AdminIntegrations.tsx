@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const groups = [
   ["Уведомления", [["SMSAERO_EMAIL","SMS Aero — email"],["SMSAERO_API_KEY","SMS Aero — API-ключ"],["TELEGRAM_BOT_TOKEN","Telegram — токен"],["MAX_BOT_TOKEN","MAX — токен"],["VAPID_PUBLIC_KEY","Web Push — публичный ключ"],["VAPID_PRIVATE_KEY","Web Push — приватный ключ"],["VAPID_EMAIL","Web Push — email"]]],
-  ["Проверки и внешние API", [["DADATA_API_KEY","DaData"],["CREDIT_CHECK_API_KEY","Кредитная история"],["KVELL_API_KEY","Kvell — API-ключ"],["KVELL_SECRET_KEY","Kvell — секрет"],["FSSP_API_TOKEN","ФССП"],["RFM_API_KEY","РФМ"],["ANTHROPIC_API_KEY","Anthropic"]]],
+  ["Проверки и внешние API", [["DADATA_API_KEY","DaData"],["CREDIT_CHECK_API_KEY","Кредитная история"],["KVELL_API_KEY","Kvell — API-ключ"],["KVELL_SECRET_KEY","Kvell — секрет"],["FSSP_API_TOKEN","ФССП"],["FIAS_MASTER_TOKEN","ФИАС — мастер-токен ФНС"],["RFM_API_KEY","РФМ"],["ANTHROPIC_API_KEY","Anthropic"]]],
   ["Банк и почта", [["BANK_IMAP_HOST","IMAP-сервер"],["BANK_IMAP_PORT","IMAP-порт"],["BANK_IMAP_USER","IMAP-пользователь"],["BANK_IMAP_PASSWORD","IMAP-пароль"],["SBER_CLIENT_ID_ORG2","Сбер — Client ID организации 2"],["SBER_CLIENT_SECRET_ORG2","Сбер — секрет организации 2"],["SBER_CLIENT_ID_ORG3","Сбер — Client ID организации 3"],["SBER_CLIENT_SECRET_ORG3","Сбер — секрет организации 3"]]],
   ["Файловое хранилище", [["S3_ENDPOINT_URL","S3 endpoint"],["S3_BUCKET","S3 bucket"],["AWS_ACCESS_KEY_ID","S3 Access Key"],["AWS_SECRET_ACCESS_KEY","S3 Secret Key"]]],
 ] as const;

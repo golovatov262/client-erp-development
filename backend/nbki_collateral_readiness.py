@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 def collateral_readiness(cur, org_id: int) -> dict:
     """List active CRM collateral records and the fields/history still needed.
@@ -13,6 +15,11 @@ def collateral_readiness(cur, org_id: int) -> dict:
         lc.pledger_name,lc.description,lc.collateral_value,lc.identifier,
         lc.nbki_guarantee_uid,lc.nbki_guarantee_amount,lc.nbki_guarantee_currency,
         lc.nbki_guarantee_start,lc.nbki_guarantee_end,lc.nbki_event_source_id,
+        lc.nbki_collateral_code,lc.nbki_collateral_start,lc.nbki_collateral_end,
+        lc.nbki_collateral_sum,lc.nbki_collateral_currency,lc.nbki_assess_date,
+        lc.nbki_price_code,lc.nbki_actual_cost,lc.nbki_calc_date,
+        lc.nbki_actual_price_code,lc.nbki_contract_total_sum,lc.nbki_contract_count,
+        lc.nbki_location,lc.nbki_location_address,
         source_facts.payload
         FROM loans l JOIN loan_collateral lc ON lc.loan_id=l.id
         LEFT JOIN LATERAL (
@@ -27,7 +34,11 @@ def collateral_readiness(cur, org_id: int) -> dict:
     for row in cur.fetchall():
         (loan_id, contract_no, loan_status, collateral_id, kind, pledger,
          description, value, identifier, guarantee_uid, guarantee_amount,
-         guarantee_currency, guarantee_start, guarantee_end, source_id, source_facts) = row
+         guarantee_currency, guarantee_start, guarantee_end, source_id,
+         collateral_code, collateral_start, collateral_end, collateral_sum,
+         collateral_currency, assess_date, price_code, actual_cost, calc_date,
+         actual_price_code, contract_total_sum, contract_count, location,
+         location_address, source_facts) = row
         has_xml_history = isinstance(source_facts, dict)
         missing = []
         if kind == 'Поручительство':
@@ -44,23 +55,38 @@ def collateral_readiness(cur, org_id: int) -> dict:
             if not pledger and not description:
                 missing.append('идентификация поручителя')
         else:
-            # CRM currently stores only broad pledge families; the GUTDF
-            # reference distinguishes concrete asset types and legal facts.
-            source_collateral = (source_facts or {}).get('collateral', {})
-            source_value = source_collateral.get('Sum_group_FL_32_35_Group', {})
-            if not source_collateral.get('code'):
+            if not collateral_code:
                 missing.append('код конкретного вида предмета залога')
-            if not source_collateral.get('startDate'):
+            if not identifier:
+                missing.append('идентификатор предмета залога (VIN или кадастровый номер)')
+            if not collateral_start:
                 missing.append('дата возникновения залога')
-            if not (source_value.get('currency') and source_value.get('priceCode')
-                    and (source_collateral.get('actualCost') or source_collateral.get('contractTotalSum'))):
-                missing.append('валюта и вид стоимости (оценка/актуальная стоимость)')
+            if not collateral_end:
+                missing.append('дата окончания залога')
+            if collateral_sum is None:
+                missing.append('сумма обеспечения')
+            if collateral_currency != 'RUB':
+                missing.append('валюта обеспечения (код RUB)')
+            if not assess_date:
+                missing.append('дата оценки')
+            if not price_code:
+                missing.append('код вида стоимости')
+            if actual_cost is None:
+                missing.append('актуальная стоимость')
+            if not calc_date:
+                missing.append('дата расчёта стоимости')
+            if not actual_price_code:
+                missing.append('код фактической стоимости')
+            if contract_total_sum is None:
+                missing.append('общая сумма обеспеченных обязательств')
+            if contract_count != 1:
+                missing.append('количество договоров в записи (должно быть 1)')
+            if not location_address:
+                missing.append('адрес для определения ОКАТО')
+            if not location or not re.fullmatch(r'\d{11}', str(location)):
+                missing.append('код местонахождения по ОКАТО (11 цифр)')
             if not has_xml_history:
                 missing.append('ранее переданное состояние обеспечения')
-            if not identifier:
-                missing.append('идентификатор предмета залога')
-            if value is None and not source_collateral.get('actualCost'):
-                missing.append('стоимость предмета залога')
             if not pledger:
                 missing.append('залогодатель')
         if not source_id and not has_xml_history:
