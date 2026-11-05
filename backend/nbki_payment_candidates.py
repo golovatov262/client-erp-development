@@ -103,6 +103,20 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             interest_candidate = estimate_posting_snapshot_interest(
                 cur, posting_evidence, posting_snapshot_sha256, loan_id,
                 payment_id, payment_date)
+            snapshot_history_gap = any(
+                'нет неизменяемого снимка CRM' in issue
+                for issue in interest_candidate.get('issues', []))
+            latest_payment = ledgers[loan_id][-1][0] == payment_id
+            if snapshot_history_gap and latest_payment:
+                # For a latest event, preserve the existing CRM-only replay
+                # path: it verifies the current balance and rejects replaced
+                # schedules. Older events still require complete frozen history.
+                fallback = estimate_current_interest(
+                    cur, loan_id, payment_id, payment_date, latest_payment=True,
+                    principal_checked=accounting.get('status') == 'checked')
+                if fallback.get('status') == 'candidate_from_crm_formula':
+                    fallback['snapshot_history_note'] = interest_candidate['issues'][0]
+                    interest_candidate = fallback
         else:
             interest_candidate = estimate_current_interest(
                 cur, loan_id, payment_id, payment_date,
