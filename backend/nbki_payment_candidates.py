@@ -24,14 +24,16 @@ try:
     from nbki_outbox import inspect_loan
     from nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from nbki_event23_readiness import assess_event23
-    from nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
+    from nbki_crm_debt import (split_latest_crm_debt, split_posting_snapshot_debt,
+                               estimate_current_interest, estimate_posting_snapshot_interest)
     from nbki_smp import preview_smp, preview_smp_from_posting_snapshot
     from nbki_debt_preview import preview_debt
 except ImportError:
     from backend.nbki_outbox import inspect_loan
     from backend.nbki_accounting_snapshot import audit_payment_allocations, build_accounting_snapshot
     from backend.nbki_event23_readiness import assess_event23
-    from backend.nbki_crm_debt import split_latest_crm_debt, split_posting_snapshot_debt, estimate_current_interest
+    from backend.nbki_crm_debt import (split_latest_crm_debt, split_posting_snapshot_debt,
+                                       estimate_current_interest, estimate_posting_snapshot_interest)
     from backend.nbki_smp import preview_smp, preview_smp_from_posting_snapshot
     from backend.nbki_debt_preview import preview_debt
 
@@ -96,10 +98,16 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             crm_debt = split_latest_crm_debt(
                 cur, loan_id, payment_id, payment_date,
                 accounting.get('principal_after') if accounting.get('status') == 'checked' else None)
-        interest_candidate = estimate_current_interest(
-            cur, loan_id, payment_id, payment_date,
-            latest_payment=ledgers[loan_id][-1][0] == payment_id,
-            principal_checked=accounting.get('status') == 'checked')
+        if (posting_snapshot_sha256 and posting_evidence and
+                crm_debt.get('status') == 'calculated_from_posting_snapshot'):
+            interest_candidate = estimate_posting_snapshot_interest(
+                cur, posting_evidence, posting_snapshot_sha256, loan_id,
+                payment_id, payment_date)
+        else:
+            interest_candidate = estimate_current_interest(
+                cur, loan_id, payment_id, payment_date,
+                latest_payment=ledgers[loan_id][-1][0] == payment_id,
+                principal_checked=accounting.get('status') == 'checked')
         if (posting_snapshot_sha256 and posting_evidence and
                 crm_debt.get('status') == 'calculated_from_posting_snapshot'):
             smp_candidate = preview_smp_from_posting_snapshot(

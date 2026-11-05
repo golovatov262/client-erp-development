@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from backend.nbki_crm_debt import (split_latest_crm_debt,
                                    split_posting_snapshot_debt, estimate_current_interest)
+from backend.nbki_crm_debt import estimate_posting_snapshot_interest
 
 
 class Cursor:
@@ -192,6 +193,36 @@ class DebtTest(unittest.TestCase):
                                            date(2026, 9, 16), latest_payment=True)
         self.assertEqual(result['status'], 'unavailable')
         self.assertIn('новый график', result['issues'][0])
+
+    def test_snapshot_interest_reconstructs_historical_event(self):
+        evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-26',
+                    'before': {'loan': {'balance': '1000.00', 'rate': '36'}},
+                    'after': {'loan': {'balance': '900.00', 'rate': '36',
+                                       'amount': '1000.00', 'start_date': '2026-01-01',
+                                       'end_date': '2027-01-31', 'schedule_type': 'annuity',
+                                       'status': 'active'},
+                              'schedule': [
+                                  {'id': 10, 'payment_date': '2026-10-01', 'status': 'paid'},
+                                  {'id': 11, 'payment_date': '2026-11-01',
+                                   'status': 'pending', 'interest_amount': '50.00',
+                                   'paid_amount': '0.00', 'covered_interest_v2': '0.00',
+                                   'covered_total_v2': '0.00'}]}}
+        digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                                           separators=(',', ':')).encode()).hexdigest()
+
+        class SnapshotCursor:
+            def execute(self, query, params):
+                self.query = query
+
+            def fetchall(self):
+                return [(2, date(2026, 10, 26), Decimal('100'), digest, evidence)]
+
+        result = estimate_posting_snapshot_interest(
+            SnapshotCursor(), evidence, digest, 1, 2, date(2026, 10, 26))
+        self.assertEqual(result['status'], 'candidate_from_posting_snapshot_formula')
+        self.assertEqual(result['period_start'], '2026-10-01')
+        self.assertEqual(result['accrued_before_payment'], '24.66')
+        self.assertEqual(result['remaining_interest_candidate'], '24.66')
 
 
 if __name__ == '__main__':

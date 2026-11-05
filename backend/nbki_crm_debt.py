@@ -208,6 +208,160 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
     return result
 
 
+def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str,
+                                       loan_id: int, payment_id: int,
+                                       event_date: date) -> dict:
+    """Estimate accrued current-period interest from immutable CRM postings.
+
+    Every payment after the schedule-period anchor must have its own valid
+    posting snapshot. Principal reductions are taken from snapshot balance
+    deltas and cross-checked against the payment ledger; mutable current loan
+    balances and schedules are not used.
+    """
+    result = {'status': 'unavailable',
+              'basis': 'Снимки проведения платежей CRM: фактические дни / 365',
+              'period_start': None, 'accrued_before_payment': None,
+              'interest_covered_in_period': None,
+              'remaining_interest_candidate': None, 'issues': []}
+
+    def review(message):
+        result['status'] = 'review'
+        result['issues'].append(message)
+        return result
+
+    encoded = json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                         separators=(',', ':')).encode('utf-8')
+    if hashlib.sha256(encoded).hexdigest() != (expected_sha256 or '').strip():
+        result['issues'].append('Контрольная сумма снимка проведения не совпала')
+        return result
+    if (evidence.get('loan_id') != loan_id or evidence.get('payment_id') != payment_id or
+            evidence.get('payment_date') != event_date.isoformat()):
+        result['issues'].append('Снимок относится к другому займу, платежу или дате')
+        return result
+
+    after = evidence.get('after') or {}
+    loan = after.get('loan') or {}
+    schedule = after.get('schedule') or []
+    rate_value = loan.get('rate')
+    start_value = loan.get('start_date')
+    if (loan.get('schedule_type') != 'annuity' or rate_value is None or
+            not start_value or loan.get('status') == 'holiday'):
+        result['issues'].append('Формула фактических дней по этому типу графика/статусу не подтверждена')
+        return result
+    rate = Decimal(str(rate_value))
+    if rate < ZERO:
+        return review('Отрицательная ставка займа в снимке')
+    try:
+        start_date = date.fromisoformat(str(start_value)[:10])
+        previous_due = [date.fromisoformat(str(row['payment_date'])[:10])
+                        for row in schedule
+                        if date.fromisoformat(str(row['payment_date'])[:10]) < event_date]
+    except (KeyError, TypeError, ValueError):
+        return review('В снимке нет корректных дат графика или займа')
+    anchor = max(previous_due) if previous_due else start_date
+    if anchor > event_date:
+        return review('Нет корректной начальной даты периода начисления')
+    result['period_start'] = anchor.isoformat()
+
+    current_rows = []
+    for row in schedule:
+        try:
+            due = date.fromisoformat(str(row['payment_date'])[:10])
+        except (KeyError, TypeError, ValueError):
+            return review('Некорректная дата строки графика в снимке')
+        if due >= event_date and row.get('status') not in ('holiday', 'holiday_pending'):
+            current_rows.append((due, row))
+    if not current_rows:
+        return review('Нет строки графика для текущего периода в снимке')
+    _, current_row = min(current_rows, key=lambda item: item[0])
+    try:
+        scheduled_interest, paid_amount, v2_interest, v2_total = map(
+            _money, (current_row['interest_amount'], current_row['paid_amount'],
+                     current_row['covered_interest_v2'], current_row['covered_total_v2']))
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return review('В снимке нет точного распределения процентов текущей строки')
+    if (v2_total > paid_amount + CENT or
+            min(scheduled_interest, paid_amount, v2_interest, v2_total) < ZERO):
+        return review('Несогласованные суммы в текущей строке графика снимка')
+    legacy_paid = max(ZERO, paid_amount - v2_total)
+    covered_interest = min(legacy_paid, scheduled_interest) + v2_interest
+    if covered_interest > scheduled_interest + CENT:
+        return review('Зачтённые проценты превышают проценты текущей строки графика')
+
+    cur.execute("""SELECT p.id,p.payment_date,p.principal_part,
+        ps.evidence_sha256,ps.evidence
+        FROM loan_payments p LEFT JOIN nbki_payment_posting_snapshots ps
+          ON ps.payment_id=p.id AND ps.loan_id=p.loan_id
+        WHERE p.loan_id=%s AND p.payment_date>=%s
+          AND (p.payment_date,p.id)<=(%s,%s)
+        ORDER BY p.payment_date,p.id""",
+        (loan_id, anchor, event_date, payment_id))
+    payments = cur.fetchall()
+    if not payments or payments[-1][0] != payment_id:
+        return review('Целевой платёж или предшествующая часть периода отсутствует в журнале CRM')
+
+    accrued = ZERO
+    prior_date = anchor
+    running_balance = None
+    target_seen = False
+    for pid, payment_date, principal_part, snapshot_hash, payment_evidence in payments:
+        target = pid == payment_id
+        if target:
+            target_seen = True
+            payment_evidence = evidence
+            snapshot_hash = expected_sha256
+        if not payment_evidence or not snapshot_hash:
+            return review(f'Для платежа {pid} внутри периода нет неизменяемого снимка CRM')
+        encoded_payment = json.dumps(payment_evidence, ensure_ascii=False, sort_keys=True,
+                                     separators=(',', ':')).encode('utf-8')
+        if hashlib.sha256(encoded_payment).hexdigest() != snapshot_hash.strip():
+            return review(f'Контрольная сумма снимка платежа {pid} не совпала')
+        if (payment_evidence.get('loan_id') != loan_id or
+                payment_evidence.get('payment_id') != pid or
+                payment_evidence.get('payment_date') != payment_date.isoformat()):
+            return review(f'Снимок платежа {pid} относится к другой операции')
+        before_loan = (payment_evidence.get('before') or {}).get('loan') or {}
+        after_loan = (payment_evidence.get('after') or {}).get('loan') or {}
+        try:
+            before_balance = _money(before_loan['balance'])
+            after_balance = _money(after_loan['balance'])
+            before_rate = Decimal(str(before_loan['rate']))
+            after_rate = Decimal(str(after_loan['rate']))
+            payment_day = date.fromisoformat(str(payment_date)[:10])
+            recorded_principal = _money(principal_part)
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return review(f'В снимке платежа {pid} нет достоверного остатка или ставки')
+        if before_rate != after_rate or before_rate != rate:
+            return review('Внутри периода менялась ставка; требуется версия условий на даты начисления')
+        if before_balance < ZERO or after_balance < ZERO or before_balance < after_balance:
+            return review(f'Несогласованный остаток основного долга в снимке платежа {pid}')
+        principal_delta = before_balance - after_balance
+        if abs(principal_delta - recorded_principal) > CENT:
+            return review(f'Снижение остатка в снимке платежа {pid} не равно части ОД журнала CRM')
+        if running_balance is None:
+            running_balance = before_balance
+        elif abs(running_balance - before_balance) > CENT:
+            return review(f'Разрыв остатков между снимками платежей до операции {pid}')
+        days = (payment_day - prior_date).days
+        if days < 0:
+            return review('Нарушен порядок дат платежей внутри периода')
+        if days:
+            accrued += _money(running_balance * rate * Decimal(days) / Decimal('36500'))
+        running_balance = after_balance
+        prior_date = payment_day
+
+    if not target_seen:
+        return review('Целевой платёж отсутствует среди снимков периода')
+    if prior_date < event_date:
+        days = (event_date - prior_date).days
+        accrued += _money(running_balance * rate * Decimal(days) / Decimal('36500'))
+    result.update({'status': 'candidate_from_posting_snapshot_formula',
+                   'accrued_before_payment': str(accrued),
+                   'interest_covered_in_period': str(covered_interest),
+                   'remaining_interest_candidate': str(max(ZERO, accrued - covered_interest))})
+    return result
+
+
 def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
                           event_date: date, principal_after) -> dict:
     """Reconstruct overdue schedule claims from CRM when no later payment exists."""

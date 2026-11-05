@@ -94,7 +94,9 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         blockers.append('Не подтверждено распределение платежа CRM')
     debt_ready = bool(debt_preview and debt_preview.get('status') == 'candidate_from_crm_components')
     interest_ready = bool(interest_candidate and
-                          interest_candidate.get('status') == 'candidate_from_crm_formula')
+                          interest_candidate.get('status') in
+                          ('candidate_from_crm_formula',
+                           'candidate_from_posting_snapshot_formula'))
     smp_ready = bool(smp_candidate and smp_candidate.get('status') in
                      ('candidate_from_crm_schedule', 'candidate_from_crm_components',
                       'candidate_from_posting_snapshot_schedule'))

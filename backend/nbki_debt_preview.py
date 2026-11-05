@@ -22,7 +22,8 @@ def preview_debt(accounting: dict, crm_debt: dict, interest_candidate: dict) -> 
             'calculated_from_current_crm', 'calculated_from_posting_snapshot'):
         result['issues'].append('Основной долг и график CRM не прошли сверку')
         return result
-    if interest_candidate.get('status') != 'candidate_from_crm_formula':
+    if interest_candidate.get('status') not in (
+            'candidate_from_crm_formula', 'candidate_from_posting_snapshot_formula'):
         result['issues'].append('Нет расчёта фактически накопленных процентов текущего периода')
         return result
     penalty = crm_debt.get('penalty_candidate')
