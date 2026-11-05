@@ -164,7 +164,19 @@ const LoanCollateralTab = ({ loanId }: Props) => {
     setIdentifier(item.identifier || "");
     setLocationAddress(item.nbki_location_address || (item.collateral_type === "Залог движимого имущества" ? loan?.member_registration_address || "" : item.collateral_type === "Залог недвижимого имущества" ? item.description || "" : ""));
     setFiasResults([]);
-    setNbki(Object.fromEntries(NBKI_FIELDS.map(([key]) => [key, (item as any)[key] == null || (item as any)[key] === "" ? (defaultNbki(item.collateral_type) as Record<string, string>)[key] || "" : String((item as any)[key]).slice(0, 10)])));
+    const storedFields = item as unknown as Record<string, string | number | null | undefined>;
+    setNbki(Object.fromEntries(NBKI_FIELDS.map(([key, , kind]) => {
+      const value = storedFields[key];
+      const fallback = (defaultNbki(item.collateral_type) as Record<string, string>)[key] || "";
+      // Date inputs require YYYY-MM-DD, but identifiers/codes (especially the
+      // 11-digit OKATO) must be preserved exactly as stored.
+      const formatted = value == null || value === ""
+        ? fallback
+        : kind === "date"
+          ? String(value).slice(0, 10)
+          : String(value);
+      return [key, formatted];
+    })));
     setShowAdd(true);
   };
 
