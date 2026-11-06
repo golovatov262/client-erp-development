@@ -70,7 +70,11 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
         if covered_interest > interest + CENT or covered_principal > principal + CENT:
             result['issues'].append(f'Оплата превышает сумму строки графика {row["id"]}')
             continue
-        if due < event_date and row['status'] not in ('holiday','holiday_pending'):
+        # Legacy schedule rows can be marked paid even when the historical
+        # paid_amount differs from principal + interest by a few rounding cents.
+        # The CRM status is authoritative for whether the installment remains
+        # overdue; do not turn a closed installment into a fresh debt claim.
+        if due < event_date and row['status'] not in ('paid','holiday','holiday_pending'):
             remaining_principal = max(ZERO, principal - covered_principal)
             remaining_interest = max(ZERO, interest - covered_interest)
             overdue_principal += remaining_principal
@@ -421,13 +425,15 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
         COALESCE(s.paid_amount,0),
         COALESCE(SUM(a.amount) FILTER (WHERE a.component='interest'),0),
         COALESCE(SUM(a.amount) FILTER (WHERE a.component='principal'),0),
-        COALESCE(SUM(a.amount),0)
+        COALESCE(SUM(a.amount),0),s.status
         FROM loan_schedule s LEFT JOIN loan_payment_allocations a ON a.schedule_id=s.id
         WHERE s.loan_id=%s AND s.payment_date<%s
         GROUP BY s.id ORDER BY s.payment_date,s.id""", (loan_id, event_date))
     overdue_principal = ZERO
     overdue_interest = ZERO
-    for sid, due, principal, interest, paid, v2_interest, v2_principal, v2_total in cur.fetchall():
+    for sid, due, principal, interest, paid, v2_interest, v2_principal, v2_total, status in cur.fetchall():
+        if status in ('paid', 'holiday', 'holiday_pending'):
+            continue
         principal, interest, paid = map(_money, (principal, interest, paid))
         v2_interest, v2_principal, v2_total = map(_money, (v2_interest, v2_principal, v2_total))
         if min(principal, interest, paid, v2_interest, v2_principal, v2_total) < ZERO:

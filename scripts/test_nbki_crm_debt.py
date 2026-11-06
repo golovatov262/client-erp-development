@@ -37,7 +37,7 @@ class DebtTest(unittest.TestCase):
         cur = Cursor(0, [(10, date(2026, 9, 30), Decimal('3540.14'),
                           Decimal('9847.26'), Decimal('13387.40'),
                           Decimal('8159.13'), Decimal('3540.14'),
-                          Decimal('11699.27'))])
+                          Decimal('11699.27'), 'paid')])
         result = split_latest_crm_debt(cur, 87, 2649, date(2026, 10, 26), '321425.56')
         self.assertEqual(result['overdue_principal'], '0.00')
         self.assertEqual(result['overdue_interest'], '0.00')
@@ -46,11 +46,18 @@ class DebtTest(unittest.TestCase):
 
     def test_partial_due_row_separates_principal_and_interest(self):
         cur = Cursor(0, [(10, date(2026, 9, 30), Decimal('100'), Decimal('50'),
-                          Decimal('90'), Decimal('10'), Decimal('40'), Decimal('50'))])
+                          Decimal('90'), Decimal('10'), Decimal('40'), Decimal('50'), 'partial')])
         result = split_latest_crm_debt(cur, 1, 2, date(2026, 10, 1), '900')
         self.assertEqual(result['overdue_principal'], '60.00')
         self.assertEqual(result['overdue_interest'], '0.00')
         self.assertEqual(result['term_principal'], '840.00')
+
+    def test_paid_legacy_row_does_not_become_overdue_for_rounding_cents(self):
+        cur = Cursor(0, [(11, date(2026, 9, 30), Decimal('0.09'), Decimal('0'),
+                          Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), 'paid')])
+        result = split_latest_crm_debt(cur, 1, 2, date(2026, 10, 1), '100.00')
+        self.assertEqual(result['overdue_principal'], '0.00')
+        self.assertEqual(result['term_principal'], '100.00')
 
     def test_later_payment_fails_closed(self):
         result = split_latest_crm_debt(Cursor(1, []), 1, 2, date(2026, 10, 1), '900')
@@ -94,7 +101,12 @@ class DebtTest(unittest.TestCase):
                                             'principal_amount': '800.00', 'interest_amount': '20.00',
                                             'paid_amount': '0.00', 'covered_interest_v2': '0.00',
                                             'covered_principal_v2': '0.00', 'covered_total_v2': '0.00',
-                                            'penalty_amount': '0.00', 'status': 'pending'}]}}
+                                            'penalty_amount': '0.00', 'status': 'pending'},
+                                           {'id': 12, 'payment_date': '2026-09-30',
+                                            'principal_amount': '0.09', 'interest_amount': '0.00',
+                                            'paid_amount': '0.00', 'covered_interest_v2': '0.00',
+                                            'covered_principal_v2': '0.00', 'covered_total_v2': '0.00',
+                                            'penalty_amount': '0.00', 'status': 'paid'}]}}
         digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
                                            separators=(',', ':')).encode()).hexdigest()
         result = split_posting_snapshot_debt(evidence, digest, 1, 2, date(2026, 10, 1))

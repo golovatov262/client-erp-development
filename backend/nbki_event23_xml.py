@@ -222,6 +222,14 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     return event
 
 
+def _require_reconciled_schedule_principal(smp: dict) -> None:
+    """Do not serialize an event whose CRM schedule disagrees with CRM debt."""
+    if not smp or smp.get('principal_reconciled') is not True:
+        difference = smp.get('principal_difference') if smp else None
+        detail = f' (разница «график − срочный долг»: {difference} ₽)' if difference is not None else ''
+        raise ValueError('Событие удержано: основной долг будущего графика не сверился со срочным остатком CRM' + detail)
+
+
 def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     """Build a one-event file from CRM facts and validate it against XSD 5.1."""
     facts = payment_event_facts(cur, org_id, event_id)
@@ -271,6 +279,7 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
         frozen[1], frozen[0].strip(), loan_id, payment_id, event_date, crm_debt)
         if frozen and crm_debt.get('status') == 'calculated_from_posting_snapshot'
         else preview_smp(cur, loan_id, event_date, crm_debt))
+    _require_reconciled_schedule_principal(smp)
     if debt_preview.get('status') != 'candidate_from_crm_components':
         raise ValueError('Не удалось получить согласованный срез долга CRM: ' + '; '.join(debt_preview['issues']))
     if not facts['event_occurred_at']:
