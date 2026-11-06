@@ -18,15 +18,17 @@ except ImportError:  # pragma: no cover - deployment dependency is declared
 
 try:
     from nbki_crm_export_facts import payment_event_facts
-    from nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from nbki_crm_debt import (split_latest_crm_debt, estimate_current_interest,
+                               estimate_posting_snapshot_interest)
     from nbki_debt_preview import preview_debt
-    from nbki_smp import preview_smp
+    from nbki_smp import preview_smp, preview_smp_from_posting_snapshot
     from nbki_xml_builder import document_xml
 except ImportError:
     from backend.nbki_crm_export_facts import payment_event_facts
-    from backend.nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
+    from backend.nbki_crm_debt import (split_latest_crm_debt, estimate_current_interest,
+                                        estimate_posting_snapshot_interest)
     from backend.nbki_debt_preview import preview_debt
-    from backend.nbki_smp import preview_smp
+    from backend.nbki_smp import preview_smp, preview_smp_from_posting_snapshot
     from backend.nbki_xml_builder import document_xml
 
 
@@ -232,15 +234,41 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     if accounting.get('status') != 'checked':
         raise ValueError('Платёж и остаток основного долга не прошли сверку CRM')
     event_date = date.fromisoformat(facts['payment']['date'])
+    cur.execute("""SELECT evidence_sha256,evidence FROM nbki_payment_posting_snapshots
+        WHERE payment_id=%s AND loan_id=%s""", (payment_id, loan_id))
+    frozen = cur.fetchone()
     crm_debt = facts.get('debt_at_posting')
-    if not crm_debt or crm_debt.get('status') != 'calculated_from_posting_snapshot':
+    if not frozen:
         crm_debt = split_latest_crm_debt(cur, loan_id, payment_id, event_date,
                                          accounting['principal_after'])
-    interest = estimate_current_interest(cur, loan_id, payment_id, event_date,
-        latest_payment=crm_debt.get('later_payments', 0) == 0,
-        principal_checked=True)
+    if frozen and crm_debt.get('status') == 'calculated_from_posting_snapshot':
+        interest = estimate_posting_snapshot_interest(
+            cur, frozen[1], frozen[0].strip(), loan_id, payment_id, event_date)
+        history_gap = any('нет неизменяемого снимка CRM' in issue
+                          for issue in interest.get('issues', []))
+        if history_gap:
+            cur.execute("""SELECT NOT EXISTS (SELECT 1 FROM loan_payments
+                WHERE loan_id=%s AND (payment_date>%s OR (payment_date=%s AND id>%s)))""",
+                (loan_id, event_date, event_date, payment_id))
+            latest_payment = bool(cur.fetchone()[0])
+            if latest_payment:
+                fallback = estimate_current_interest(
+                    cur, loan_id, payment_id, event_date, latest_payment=True,
+                    principal_checked=True)
+                if fallback.get('status') == 'candidate_from_crm_formula':
+                    interest = fallback
+    else:
+        cur.execute("""SELECT NOT EXISTS (SELECT 1 FROM loan_payments
+            WHERE loan_id=%s AND (payment_date>%s OR (payment_date=%s AND id>%s)))""",
+            (loan_id, event_date, event_date, payment_id))
+        latest_payment = bool(cur.fetchone()[0])
+        interest = estimate_current_interest(cur, loan_id, payment_id, event_date,
+            latest_payment=latest_payment, principal_checked=True)
     debt_preview = preview_debt(accounting, crm_debt, interest)
-    smp = preview_smp(cur, loan_id, event_date, crm_debt)
+    smp = (preview_smp_from_posting_snapshot(
+        frozen[1], frozen[0].strip(), loan_id, payment_id, event_date, crm_debt)
+        if frozen and crm_debt.get('status') == 'calculated_from_posting_snapshot'
+        else preview_smp(cur, loan_id, event_date, crm_debt))
     if debt_preview.get('status') != 'candidate_from_crm_components':
         raise ValueError('Не удалось получить согласованный срез долга CRM: ' + '; '.join(debt_preview['issues']))
     if not facts['event_occurred_at']:
