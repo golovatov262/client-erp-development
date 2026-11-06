@@ -55,7 +55,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
           AND p.payment_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
               WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
-                AND e.role='borrower' AND e.match_status='matched')
+                AND e.role='borrower')
         ORDER BY p.payment_date,l.id,p.id""", (org_id,))
     rows = []
     inspections = {}
@@ -209,7 +209,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
           AND s.status NOT IN ('holiday','holiday_pending')
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
               WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
-                AND e.role='borrower' AND e.match_status='matched')
+                AND e.role='borrower')
         ORDER BY s.payment_date,l.id,s.id""", (org_id,))
     schedule_due_review = []
     today_msk = datetime.now(MOSCOW).date()
@@ -259,7 +259,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
           AND a.accrual_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
               WHERE e.org_id=f.org_id AND e.loan_id=l.id AND e.uid=f.uid
-                AND e.role='borrower' AND e.match_status='matched')
+                AND e.role='borrower')
         GROUP BY l.id,l.contract_no,f.uid,f.event_time
         ORDER BY MAX(a.accrual_date) DESC,l.id""", (org_id,))
     penalty_accrual_review = []

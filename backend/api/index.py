@@ -63,6 +63,10 @@ try:
 except ImportError:
     from backend.nbki_crm_export_facts import payment_event_facts
 try:
+    from nbki_uid import authoritative_borrower_uid
+except ImportError:
+    from backend.nbki_uid import authoritative_borrower_uid
+try:
     from nbki_event23_xml import build_event23_xml, build_event23_batch_xml
 except ImportError:
     from backend.nbki_event23_xml import build_event23_xml, build_event23_batch_xml
@@ -801,21 +805,15 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % loan['org_id'])
                 loan['org_name'] = org_row['name'] if org_row else ''
                 loan['org_short_name'] = org_row['short_name'] if org_row else ''
-            cur.execute("""SELECT e.uid, CASE WHEN x.reported_accepted THEN 'ticket2_unverified'
-                                      ELSE 'operator_assumed' END
-                           FROM nbki_event_deals e LEFT JOIN nbki_deals x
-                             ON x.org_id=e.org_id AND x.uid=e.uid
-                           WHERE e.loan_id=%s AND e.role='borrower' AND e.match_status='matched'
-                           ORDER BY e.last_event_time DESC LIMIT 1""", (loan['id'],))
-            nbki_row = cur.fetchone()
-            if not nbki_row:
-                cur.execute("SELECT uid, CASE WHEN reported_accepted THEN 'ticket2_unverified' ELSE 'no_receipt' END FROM nbki_deals WHERE loan_id=%s", (loan['id'],))
-                nbki_row = cur.fetchone()
-            if not nbki_row:
-                cur.execute("SELECT loan_uid, 'manual_entry' FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s AND loan_uid IS NOT NULL", (loan['id'], loan.get('org_id')))
-                nbki_row = cur.fetchone()
-            loan['nbki_uid'] = nbki_row[0] if nbki_row else None
-            loan['nbki_acceptance_basis'] = nbki_row[1] if nbki_row else None
+            cur.execute("SELECT loan_uid FROM loan_bki_fields WHERE loan_id=%s AND org_id=%s",
+                        (loan['id'], loan.get('org_id')))
+            manual_row = cur.fetchone()
+            uid, uid_basis = authoritative_borrower_uid(
+                cur, loan.get('org_id'), loan['id'], loan.get('contract_no'),
+                manual_row[0] if manual_row else None)
+            loan['nbki_uid'] = uid
+            loan['nbki_acceptance_basis'] = 'nbki_file_uid' if uid_basis == 'nbki_file' else (
+                'manual_entry' if uid_basis == 'crm_manual' else 'no_uid')
             cur.execute("""SELECT psk_percent,psk_amount,calculated_on,principal,annual_rate,
                 term_months,schedule_type,verification_status,verification_note,calculated_at
                 FROM loan_psk_calculations WHERE loan_id=%s""", (loan['id'],))
@@ -10092,14 +10090,18 @@ def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
-    cur.execute("SELECT id FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
-    if not cur.fetchone():
+    cur.execute("SELECT id,contract_no FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))
+    loan_row = cur.fetchone()
+    if not loan_row:
         return {'_status': 404, 'error': 'Договор не найден'}
     if method == 'GET':
         cur.execute("""SELECT loan_uid,deal_code,kind_code,purpose_code,note,updated_at FROM loan_bki_fields
             WHERE loan_id=%s AND org_id=%s""", (loan_id,org_id))
         row = cur.fetchone()
-        if not row: return {}
+        if not row: row = (None, None, None, None, None, None)
+        if not row[0]:
+            row = (authoritative_borrower_uid(cur, org_id, loan_id,
+                        loan_row[1], None)[0], *row[1:])
         keys = ('loan_uid','deal_code','kind_code','purpose_code','note','updated_at')
         return dict(zip(keys, (serialize(value) for value in row)))
     if method != 'PUT':
@@ -10107,12 +10109,6 @@ def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
     loan_uid = (body.get('loan_uid') or '').strip() or None
     if loan_uid and len(loan_uid) > 100:
         return {'_status': 400, 'error': 'УИД займа не должен превышать 100 символов'}
-    if loan_uid:
-        cur.execute("""SELECT uid FROM nbki_deals WHERE org_id=%s AND loan_id=%s AND deal_role='borrower' AND match_status='matched'
-            UNION SELECT uid FROM nbki_event_deals WHERE org_id=%s AND loan_id=%s AND role='borrower' AND match_status='matched'""", (org_id,loan_id,org_id,loan_id))
-        imported_uids = {row[0] for row in cur.fetchall() if row[0]}
-        if imported_uids and imported_uids != {loan_uid}:
-            return {'_status': 409, 'error': 'УИД расходится с импортированным сопоставлением. Сначала проверьте реестр БКИ.'}
     keys = ('deal_code','kind_code','purpose_code','note')
     values = [body.get(key) or None for key in keys]
     cur.execute("""INSERT INTO loan_bki_fields

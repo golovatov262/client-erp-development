@@ -122,35 +122,16 @@ def parse_mxl(raw: bytes) -> dict:
 def _match_borrower(cur, org_id: int, deal: dict) -> tuple[int | None, str, str | None]:
     if deal['role'] == 'guarantor':
         return None, 'guarantor', 'УИД поручителя хранится отдельно от УИД заемщика'
-    cur.execute("""SELECT l.id, l.amount, l.start_date, m.member_type,
-                          m.last_name, m.first_name, m.middle_name, m.company_name
-                   FROM loans l JOIN members m ON m.id=l.member_id
+    # The file supplies only the UID. CRM remains authoritative for every
+    # contract/member field, so link by a unique contract number only.
+    cur.execute("""SELECT l.id FROM loans l
                    WHERE l.org_id=%s AND l.contract_no=%s AND l.bki_enabled IS TRUE""", (org_id, deal['contract_no']))
     matches = cur.fetchall()
     if not matches:
         return None, 'not_in_crm', 'Номер договора отсутствует в CRM'
     if len(matches) != 1:
         return None, 'review', 'Номер договора неоднозначен'
-    loan_id, crm_amount, crm_date, kind, last, first, middle, company = matches[0]
-    crm_name = ' '.join(filter(None, (last, first, middle))) if kind == 'FL' else company
-    problems = []
-    if not crm_name or _norm(crm_name) != _norm(deal['subject_name']):
-        problems.append('имя заемщика')
-    if deal['original_amount'] is not None and crm_amount is not None and abs(deal['original_amount'] - crm_amount) > Decimal('0.01'):
-        problems.append('сумма договора')
-    if deal['deal_date'] and crm_date and deal['deal_date'] != crm_date:
-        problems.append('дата договора')
-    if deal['original_amount'] is None or crm_amount is None or deal['deal_date'] is None or crm_date is None:
-        problems.append('недостаточно данных для проверки')
-    cur.execute('SELECT uid, loan_id FROM nbki_deals WHERE org_id=%s AND (uid=%s OR contract_no=%s)',
-                (org_id, deal['uid'], deal['contract_no']))
-    for old_uid, old_loan in cur.fetchall():
-        if old_uid != deal['uid'] or old_loan not in (None, loan_id):
-            problems.append('конфликт с УИД из XML')
-            break
-    if problems:
-        return None, 'review', 'Расхождение: ' + ', '.join(problems)
-    return loan_id, 'matched', None
+    return matches[0][0], 'matched', None
 
 
 def _same_guarantor_name(source_name: str, existing_name: str | None) -> bool:
@@ -251,16 +232,24 @@ def import_mxl(conn, raw: bytes, original_name: str) -> dict:
             cur.execute('SELECT contract_no, nbki_contract_no, role, subject_name, loan_id, deal_date, original_amount FROM nbki_event_deals WHERE org_id=%s AND uid=%s',
                         (org_id, uid))
             existing = cur.fetchone()
-            if existing and (existing[0] != deal['contract_no'] or existing[1] != deal['nbki_contract_no'] or
-                             existing[2] != deal['role'] or _norm(existing[3]) != _norm(deal['subject_name']) or
-                             existing[5] != deal['deal_date'] or existing[6] != deal['original_amount'] or
+            if existing and (existing[2] != deal['role'] or
                              (existing[4] is not None and loan_id is not None and existing[4] != loan_id)):
-                raise ValueError('УИД уже связан с другими реквизитами в прежнем MXL')
+                raise ValueError('УИД уже связан с другой ролью или договором CRM')
             cur.execute("""INSERT INTO nbki_event_deals
                 (org_id,uid,contract_no,nbki_contract_no,role,subject_name,deal_date,original_amount,loan_id,
                  match_status,match_reason,first_event_time,last_event_time,last_source_id)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (org_id,uid) DO UPDATE SET
+                  contract_no=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time
+                                   THEN EXCLUDED.contract_no ELSE nbki_event_deals.contract_no END,
+                  nbki_contract_no=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time
+                                        THEN EXCLUDED.nbki_contract_no ELSE nbki_event_deals.nbki_contract_no END,
+                  subject_name=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time
+                                    THEN EXCLUDED.subject_name ELSE nbki_event_deals.subject_name END,
+                  deal_date=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time
+                                 THEN EXCLUDED.deal_date ELSE nbki_event_deals.deal_date END,
+                  original_amount=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time
+                                       THEN EXCLUDED.original_amount ELSE nbki_event_deals.original_amount END,
                   first_event_time=LEAST(nbki_event_deals.first_event_time,EXCLUDED.first_event_time),
                   last_event_time=GREATEST(nbki_event_deals.last_event_time,EXCLUDED.last_event_time),
                   last_source_id=CASE WHEN EXCLUDED.last_event_time>=nbki_event_deals.last_event_time

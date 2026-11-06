@@ -16,9 +16,9 @@ from decimal import Decimal
 from psycopg2.extras import Json
 
 try:
-    from nbki_import import _norm
+    from nbki_uid import borrower_file_uids
 except ImportError:
-    from backend.nbki_import import _norm
+    from backend.nbki_uid import borrower_file_uids
 
 
 def _json_default(value):
@@ -300,19 +300,11 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
                              ('registration_address','адрес регистрации')):
             if not data[field]:
                 issues.append('Отсутствует ' + label)
-    all_matches = [(uid,status,subject) for uid,status,subject in xml_matches]
-    all_matches += [(uid,status,subject) for uid,status,subject,_ in mxl_matches]
-    if any(status != 'matched' for _,status,_ in all_matches):
-        issues.append('Есть УИД с неподтвержденным сопоставлением')
-    matched_uids = {uid for uid,status,_ in all_matches if status == 'matched'}
-    if manual_uid:
-        matched_uids.add(manual_uid)
-    if manual_uid and any(uid != manual_uid for uid in matched_uids):
-        issues.append('Ручной УИД расходится с импортированным сопоставлением')
-    if len(matched_uids) != 1:
+    file_uids = borrower_file_uids(cur, org_id, loan_id, data['contract_no'])
+    uid = file_uids[0] if file_uids else manual_uid
+    uid_basis = 'nbki_file' if file_uids else ('crm_manual' if manual_uid else 'missing')
+    if not uid:
         issues.append('Нет единственного сопоставленного УИД договора')
-    if any(_norm(subject) != _norm(name) for _,status,subject in all_matches if status == 'matched'):
-        issues.append('Имя заемщика расходится с историческим источником')
     if data['balance'] is None or data['balance'] < 0:
         issues.append('Некорректный остаток займа')
     snapshot = {
@@ -324,10 +316,11 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
             'first_name','middle_name','company_name','birth_date','birth_place',
             'passport_series','passport_number','passport_issue_date','passport_issued_by',
             'passport_dept_code','registration_address','inn','member_updated_at')},
-        'uid': next(iter(matched_uids)) if len(matched_uids) == 1 else None,
+        'uid': uid,
         'uid_sources': {'xml': [list(x) for x in xml_matches],
                         'mxl': [list(x) for x in mxl_matches],
-                        'manual': manual_uid},
+                        'file_uids_newest_first': file_uids,
+                        'basis': uid_basis, 'manual': manual_uid},
         'payments': payments,
         'schedule': schedule,
         'collateral': collateral,

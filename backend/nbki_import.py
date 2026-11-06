@@ -1,7 +1,7 @@
 """Import historical GUTDF files and receipt results into the CRM registry.
 
-This module never changes loans or members. A UID is linked only after an exact,
-unambiguous contract match and agreement of the available identity fields.
+The UID comes from the imported file; CRM is authoritative for loan and member
+data. A UID is linked only by a unique, exact CRM contract number.
 """
 
 from __future__ import annotations
@@ -248,36 +248,17 @@ def parse_receipt_zip(payload: bytes | Path) -> dict:
 def _match_loan(cur, org_id: int, deal: Deal) -> tuple[int | None, str, str | None]:
     if deal.role == 'guarantor':
         return None, 'guarantor', 'УИД поручителя: договор поручительства не является займом CRM'
-    cur.execute("""SELECT l.id, l.amount, l.start_date, m.member_type, m.inn,
-                          m.birth_date, m.last_name, m.first_name, m.middle_name, m.company_name
-                   FROM loans l JOIN members m ON m.id=l.member_id
+    # The UID is taken from the NBKI file, but all loan and borrower details
+    # come from CRM. Match only by a unique CRM contract number; old file
+    # amounts, dates and subject text must not invalidate a known UID.
+    cur.execute("""SELECT l.id FROM loans l
                    WHERE l.org_id=%s AND l.contract_no=%s AND l.bki_enabled IS TRUE""", (org_id, deal.contract_no))
     rows = cur.fetchall()
     if not rows:
         return None, "not_in_crm", "Номер договора отсутствует в CRM"
     if len(rows) != 1:
         return None, "review", "Номер договора неоднозначен"
-    row = rows[0]
-    loan_id, amount, start_date, kind, inn, birth, last, first, middle, company = row
-    problems = []
-    if kind != deal.subject_type:
-        problems.append("тип заемщика")
-    if deal.subject_inn and inn and deal.subject_inn != inn:
-        problems.append("ИНН")
-    crm_name = " ".join(filter(None, (last, first, middle))) if kind == "FL" else company
-    if deal.subject_name and crm_name and _norm(deal.subject_name) != _norm(crm_name):
-        problems.append("имя заемщика")
-    if deal.birth_date and birth and deal.birth_date != birth:
-        problems.append("дата рождения")
-    if deal.original_amount is not None and amount is not None and abs(deal.original_amount - amount) > Decimal("0.01"):
-        problems.append("сумма договора")
-    if deal.deal_date and start_date and deal.deal_date != start_date:
-        problems.append("дата договора")
-    if not deal.subject_name or not crm_name or deal.original_amount is None or amount is None:
-        problems.append("недостаточно данных для проверки")
-    if problems:
-        return None, "review", "Расхождение: " + ", ".join(problems)
-    return loan_id, "matched", None
+    return rows[0][0], "matched", None
 
 
 def _sync_collateral_events(cur, org_id: int, file_id: int, source: dict,

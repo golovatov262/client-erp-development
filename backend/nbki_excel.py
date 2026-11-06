@@ -104,9 +104,11 @@ def make_missing_uid_xlsx(cur, org_id: int) -> bytes:
         FROM loans l JOIN members m ON m.id=l.member_id
         WHERE l.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         AND NOT EXISTS (SELECT 1 FROM nbki_deals d
-            WHERE d.loan_id=l.id AND d.match_status='matched')
+            WHERE d.org_id=l.org_id AND d.deal_role='borrower'
+              AND (d.loan_id=l.id OR d.contract_no=l.contract_no))
         AND NOT EXISTS (SELECT 1 FROM nbki_event_deals d
-            WHERE d.loan_id=l.id AND d.role='borrower' AND d.match_status='matched')
+            WHERE d.org_id=l.org_id AND d.role='borrower'
+              AND (d.loan_id=l.id OR d.contract_no=l.contract_no))
         ORDER BY l.status,l.contract_no""", (org_id,))
     book = Workbook()
     sheet = book.active

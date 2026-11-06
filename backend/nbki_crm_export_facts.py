@@ -12,10 +12,12 @@ try:
     from nbki_accounting_snapshot import (build_accounting_snapshot,
                                           audit_payment_allocations)
     from nbki_crm_debt import split_posting_snapshot_debt
+    from nbki_uid import authoritative_borrower_uid
 except ImportError:
     from backend.nbki_accounting_snapshot import (build_accounting_snapshot,
                                                   audit_payment_allocations)
     from backend.nbki_crm_debt import split_posting_snapshot_debt
+    from backend.nbki_uid import authoritative_borrower_uid
 
 
 def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
@@ -43,18 +45,14 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
      registration_address,org_inn,org_ogrn,org_name,org_short_name,bki_enabled) = row
     if status not in ('active','overdue','holiday'):
         raise ValueError('Закрытый договор исключён из исходящей выгрузки')
-    cur.execute("""SELECT DISTINCT uid FROM (
-        SELECT uid FROM nbki_event_deals WHERE org_id=%s AND loan_id=%s
-            AND role='borrower' AND match_status='matched'
-        UNION ALL
-        SELECT uid FROM nbki_deals WHERE org_id=%s AND loan_id=%s
-            AND deal_role='borrower' AND match_status='matched'
-        UNION ALL
-        SELECT loan_uid AS uid FROM loan_bki_fields WHERE org_id=%s AND loan_id=%s
-        ) matched WHERE uid IS NOT NULL""", (org_id, loan_id, org_id, loan_id, org_id, loan_id))
-    uids = [value[0] for value in cur.fetchall()]
-    if len(uids) != 1:
-        raise ValueError('Для исходящей выгрузки нужен один сопоставленный УИД')
+    cur.execute("SELECT loan_uid FROM loan_bki_fields WHERE org_id=%s AND loan_id=%s",
+                (org_id, loan_id))
+    manual_row = cur.fetchone()
+    manual_uid = manual_row[0] if manual_row else None
+    uid, _uid_basis = authoritative_borrower_uid(
+        cur, org_id, loan_id, contract_no, manual_uid)
+    if not uid:
+        raise ValueError('Для исходящей выгрузки не найден УИД в файле БКИ или CRM')
     cur.execute("""SELECT id,payment_date,amount,principal_part,interest_part,
         penalty_part,engine_version FROM loan_payments WHERE loan_id=%s
         ORDER BY payment_date,id""", (loan_id,))
@@ -104,7 +102,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         'event_id': event_id, 'event_code': '2.3', 'payment_id': payment_id,
         'loan_id': loan_id,
         'event_occurred_at': occurred_at.isoformat() if occurred_at else None,
-        'uid': uids[0], 'contract_no': contract_no,
+        'uid': uid, 'contract_no': contract_no,
         'source': {'org_id': org_id, 'inn': org_inn, 'ogrn': org_ogrn,
                    'name': org_name, 'short_name': org_short_name,
                    'source_id': source[0] if source else None,

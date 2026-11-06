@@ -9,7 +9,8 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
     """Show queued operations with the accounting evidence used by the exporter.
 
     The event ledger is intentionally separate from historical import receipts.
-    Closed loans and loans without one matched UID are not export candidates.
+    Closed loans and loans without a UID from an imported NBKI file or CRM are
+    not export candidates. Imported non-UID details are not compared here.
     """
     if not 1 <= limit <= 500:
         raise ValueError('Недопустимый размер страницы событий')
@@ -21,9 +22,14 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
         e.event_kind,e.event_occurred_at,e.recorded_at,e.status,e.evidence_sha256,
         p.payment_date,p.amount,p.principal_part,p.interest_part,p.penalty_part,
         l.amount,l.balance,
-        (SELECT array_agg(DISTINCT d.uid) FROM nbki_event_deals d
-         WHERE d.org_id=e.org_id AND d.loan_id=e.loan_id
-           AND d.role='borrower' AND d.match_status='matched') AS uids
+        (SELECT array_agg(DISTINCT d.uid) FROM (
+            SELECT uid FROM nbki_event_deals d WHERE d.org_id=e.org_id
+              AND d.role='borrower' AND (d.loan_id=e.loan_id OR d.contract_no=l.contract_no)
+            UNION SELECT uid FROM nbki_deals d WHERE d.org_id=e.org_id
+              AND d.deal_role='borrower' AND (d.loan_id=e.loan_id OR d.contract_no=l.contract_no)
+            UNION SELECT loan_uid FROM loan_bki_fields f
+              WHERE f.org_id=e.org_id AND f.loan_id=e.loan_id
+        ) d WHERE d.uid IS NOT NULL AND BTRIM(d.uid)<>'') AS uids
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         LEFT JOIN loan_payments p ON e.source_type='loan_payment' AND p.id=e.source_id
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
