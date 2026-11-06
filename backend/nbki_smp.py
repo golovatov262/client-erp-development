@@ -36,6 +36,8 @@ def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
     result = {'status': 'unavailable', 'basis': 'Пункт 5 приложения 1 к 758-П; оставшиеся платежи графика CRM',
               'months_uncapped': None, 'months_cap48': None,
               'remaining_schedule_payments': None, 'overdue_principal_interest': None,
+              'remaining_schedule_principal': None, 'expected_term_principal': None,
+              'principal_difference': None,
               'penalty_candidate': None, 'value_without_penalty_uncapped': None,
               'value_with_penalty_uncapped': None, 'value_without_penalty_cap48': None,
               'value_with_penalty_cap48': None, 'principal_reconciled': False,
@@ -91,6 +93,9 @@ def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
         result['status'] = 'review'
         return result
     expected_principal = money(crm_debt['term_principal'])
+    result.update({'remaining_schedule_principal': str(remaining_principal),
+                   'expected_term_principal': str(expected_principal),
+                   'principal_difference': str(remaining_principal - expected_principal)})
     result['principal_reconciled'] = abs(remaining_principal - expected_principal) <= CENT
     if not result['principal_reconciled']:
         result['status'] = 'review'
@@ -127,6 +132,8 @@ def preview_smp_from_posting_snapshot(evidence: dict, expected_sha256: str,
               'basis': 'Снимок графика CRM после проведения платежа; кандидат для сверки',
               'months_uncapped': None, 'months_cap48': None,
               'remaining_schedule_payments': None, 'overdue_principal_interest': None,
+              'remaining_schedule_principal': None, 'expected_term_principal': None,
+              'principal_difference': None,
               'penalty_candidate': None, 'value_without_penalty_uncapped': None,
               'value_with_penalty_uncapped': None, 'value_without_penalty_cap48': None,
               'value_with_penalty_cap48': None, 'principal_reconciled': False,
@@ -208,6 +215,9 @@ def preview_smp_from_posting_snapshot(evidence: dict, expected_sha256: str,
         result['status'] = 'review'
         return result
     result['principal_reconciled'] = abs(remaining_principal - expected_principal) <= CENT
+    result.update({'remaining_schedule_principal': str(remaining_principal),
+                   'expected_term_principal': str(expected_principal),
+                   'principal_difference': str(remaining_principal - expected_principal)})
     if not result['principal_reconciled']:
         result['issues'].append('Основной долг будущего графика не равен срочному остатку CRM')
         result['status'] = 'review'

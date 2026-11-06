@@ -321,6 +321,9 @@ export type NbkiPaymentCandidates = {
       status: "candidate_from_crm_schedule" | "unavailable" | "review";
       basis: string; months_uncapped: number | null; months_cap48: number | null;
       remaining_schedule_payments: string | null;
+      remaining_schedule_principal: string | null;
+      expected_term_principal: string | null;
+      principal_difference: string | null;
       overdue_principal_interest: string | null; penalty_candidate: string | null;
       value_without_penalty_uncapped: number | null;
       value_with_penalty_uncapped: number | null;

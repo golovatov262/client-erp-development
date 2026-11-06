@@ -53,6 +53,9 @@ class SmpTest(unittest.TestCase):
         result = preview_smp(Cursor(rows), 1, date(2026, 10, 26), debt)
         self.assertEqual(result['status'], 'review')
         self.assertFalse(result['principal_reconciled'])
+        self.assertEqual(result['remaining_schedule_principal'], '400.00')
+        self.assertEqual(result['expected_term_principal'], '900.00')
+        self.assertEqual(result['principal_difference'], '-500.00')
 
     def test_snapshot_candidate_uses_frozen_schedule(self):
         evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-26',
