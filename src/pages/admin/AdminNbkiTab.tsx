@@ -257,7 +257,10 @@ const AdminNbkiTab = () => {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       const excludedNote = result.excluded.length
-        ? ` Причины исключения: ${result.excluded.slice(0, 5).map(event => `#${event.event_id}: ${event.reason}`).join("; ")}${result.excluded.length > 5 ? `; ещё ${result.excluded.length - 5}` : ""}.`
+        ? `\nИсключены для проверки:\n${result.excluded.map(event => {
+            const source = (crmEvents?.rows || []).find(row => row.id === event.event_id);
+            return `#${event.event_id}${source ? ` · ${source.contract_no} · платёж #${source.source_id}` : ""}: ${event.reason}`;
+          }).join("\n")}`
         : "";
       setFactsResult(`Пакет XML 2.3: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
     } catch (e) { setError(humanizeError(e)); }
@@ -294,7 +297,7 @@ const AdminNbkiTab = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Очередь формируется из операций CRM и не зависит от 1С. Пакет собирается по отображаемым событиям (до 100 последних); записи, не прошедшие проверку CRM или XSD, будут перечислены отдельно.</p>
+          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Пакет проходит проверку XSD 5.1; исключённые события показываются с номером договора и причиной. Скачанный XML можно подписать локально CryptoPro.</p>
           <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.source_type === "loan_payment") || buildingEventId !== null || buildingEventBatch}>
             {buildingEventBatch ? "Формирую пакет XML…" : "Сформировать XML 2.3 по текущим событиям"}
           </Button>
@@ -497,7 +500,7 @@ const AdminNbkiTab = () => {
             <Button disabled={!eventFile || importing} onClick={() => void importEventFile()}>{importing ? "Сопоставляем…" : "Импортировать события"}</Button>
             <Button variant="outline" disabled={importing} onClick={() => void sync1CFacts()}>Перенести показатели 1С в карточки</Button>
           </div>
-          {factsResult && <p role="status" className="text-sm">{factsResult}</p>}
+          {factsResult && <p role="status" className="whitespace-pre-wrap text-sm">{factsResult}</p>}
           <Button variant="outline" disabled={readinessLoading} onClick={() => void loadReconciliation()}>Сверить с CRM</Button>
           {reconciliation && <div className="rounded-md border p-3 text-sm">
             <p>Сопоставлено {reconciliation.total_loans} договоров; по {reconciliation.resolved_crm_loans} различиям принято общее правило: для выгрузки использовать CRM. Неурегулированных платёжных вопросов: {reconciliation.review_loans}. Различие дат окончания (договор 1С / график CRM): {reconciliation.different_end_dates}, показано справочно. Учётные данные не меняются; приём НБКИ не подтверждается.</p>
