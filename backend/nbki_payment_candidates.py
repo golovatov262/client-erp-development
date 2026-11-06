@@ -68,8 +68,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
         inspection = inspections[loan_id]
-        if inspection['uid'] != uid:
-            # A later conflicting UID or borrower match must never enter the queue.
+        uid = inspection['uid']
+        if not uid:
             continue
         if loan_id not in ledgers:
             cur.execute("""SELECT id,payment_date,amount,principal_part,
@@ -217,7 +217,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
          status, amount, paid, same_day_payments) in cur.fetchall():
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
-        if inspections[loan_id]['uid'] != uid:
+        uid = inspections[loan_id]['uid']
+        if not uid:
             continue
         schedule_due_review.append({
             'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,
@@ -267,7 +268,8 @@ def list_payment_candidates(cur, org_id: int) -> dict:
          day_count, entry_count, amount) in cur.fetchall():
         if loan_id not in inspections:
             inspections[loan_id] = inspect_loan(cur, org_id, loan_id)
-        if inspections[loan_id]['uid'] != uid:
+        uid = inspections[loan_id]['uid']
+        if not uid:
             continue
         penalty_accrual_review.append({
             'loan_id': loan_id, 'contract_no': contract_no, 'uid': uid,

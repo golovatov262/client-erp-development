@@ -10099,14 +10099,16 @@ def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
             WHERE loan_id=%s AND org_id=%s""", (loan_id,org_id))
         row = cur.fetchone()
         if not row: row = (None, None, None, None, None, None)
-        if not row[0]:
-            row = (authoritative_borrower_uid(cur, org_id, loan_id,
-                        loan_row[1], None)[0], *row[1:])
+        uid, uid_basis = authoritative_borrower_uid(
+            cur, org_id, loan_id, loan_row[1], row[0])
+        row = (uid, *row[1:])
         keys = ('loan_uid','deal_code','kind_code','purpose_code','note','updated_at')
         return dict(zip(keys, (serialize(value) for value in row)))
     if method != 'PUT':
         return {'_status': 405, 'error': 'Неверный метод'}
-    loan_uid = (body.get('loan_uid') or '').strip() or None
+    imported_uid, _uid_basis = authoritative_borrower_uid(
+        cur, org_id, loan_id, loan_row[1], None)
+    loan_uid = imported_uid or (body.get('loan_uid') or '').strip() or None
     if loan_uid and len(loan_uid) > 100:
         return {'_status': 400, 'error': 'УИД займа не должен превышать 100 символов'}
     keys = ('deal_code','kind_code','purpose_code','note')
