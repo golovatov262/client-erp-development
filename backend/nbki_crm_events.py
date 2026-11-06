@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import date
 
 
-def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
+def list_crm_events(cur, org_id: int, limit: int = 100,
+                    date_from: str | None = None,
+                    date_to: str | None = None) -> dict:
     """Show queued operations with the accounting evidence used by the exporter.
 
     The event ledger is intentionally separate from historical import receipts.
@@ -14,9 +17,19 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
     """
     if not 1 <= limit <= 500:
         raise ValueError('Недопустимый размер страницы событий')
+    try:
+        start = date.fromisoformat(date_from) if date_from else None
+        end = date.fromisoformat(date_to) if date_to else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Период событий должен быть указан в формате ГГГГ-ММ-ДД') from exc
+    if start and end and start > end:
+        raise ValueError('Начало периода не может быть позже его окончания')
+    period = """AND (%s::date IS NULL OR (e.event_occurred_at AT TIME ZONE 'Europe/Moscow')::date >= %s::date)
+        AND (%s::date IS NULL OR (e.event_occurred_at AT TIME ZONE 'Europe/Moscow')::date <= %s::date)"""
     cur.execute("""SELECT COUNT(*) FROM nbki_crm_events e
         JOIN loans l ON l.id=e.loan_id
-        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')""", (org_id,))
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
+        """ + period, (org_id, start, start, end, end))
     total = cur.fetchone()[0]
     cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_type,e.source_id,
         e.event_kind,e.event_occurred_at,e.recorded_at,e.status,e.evidence_sha256,
@@ -33,7 +46,8 @@ def list_crm_events(cur, org_id: int, limit: int = 100) -> dict:
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         LEFT JOIN loan_payments p ON e.source_type='loan_payment' AND p.id=e.source_id
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
-        ORDER BY e.recorded_at DESC,e.id DESC LIMIT %s""", (org_id, limit))
+        """ + period + " ORDER BY e.event_occurred_at DESC NULLS LAST,e.id DESC LIMIT %s",
+        (org_id, start, start, end, end, limit))
     rows = []
     for row in cur.fetchall():
         (event_id, loan_id, contract_no, source_type, source_id, event_kind,

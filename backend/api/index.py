@@ -9874,7 +9874,11 @@ def handle_nbki(method, params, body, staff, cur, conn):
     if action == 'payment_candidates':
         return list_payment_candidates(cur, org_id)
     if action == 'crm_events':
-        return list_crm_events(cur, org_id)
+        try:
+            return list_crm_events(cur, org_id, date_from=params.get('date_from'),
+                                   date_to=params.get('date_to'))
+        except ValueError as exc:
+            return {'_status': 400, 'error': str(exc)}
     if action == 'collateral_readiness':
         return collateral_readiness(cur, org_id)
     if action == 'crm_event_facts':

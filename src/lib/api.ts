@@ -495,7 +495,9 @@ export const api = {
     readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
     reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", action: "reconciliation_report" }),
     paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
-    crmEvents: () => request<NbkiCrmEvents>("GET", { entity: "nbki", action: "crm_events" }),
+    crmEvents: (dateFrom?: string, dateTo?: string) => request<NbkiCrmEvents>("GET", {
+      entity: "nbki", action: "crm_events", date_from: dateFrom, date_to: dateTo,
+    }),
     collateralReadiness: () => request<NbkiCollateralReadiness>("GET", { entity: "nbki", action: "collateral_readiness" }),
     event23Xml: (eventId: number) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string }>("POST", { event_id: eventId }, { entity: "nbki", action: "event23_xml" }),
     event23BatchXml: (eventIds: number[]) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string; events: { event_id: number; contract_no: string; uid: string }[]; excluded: { event_id: number; reason: string }[] }>("POST", { event_ids: eventIds }, { entity: "nbki", action: "event23_batch_xml" }),

@@ -43,6 +43,20 @@ const gzipFile = async (file: File): Promise<string> => {
   return toBase64(await new Response(stream).arrayBuffer());
 };
 
+const dateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const defaultEventPeriod = () => {
+  const to = new Date();
+  const from = new Date(to);
+  from.setMonth(from.getMonth() - 3);
+  return { from: dateInputValue(from), to: dateInputValue(to) };
+};
+
 const AdminNbkiTab = () => {
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [deals, setDeals] = useState<NbkiDeal[]>([]);
@@ -75,6 +89,10 @@ const AdminNbkiTab = () => {
   const [reconciliation, setReconciliation] = useState<NbkiReconciliationReport | null>(null);
   const [paymentCandidates, setPaymentCandidates] = useState<NbkiPaymentCandidates | null>(null);
   const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
+  const [eventPeriodFrom, setEventPeriodFrom] = useState(() => defaultEventPeriod().from);
+  const [eventPeriodTo, setEventPeriodTo] = useState(() => defaultEventPeriod().to);
+  const [loadedEventPeriod, setLoadedEventPeriod] = useState(() => defaultEventPeriod());
+  const [eventPeriodLoading, setEventPeriodLoading] = useState(false);
   const [buildingEventId, setBuildingEventId] = useState<number | null>(null);
   const [buildingEventBatch, setBuildingEventBatch] = useState(false);
   const [collateralReadiness, setCollateralReadiness] = useState<NbkiCollateralReadiness | null>(null);
@@ -82,17 +100,29 @@ const AdminNbkiTab = () => {
 
   const refreshOutbox = async () => {
     try {
-      const [outbox, candidates, payments, events] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates(), api.nbki.paymentCandidates(), api.nbki.crmEvents()]);
+      const [outbox, candidates, payments, events] = await Promise.all([api.nbki.outbox(), api.nbki.changeCandidates(), api.nbki.paymentCandidates(), api.nbki.crmEvents(eventPeriodFrom, eventPeriodTo)]);
       setDrafts(outbox.rows);
       setChangeCandidates(candidates.rows);
       setChangeCandidateTotal(candidates.total);
       setPaymentCandidates(payments);
       setCrmEvents(events);
+      setLoadedEventPeriod({ from: eventPeriodFrom, to: eventPeriodTo });
     }
     catch (e) { setError(humanizeError(e)); }
   };
 
   useEffect(() => { void refreshOutbox(); }, []);
+
+  const loadEventPeriod = async () => {
+    setEventPeriodLoading(true);
+    setError("");
+    try {
+      const events = await api.nbki.crmEvents(eventPeriodFrom, eventPeriodTo);
+      setCrmEvents(events);
+      setLoadedEventPeriod({ from: eventPeriodFrom, to: eventPeriodTo });
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setEventPeriodLoading(false); }
+  };
 
   const loadReadiness = async () => {
     setReadinessLoading(true);
@@ -298,9 +328,17 @@ const AdminNbkiTab = () => {
         <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Пакет проходит проверку XSD 5.1; исключённые события показываются с номером договора и причиной. Скачанный XML можно подписать локально CryptoPro.</p>
-          <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.source_type === "loan_payment") || buildingEventId !== null || buildingEventBatch}>
-            {buildingEventBatch ? "Формирую пакет XML…" : "Сформировать XML 2.3 по текущим событиям"}
-          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid gap-1 text-xs text-muted-foreground">События с (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodFrom} onChange={event => setEventPeriodFrom(event.target.value)} /></label>
+            <label className="grid gap-1 text-xs text-muted-foreground">по (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodTo} onChange={event => setEventPeriodTo(event.target.value)} /></label>
+            <Button variant="outline" onClick={() => void loadEventPeriod()} disabled={eventPeriodLoading || !eventPeriodFrom || !eventPeriodTo || eventPeriodFrom > eventPeriodTo}>
+              {eventPeriodLoading ? "Загружаю события…" : "Показать период"}
+            </Button>
+            <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.source_type === "loan_payment") || buildingEventId !== null || buildingEventBatch || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to}>
+              {buildingEventBatch ? "Формирую пакет XML…" : "Сформировать XML 2.3 за период"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Период: {loadedEventPeriod.from} — {loadedEventPeriod.to}; в очереди {crmEvents?.total ?? "…"} событий. Сейчас автоматически формируется тип 2.3 по платежам.</p>
           <div className="max-h-56 overflow-y-auto">
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
