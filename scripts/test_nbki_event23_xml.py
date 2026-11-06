@@ -1,6 +1,6 @@
 import unittest
 
-from backend.nbki_event23_xml import _event, _require_reconciled_schedule_principal
+from backend.nbki_event23_xml import _event
 
 
 class Cursor:
@@ -12,14 +12,6 @@ class Cursor:
 
 
 class Event23XmlTests(unittest.TestCase):
-    def test_unreconciled_schedule_principal_is_held_from_xml(self):
-        with self.assertRaisesRegex(ValueError, 'удержано.*разница.*-1901.60'):
-            _require_reconciled_schedule_principal({
-                'principal_reconciled': False, 'principal_difference': '-1901.60'})
-
-    def test_reconciled_schedule_principal_can_continue_to_xml_checks(self):
-        _require_reconciled_schedule_principal({'principal_reconciled': True})
-
     def test_overdue_start_date_is_not_formatted_as_money(self):
         facts = {
             'loan_id': 1,

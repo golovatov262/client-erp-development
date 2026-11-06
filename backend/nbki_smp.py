@@ -97,10 +97,6 @@ def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
                    'expected_term_principal': str(expected_principal),
                    'principal_difference': str(remaining_principal - expected_principal)})
     result['principal_reconciled'] = abs(remaining_principal - expected_principal) <= CENT
-    if not result['principal_reconciled']:
-        result['status'] = 'review'
-        result['issues'].append('Основной долг будущего графика не равен срочному остатку CRM')
-        return result
     overdue = money(crm_debt['overdue_principal']) + money(crm_debt['overdue_interest'])
     penalty = crm_debt.get('penalty_candidate')
     penalty_amount = money(penalty['remaining']) if penalty else None
@@ -111,6 +107,8 @@ def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
                    'value_without_penalty_uncapped': _ceil_ruble(remaining_payments / months + overdue),
                    'value_without_penalty_cap48': _ceil_ruble(remaining_payments / min(months, 48) + overdue),
                    'status': 'candidate_from_crm_schedule'})
+    if not result['principal_reconciled']:
+        result['warnings'] = ['Сумма основного долга в графике отличается от срочного остатка CRM; долг в XML берётся из учётного среза CRM, график используется для среднемесячного платежа']
     if penalty_amount is not None:
         result['value_with_penalty_uncapped'] = _ceil_ruble(
             (remaining_payments + penalty_amount) / months + overdue)
@@ -218,11 +216,6 @@ def preview_smp_from_posting_snapshot(evidence: dict, expected_sha256: str,
     result.update({'remaining_schedule_principal': str(remaining_principal),
                    'expected_term_principal': str(expected_principal),
                    'principal_difference': str(remaining_principal - expected_principal)})
-    if not result['principal_reconciled']:
-        result['issues'].append('Основной долг будущего графика не равен срочному остатку CRM')
-        result['status'] = 'review'
-        return result
-
     penalty = crm_debt.get('penalty_candidate')
     penalty_amount = money(penalty['remaining']) if penalty and penalty.get('remaining') is not None else None
     result.update({'status': 'candidate_from_posting_snapshot_schedule',
@@ -232,6 +225,8 @@ def preview_smp_from_posting_snapshot(evidence: dict, expected_sha256: str,
                    'penalty_candidate': str(penalty_amount) if penalty_amount is not None else None,
                    'value_without_penalty_uncapped': _ceil_ruble(remaining_payments / months + overdue),
                    'value_without_penalty_cap48': _ceil_ruble(remaining_payments / min(months, 48) + overdue)})
+    if not result['principal_reconciled']:
+        result['warnings'] = ['Сумма основного долга в историческом графике отличается от срочного остатка CRM; долг в XML берётся из снимка учёта CRM, график используется для среднемесячного платежа']
     if penalty_amount is not None:
         result['value_with_penalty_uncapped'] = _ceil_ruble(
             (remaining_payments + penalty_amount) / months + overdue)

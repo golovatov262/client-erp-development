@@ -44,18 +44,39 @@ class SmpTest(unittest.TestCase):
         self.assertEqual(result['value_with_penalty_uncapped'], 250)
         self.assertTrue(result['principal_reconciled'])
 
-    def test_principal_mismatch_blocks_candidate(self):
+    def test_principal_mismatch_is_diagnostic_not_xml_blocker(self):
         rows = [(2, date(2027, 1, 31), Decimal('440'), Decimal('400'),
                  Decimal('40'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'))]
         debt = {'status': 'calculated_from_current_crm', 'term_principal': '900',
                 'overdue_principal': '0', 'overdue_interest': '0',
                 'penalty_candidate': None}
         result = preview_smp(Cursor(rows), 1, date(2026, 10, 26), debt)
-        self.assertEqual(result['status'], 'review')
+        self.assertEqual(result['status'], 'candidate_from_crm_schedule')
         self.assertFalse(result['principal_reconciled'])
         self.assertEqual(result['remaining_schedule_principal'], '400.00')
         self.assertEqual(result['expected_term_principal'], '900.00')
         self.assertEqual(result['principal_difference'], '-500.00')
+        self.assertEqual(result['value_without_penalty_uncapped'], 110)
+        self.assertTrue(result['warnings'])
+
+    def test_snapshot_principal_mismatch_still_calculates_monthly_payment(self):
+        evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-26',
+                    'after': {'loan': {'end_date': '2027-01-31'},
+                              'schedule': [{'id': 10, 'payment_date': '2027-01-31',
+                                  'payment_amount': '440', 'principal_amount': '400',
+                                  'interest_amount': '40', 'paid_amount': '0',
+                                  'covered_interest_v2': '0', 'covered_principal_v2': '0',
+                                  'covered_total_v2': '0', 'status': 'pending'}]}}
+        digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+            separators=(',', ':')).encode()).hexdigest()
+        debt = {'status': 'calculated_from_posting_snapshot', 'term_principal': '900',
+                'overdue_principal': '0', 'overdue_interest': '0', 'penalty_candidate': None}
+        result = preview_smp_from_posting_snapshot(evidence, digest, 1, 2,
+            date(2026, 10, 26), debt)
+        self.assertEqual(result['status'], 'candidate_from_posting_snapshot_schedule')
+        self.assertFalse(result['principal_reconciled'])
+        self.assertEqual(result['value_without_penalty_uncapped'], 110)
+        self.assertTrue(result['warnings'])
 
     def test_snapshot_candidate_uses_frozen_schedule(self):
         evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-26',
