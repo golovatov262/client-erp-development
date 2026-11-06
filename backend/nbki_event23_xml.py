@@ -290,7 +290,7 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
             'business_status': 'candidate_requires_regulatory_review',
             'event_id': event_id, 'contract_no': facts['contract_no'], 'uid': facts['uid'],
             'debt': debt_preview, 'interest': interest, 'smp': smp,
-            'psk_status': facts['loan'].get('psk', {}).get('status')}
+            'psk_status': (facts['loan'].get('psk') or {}).get('status')}
 
 
 def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
