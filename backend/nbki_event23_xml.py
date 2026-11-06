@@ -182,7 +182,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                            ('debtOverduePercentSum', overdue_interest),
                            ('debtOverdueOtherSum', 0), ('debtOverdueStartDate', first_overdue),
                            ('missDuration', overdue_days), ('repaidMissDuration', 0)):
-            _add(overdue, key, _money(value) if key.startswith('debt') else value)
+            _add(overdue, key, _money(value) if key in {
+                'debtOverdueSum', 'debtOverdueMainSum', 'debtOverduePercentSum',
+                'debtOverdueOtherSum'} else value)
     else:
         _add(overdue, 'missFact_0')
     p = _add(group, 'FL_28_Payment')
