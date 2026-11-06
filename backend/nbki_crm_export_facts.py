@@ -20,6 +20,32 @@ except ImportError:
     from backend.nbki_uid import authoritative_borrower_uid
 
 
+def _loan_terms_for_event(cur, org_id: int, loan_id: int, occurred_at):
+    """Prefer a dated CRM term version, then use the shared current CRM card.
+
+    Some legacy payment events predate the version ledger. The unversioned
+    ``loan_bki_fields`` card is still the CRM source of truth for the shared
+    deal/kind/purpose codes; imported bureau files are never consulted.
+    """
+    if occurred_at:
+        cur.execute("""SELECT deal_code,kind_code,purpose_code,
+            interest_day_basis,annual_rate,valid_from,basis
+            FROM nbki_loan_terms_versions WHERE loan_id=%s AND valid_from<=%s
+            AND (valid_until IS NULL OR valid_until>%s)
+            ORDER BY valid_from DESC,id DESC LIMIT 1""",
+            (loan_id, occurred_at, occurred_at))
+        version = cur.fetchone()
+        if version:
+            return version
+    cur.execute("""SELECT deal_code,kind_code,purpose_code
+        FROM loan_bki_fields WHERE org_id=%s AND loan_id=%s""",
+        (org_id, loan_id))
+    current = cur.fetchone()
+    if not current:
+        return None
+    return (*current, 365, None, None, 'current shared CRM BKI card; no dated version')
+
+
 def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
     cur.execute("""SELECT e.loan_id,e.source_id,e.event_occurred_at,
         e.evidence_sha256,l.contract_no,l.amount,l.balance,l.status,
@@ -82,13 +108,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         registration_number,creditor_code FROM nbki_source_settings
         WHERE org_id=%s""", (org_id,))
     source = cur.fetchone()
-    cur.execute("""SELECT deal_code,kind_code,purpose_code,
-        interest_day_basis,annual_rate,valid_from,basis
-        FROM nbki_loan_terms_versions WHERE loan_id=%s AND valid_from<=%s
-        AND (valid_until IS NULL OR valid_until>%s)
-        ORDER BY valid_from DESC,id DESC LIMIT 1""",
-        (loan_id, occurred_at, occurred_at)) if occurred_at else None
-    terms = cur.fetchone() if occurred_at else None
+    terms = _loan_terms_for_event(cur, org_id, loan_id, occurred_at)
     cur.execute("""SELECT COALESCE(SUM(a.amount),0) FROM loan_payment_allocations a
         WHERE a.payment_id=%s AND a.component='unapplied'""", (payment_id,))
     unapplied = cur.fetchone()[0]
@@ -127,7 +147,8 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
                  'terms': {'deal_code': terms[0], 'kind_code': terms[1],
                            'purpose_code': terms[2], 'interest_day_basis': terms[3],
                            'annual_rate': str(terms[4]) if terms[4] is not None else None,
-                           'valid_from': terms[5].isoformat(), 'basis': terms[6]}
+                           'valid_from': terms[5].isoformat() if terms[5] else None,
+                           'basis': terms[6]}
                           if terms else None,
                  'psk': {'percent': str(psk[0]), 'amount': str(psk[1]),
                          'calculated_on': psk[2].isoformat(), 'status': psk[3]}
