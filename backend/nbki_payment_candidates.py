@@ -148,10 +148,18 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                           'include_application': report_blocks_row[1],
                           'application_block': report_blocks_row[2]}
                          if report_blocks_row else None)
+        # FL_21_PaymentTerms is built live from loan_schedule, not from a
+        # snapshot; it only needs that no later schedule replacement could
+        # have rewritten the row this event's "next installment" query reads.
+        cur.execute("""SELECT NOT EXISTS (SELECT 1 FROM approved_loan_schedule_replacements
+            WHERE loan_id=%s AND (applied_at AT TIME ZONE 'Europe/Moscow')::date >= %s)""",
+            (loan_id, payment_date))
+        schedule_stable_since_event = cur.fetchone()[0]
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt,
                                 interest_candidate=interest_candidate,
+                                schedule_stable_since_event=schedule_stable_since_event,
                                 debt_preview=debt_preview, smp_candidate=smp_candidate,
                                 loan_terms=loan_terms, report_blocks=report_blocks)
         generic_event_gaps = {

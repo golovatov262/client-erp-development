@@ -41,7 +41,7 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                    psk_candidate_status=None, crm_debt=None,
                    interest_candidate=None, debt_preview=None,
                    smp_candidate=None, loan_terms=None,
-                   report_blocks=None) -> dict:
+                   report_blocks=None, schedule_stable_since_event=False) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -66,7 +66,11 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                               '(продуктов типа «заём-гарантия» в модели нет), передаётся признак отсутствия'),
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
                                if posting_snapshot_sha256 else
-                               'Исторического снимка графика на момент проведения нет'),
+                               'Снимка нет, но график для этого займа не переписывался после события: '
+                               'условия следующего платежа читаются из CRM напрямую'
+                               if schedule_stable_since_event else
+                               'Исторического снимка графика на момент проведения нет, '
+                               'а график займа позже был переписан заново'),
         'FL_22_TotalCost': ('Исторический признак займа не требует этого блока'
                             if report_blocks and not report_blocks.get('include_total_cost') else
                             'ПСК рассчитана по первоначальным реквизитам CRM и согласуется с историческим расчётом; для XML требуется сверка с подписанным договором и условием обязательности'
@@ -136,7 +140,8 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         if name in ('FL_18_Deal', 'FL_56_Participation'):
             return 'source_present' if loan_terms_complete else 'review'
         if name == 'FL_21_PaymentTerms':
-            return 'partial' if posting_snapshot_sha256 else 'review'
+            return ('partial' if posting_snapshot_sha256 or schedule_stable_since_event
+                    else 'review')
         if name == 'FL_22_TotalCost':
             if report_blocks and not report_blocks.get('include_total_cost'):
                 return 'source_present'

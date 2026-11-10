@@ -44,6 +44,20 @@ class Event23ReadinessTests(unittest.TestCase):
         self.assertEqual(result['blockers'], [])
         self.assertTrue(result['xml_ready'])
 
+    def test_fl21_accepts_stable_schedule_without_posting_snapshot(self):
+        inspection = {'uid': 'uid', 'snapshot': {'loan': {
+            'contract_no': '123', 'start_date': '2026-01-01', 'amount': Decimal('1000')}}}
+        accounting = {'status': 'checked', 'principal_after': '900.00',
+                      'cumulative_crm_payments': {'amount': '200.00'}}
+        no_evidence = assess_event23(inspection, accounting, {'status': 'checked'}, None, None)
+        statuses = {b['name']: b['status'] for b in no_evidence['blocks']}
+        self.assertEqual(statuses['FL_21_PaymentTerms'], 'review')
+
+        stable = assess_event23(inspection, accounting, {'status': 'checked'}, None, None,
+                                schedule_stable_since_event=True)
+        statuses = {b['name']: b['status'] for b in stable['blocks']}
+        self.assertEqual(statuses['FL_21_PaymentTerms'], 'partial')
+
     def test_structurally_absent_blocks_are_confirmed_without_per_event_data(self):
         inspection = {'uid': 'uid', 'snapshot': {'loan': {
             'contract_no': '123', 'start_date': '2026-01-01', 'amount': Decimal('1000')}}}
