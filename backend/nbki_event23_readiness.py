@@ -1,7 +1,10 @@
 """Evidence coverage for the monetary FL_Event_2_3 branch of XSD 5.1.
 
-No item here approves a regulatory XML value. Conditional blocks still need
-legal/business-rule evaluation even when the XSD permits their omission.
+xml_ready is derived strictly from the blockers list below (true only when
+it is empty) - it is not a separate manual switch. Each blocker is backed by
+either a verified CRM calculation or the organization's own confirmed-
+accepted historical NBKI files (per-loan precedent via nbki_loan_report_blocks),
+not a theoretical reading of the published XSD alone.
 """
 
 from __future__ import annotations
@@ -199,4 +202,4 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                               'total_debt': None, 'due_debt': None,
                               'overdue_debt': None,
                               'cumulative_payments_crm': cumulative},
-            'xml_ready': False}
+            'xml_ready': not blockers}

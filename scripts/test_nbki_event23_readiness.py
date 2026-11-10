@@ -24,6 +24,26 @@ class Event23ReadinessTests(unittest.TestCase):
         self.assertIn('Не подтверждено фактическое время события', result['blockers'])
         self.assertFalse(result['xml_ready'])
 
+    def test_xml_ready_is_true_only_when_blockers_are_empty(self):
+        inspection = {'uid': 'uid', 'snapshot': {'loan': {
+            'contract_no': '123', 'start_date': '2026-01-01', 'amount': Decimal('1000')}}}
+        accounting = {'status': 'checked', 'principal_after': '900.00',
+                      'cumulative_crm_payments': {'amount': '200.00'}}
+        loan_terms = {'deal_code': '1', 'kind_code': '99', 'purpose_code': '1'}
+        result = assess_event23(
+            inspection, accounting, {'status': 'checked'},
+            '2026-01-01T10:00:00', 'a' * 64,
+            psk_candidate_status='cross_checked',
+            crm_debt={'status': 'calculated_from_current_crm'},
+            interest_candidate={'status': 'candidate_from_crm_formula'},
+            debt_preview={'status': 'candidate_from_crm_components'},
+            smp_candidate={'status': 'candidate_from_crm_schedule'},
+            loan_terms=loan_terms,
+            report_blocks={'include_total_cost': True, 'include_application': False,
+                           'application_block': None})
+        self.assertEqual(result['blockers'], [])
+        self.assertTrue(result['xml_ready'])
+
     def test_structurally_absent_blocks_are_confirmed_without_per_event_data(self):
         inspection = {'uid': 'uid', 'snapshot': {'loan': {
             'contract_no': '123', 'start_date': '2026-01-01', 'amount': Decimal('1000')}}}
