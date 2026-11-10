@@ -32,11 +32,22 @@ class Event23ReadinessTests(unittest.TestCase):
         result = assess_event23(inspection, accounting, {'status': 'checked'}, None, None)
         statuses = {block['name']: block['status'] for block in result['blocks']}
         for name in ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset',
-                     'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn', 'FL_55_Application'):
+                     'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn', 'FL_55_Application',
+                     'FL_19_1_AmountInfo', 'FL_54_Accounting', 'FL_29_1_DebtBurdenInfo',
+                     'FL_19_Amount'):
             self.assertEqual(statuses[name], 'source_present')
         for name in ('FL_18_Deal', 'FL_56_Participation', 'FL_21_PaymentTerms',
                      'FL_22_TotalCost', 'FL_29_MonthlyPayment'):
             self.assertEqual(statuses[name], 'review')
+
+    def test_fl19_amount_needs_loan_amount_present(self):
+        inspection = {'uid': 'uid', 'snapshot': {'loan': {
+            'contract_no': '123', 'start_date': '2026-01-01', 'amount': None}}}
+        accounting = {'status': 'checked', 'principal_after': '900.00',
+                      'cumulative_crm_payments': {'amount': '200.00'}}
+        result = assess_event23(inspection, accounting, {'status': 'checked'}, None, None)
+        statuses = {block['name']: block['status'] for block in result['blocks']}
+        self.assertEqual(statuses['FL_19_Amount'], 'review')
 
     def test_computed_evidence_upgrades_group_a_blocks(self):
         inspection = {'uid': 'uid', 'snapshot': {'loan': {

@@ -56,8 +56,10 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                        if loan_terms and all(loan_terms.get(key) for key in
                            ('deal_code','kind_code','purpose_code'))
                        else 'В CRM нет полного набора кодов сделки на дату события'),
-        'FL_19_Amount': 'Сумма займа есть в CRM; валюта и условные показатели требуют сверки',
-        'FL_19_1_AmountInfo': 'Нужно определить применимое заполнение обеспечиваемого обязательства',
+        'FL_19_Amount': ('Сумма, валюта (RUB — мультивалютности в CRM нет) и дата расчёта берутся прямо из CRM'
+                        if loan.get('amount') is not None else 'Сумма займа не найдена в CRM'),
+        'FL_19_1_AmountInfo': ('Подтверждено структурой CRM: заём сам не обеспечивает другое обязательство '
+                              '(продуктов типа «заём-гарантия» в модели нет), передаётся признак отсутствия'),
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
                                if posting_snapshot_sha256 else
                                'Исторического снимка графика на момент проведения нет'),
@@ -71,7 +73,8 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
             else 'Не завершён расчёт процентов и частей задолженности на дату события'),
         'FL_29_MonthlyPayment': ('Среднемесячный платёж рассчитан как кандидат по графику CRM; нормативное подтверждение ещё требуется'
                                  if smp_ready else 'Нормативный среднемесячный платёж не рассчитан'),
-        'FL_29_1_DebtBurdenInfo': 'Не проверены условия обязательности и данные долговой нагрузки',
+        'FL_29_1_DebtBurdenInfo': ('Подтверждено оператором 10.11.2026: отчётность по ПДН не применяется '
+                                  'к займам этого КПК; в CRM нет данных о доходе заёмщика для расчёта'),
         'FL_20_JointDebtors': ('Подтверждено структурой CRM: у займа один заёмщик (loans.member_id — '
                                'одиночная ссылка), солидарных должников в модели нет'),
         'FL_30_NonMonetarySource': ('Подтверждено структурой CRM: в модели нет понятия неденежного займа, '
@@ -80,7 +83,9 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                                            'требований или прощения долга в модели нет, блок передаётся с признаком отсутствия'),
         'FL_37_WarrantyReturn': ('Подтверждено структурой CRM: событие сформировано из платежа заёмщика, '
                                  'в модели нет события выплаты по гарантии поручителем'),
-        'FL_54_Accounting': 'Нужно проверить учёт задолженности, источник и ставку на дату события',
+        'FL_54_Accounting': ('Обычный учёт задолженности и фиксированная ставка берутся из CRM; '
+                            'подтверждено оператором 10.11.2026: КПК не участвует в программах '
+                            'льготного финансирования с господдержкой'),
         'FL_55_Application': ('Подтверждено структурой CRM: обращения субъекта в бюро не учитываются, '
                               'событие сформировано из платежа'),
         'FL_56_Participation': ('Версионированные коды вида, цели и условий сделки найдены в CRM'
@@ -88,14 +93,18 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                                     ('deal_code','kind_code','purpose_code'))
                                 else 'В CRM нет полного набора кодов сделки на дату события'),
     }
-    # FL_20, FL_36_1, FL_30, FL_37 and FL_55 are confirmed structurally rather than
-    # per-event: the CRM loan model has no joint-debtor, offset/settlement,
-    # non-monetary-loan, guarantor-claim or bureau-application concept at all, so
-    # there is nothing a per-event check could find that a schema inspection
-    # would not.
+    # FL_20, FL_36_1, FL_30, FL_37, FL_55 and FL_19_1 are confirmed structurally
+    # rather than per-event: the CRM loan model has no joint-debtor,
+    # offset/settlement, non-monetary-loan, guarantor-claim, bureau-application
+    # or loan-as-security-for-another-obligation concept at all, so there is
+    # nothing a per-event check could find that a schema inspection would not.
     STRUCTURALLY_CONFIRMED_ABSENT = ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset',
                                      'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn',
-                                     'FL_55_Application')
+                                     'FL_55_Application', 'FL_19_1_AmountInfo')
+    # FL_54 (government-subsidy programs) and FL_29_1 (ПДН applicability) are
+    # organizational facts the operator confirmed 10.11.2026, not provable from
+    # the schema alone the way the blocks above are.
+    ORG_CONFIRMED_NOT_APPLICABLE = ('FL_54_Accounting', 'FL_29_1_DebtBurdenInfo')
     loan_terms_complete = bool(loan_terms and all(loan_terms.get(key) for key in
                                ('deal_code', 'kind_code', 'purpose_code')))
 
@@ -103,8 +112,10 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         if name == 'FL_17_DealUid':
             return ('source_present' if uid and loan.get('contract_no') and
                     loan.get('start_date') else 'review')
-        if name in STRUCTURALLY_CONFIRMED_ABSENT:
+        if name in STRUCTURALLY_CONFIRMED_ABSENT or name in ORG_CONFIRMED_NOT_APPLICABLE:
             return 'source_present'
+        if name == 'FL_19_Amount':
+            return 'source_present' if loan.get('amount') is not None else 'review'
         if name == 'FL_25_26_27_28_Group':
             return ('partial' if principal is not None and cumulative and
                     allocation.get('status') == 'checked' else 'review')
