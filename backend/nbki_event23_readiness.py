@@ -45,6 +45,9 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                  if accounting.get('status') == 'checked' else None)
     cumulative = (accounting.get('cumulative_crm_payments')
                   if accounting.get('status') == 'checked' else None)
+    smp_ready = bool(smp_candidate and smp_candidate.get('status') in
+                     ('candidate_from_crm_schedule', 'candidate_from_crm_components',
+                      'candidate_from_posting_snapshot_schedule'))
     notes = {
         'FL_17_DealUid': ('Есть УИД, номер и дата договора в CRM; требуется проверка значений XML'
                           if uid and loan.get('contract_no') and loan.get('start_date')
@@ -66,28 +69,56 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_25_26_27_28_Group': ('Срез процентов и задолженности рассчитан по журналу, распределениям и графику CRM; сверить правовую классификацию до выпуска. Коды ФЛ_28.10/28.11 заменяются прочерками по письму ЦБ от 09.12.2025'
             if crm_debt and interest_candidate and debt_preview and debt_preview.get('status') == 'candidate_from_crm_components'
             else 'Не завершён расчёт процентов и частей задолженности на дату события'),
-        'FL_29_MonthlyPayment': 'Нормативный среднемесячный платёж не рассчитан',
+        'FL_29_MonthlyPayment': ('Среднемесячный платёж рассчитан как кандидат по графику CRM; нормативное подтверждение ещё требуется'
+                                 if smp_ready else 'Нормативный среднемесячный платёж не рассчитан'),
         'FL_29_1_DebtBurdenInfo': 'Не проверены условия обязательности и данные долговой нагрузки',
         'FL_20_JointDebtors': ('Подтверждено структурой CRM: у займа один заёмщик (loans.member_id — '
                                'одиночная ссылка), солидарных должников в модели нет'),
-        'FL_30_NonMonetarySource': 'Для денежного займа обычно не применяется; требуется сверка признака',
+        'FL_30_NonMonetarySource': ('Подтверждено структурой CRM: в модели нет понятия неденежного займа, '
+                                    'все займы денежные'),
         'FL_36_1_ProvisionPaymentOffset': ('Подтверждено структурой CRM: отступного, зачёта встречных '
                                            'требований или прощения долга в модели нет, блок передаётся с признаком отсутствия'),
-        'FL_37_WarrantyReturn': 'Для заёмщика обычно не применяется; требуется сверка роли',
+        'FL_37_WarrantyReturn': ('Подтверждено структурой CRM: событие сформировано из платежа заёмщика, '
+                                 'в модели нет события выплаты по гарантии поручителем'),
         'FL_54_Accounting': 'Нужно проверить учёт задолженности, источник и ставку на дату события',
-        'FL_55_Application': 'Условный блок; требуется сверка связи с обращением',
-        'FL_56_Participation': 'Нужно подтвердить вид участия в обязательстве',
+        'FL_55_Application': ('Подтверждено структурой CRM: обращения субъекта в бюро не учитываются, '
+                              'событие сформировано из платежа'),
+        'FL_56_Participation': ('Версионированные коды вида, цели и условий сделки найдены в CRM'
+                                if loan_terms and all(loan_terms.get(key) for key in
+                                    ('deal_code','kind_code','purpose_code'))
+                                else 'В CRM нет полного набора кодов сделки на дату события'),
     }
-    # FL_20 and FL_36_1 are confirmed structurally rather than per-event: the CRM
-    # loan model has no joint-debtor or offset/settlement tables at all, so there
-    # is nothing a per-event check could find that a schema inspection would not.
-    STRUCTURALLY_CONFIRMED_ABSENT = ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset')
-    blocks = [{'name': name, 'xsd_required': required, 'status':
-               ('source_present' if name == 'FL_17_DealUid' and uid and
-                loan.get('contract_no') and loan.get('start_date') else
-                'source_present' if name in STRUCTURALLY_CONFIRMED_ABSENT else
-                'partial' if name == 'FL_25_26_27_28_Group' and principal is not None and
-                cumulative and allocation.get('status') == 'checked' else 'review'),
+    # FL_20, FL_36_1, FL_30, FL_37 and FL_55 are confirmed structurally rather than
+    # per-event: the CRM loan model has no joint-debtor, offset/settlement,
+    # non-monetary-loan, guarantor-claim or bureau-application concept at all, so
+    # there is nothing a per-event check could find that a schema inspection
+    # would not.
+    STRUCTURALLY_CONFIRMED_ABSENT = ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset',
+                                     'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn',
+                                     'FL_55_Application')
+    loan_terms_complete = bool(loan_terms and all(loan_terms.get(key) for key in
+                               ('deal_code', 'kind_code', 'purpose_code')))
+
+    def _status(name: str) -> str:
+        if name == 'FL_17_DealUid':
+            return ('source_present' if uid and loan.get('contract_no') and
+                    loan.get('start_date') else 'review')
+        if name in STRUCTURALLY_CONFIRMED_ABSENT:
+            return 'source_present'
+        if name == 'FL_25_26_27_28_Group':
+            return ('partial' if principal is not None and cumulative and
+                    allocation.get('status') == 'checked' else 'review')
+        if name in ('FL_18_Deal', 'FL_56_Participation'):
+            return 'source_present' if loan_terms_complete else 'review'
+        if name == 'FL_21_PaymentTerms':
+            return 'partial' if posting_snapshot_sha256 else 'review'
+        if name == 'FL_22_TotalCost':
+            return 'source_present' if psk_candidate_status == 'cross_checked' else 'review'
+        if name == 'FL_29_MonthlyPayment':
+            return 'partial' if smp_ready else 'review'
+        return 'review'
+
+    blocks = [{'name': name, 'xsd_required': required, 'status': _status(name),
                'note': notes[name]} for name, required in MONETARY_BLOCKS]
     blockers = []
     if not event_occurred_at:
@@ -104,9 +135,6 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                           interest_candidate.get('status') in
                           ('candidate_from_crm_formula',
                            'candidate_from_posting_snapshot_formula'))
-    smp_ready = bool(smp_candidate and smp_candidate.get('status') in
-                     ('candidate_from_crm_schedule', 'candidate_from_crm_components',
-                      'candidate_from_posting_snapshot_schedule'))
     if not debt_ready or not interest_ready:
         blockers.append('Расчёт задолженности по компонентам CRM на дату события не завершён')
     if psk_candidate_status != 'cross_checked' or not smp_ready:
