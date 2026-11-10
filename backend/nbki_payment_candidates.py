@@ -199,7 +199,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                                        if psk_percent is not None else None),
                      'event23_readiness': event23,
                      'gutdf_event_code': None, 'event_code_confirmed': False,
-                     'xml_ready': False})
+                     'xml_ready': event23['xml_ready']})
     # A payment-only queue misses planned due dates, interest accrual and
     # overdue transitions. The *current* schedule can be rewritten, so these
     # rows are review leads, never historical events or evidence of NBKI receipt.
