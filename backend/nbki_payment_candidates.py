@@ -141,18 +141,25 @@ def list_payment_candidates(cur, org_id: int) -> dict:
                        'purpose_code': terms_row[2], 'interest_day_basis': terms_row[3],
                        'annual_rate': str(terms_row[4]) if terms_row[4] is not None else None}
                       if terms_row else None)
+        cur.execute("""SELECT include_total_cost,include_application,application_block
+            FROM nbki_loan_report_blocks WHERE loan_id=%s""", (loan_id,))
+        report_blocks_row = cur.fetchone()
+        report_blocks = ({'include_total_cost': report_blocks_row[0],
+                          'include_application': report_blocks_row[1],
+                          'application_block': report_blocks_row[2]}
+                         if report_blocks_row else None)
         event23 = assess_event23(inspection, accounting, allocation_audit,
                                 event_occurred_at, posting_snapshot_sha256,
                                 psk_candidate_status=psk_status, crm_debt=crm_debt,
                                 interest_candidate=interest_candidate,
                                 debt_preview=debt_preview, smp_candidate=smp_candidate,
-                                loan_terms=loan_terms)
+                                loan_terms=loan_terms, report_blocks=report_blocks)
         generic_event_gaps = {
             'Дата и время фактического события по правилам ГУТДФ',
             'Код вида, назначения и условий сделки для применимого события',
             'Подтверждённый расчёт полной стоимости займа и среднемесячного платежа',
             'Детализация текущей, срочной и просроченной задолженности на дату события',
-            'Согласованное с НБКИ представление ФЛ_28.10/28.11 без числовых кодов',
+            'Проверка актуального признака блоков ФЛ_22/ФЛ_55 и застывшего снимка графика для конкретного события',
             'Проверка обязательных блоков и условных полей выбранного события',
         }
         event_missing_fields = [field for field in inspection['readiness']['missing_fields']

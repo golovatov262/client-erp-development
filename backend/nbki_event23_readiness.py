@@ -37,7 +37,8 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                    event_occurred_at, posting_snapshot_sha256,
                    psk_candidate_status=None, crm_debt=None,
                    interest_candidate=None, debt_preview=None,
-                   smp_candidate=None, loan_terms=None) -> dict:
+                   smp_candidate=None, loan_terms=None,
+                   report_blocks=None) -> dict:
     """Expose verified inputs and missing calculations without inventing XML."""
     loan = inspection['snapshot']['loan']
     uid = inspection['uid']
@@ -63,12 +64,14 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_21_PaymentTerms': ('Снимок графика на момент проведения есть; условия платежей ещё не рассчитаны по ГУТДФ'
                                if posting_snapshot_sha256 else
                                'Исторического снимка графика на момент проведения нет'),
-        'FL_22_TotalCost': ('ПСК рассчитана по первоначальным реквизитам CRM и согласуется с историческим расчётом; для XML требуется сверка с подписанным договором и условием обязательности'
+        'FL_22_TotalCost': ('Исторический признак займа не требует этого блока'
+                            if report_blocks and not report_blocks.get('include_total_cost') else
+                            'ПСК рассчитана по первоначальным реквизитам CRM и согласуется с историческим расчётом; для XML требуется сверка с подписанным договором и условием обязательности'
                             if psk_candidate_status == 'cross_checked' else
                             'Расчёт ПСК по CRM имеет расхождение или недостаточную историческую проверку; требуется ручная сверка'
                             if psk_candidate_status == 'review' else
                             'ПСК и условие обязательности требуют подтверждённого расчёта'),
-        'FL_25_26_27_28_Group': ('Срез процентов и задолженности рассчитан по журналу, распределениям и графику CRM; сверить правовую классификацию до выпуска. Коды ФЛ_28.10/28.11 заменяются прочерками по письму ЦБ от 09.12.2025'
+        'FL_25_26_27_28_Group': ('Срез процентов и задолженности рассчитан по журналу, распределениям и графику CRM; сверить правовую классификацию до выпуска. Коды ФЛ_28.10/28.11 не передаются совсем — подтверждено 623 реальными историческими событиями этой организации, включая файл, принятый НБКИ 06.10.2026 без отклонений'
             if crm_debt and interest_candidate and debt_preview and debt_preview.get('status') == 'candidate_from_crm_components'
             else 'Не завершён расчёт процентов и частей задолженности на дату события'),
         'FL_29_MonthlyPayment': ('Среднемесячный платёж рассчитан как кандидат по графику CRM; нормативное подтверждение ещё требуется'
@@ -86,21 +89,29 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         'FL_54_Accounting': ('Обычный учёт задолженности и фиксированная ставка берутся из CRM; '
                             'подтверждено оператором 10.11.2026: КПК не участвует в программах '
                             'льготного финансирования с господдержкой'),
-        'FL_55_Application': ('Подтверждено структурой CRM: обращения субъекта в бюро не учитываются, '
-                              'событие сформировано из платежа'),
+        'FL_55_Application': ('Исторический признак займа не требует этого блока'
+                              if report_blocks and not report_blocks.get('include_application') else
+                              'Исторические данные заявки для этого займа сохранены и готовы к повторному использованию'
+                              if report_blocks and report_blocks.get('include_application') and
+                                 report_blocks.get('application_block') else
+                              'Нет исторического признака по этому займу: неизвестно, нужен ли блок, '
+                              'и в CRM нет данных заявки (источник/способ/этап) для его заполнения'),
         'FL_56_Participation': ('Версионированные коды вида, цели и условий сделки найдены в CRM'
                                 if loan_terms and all(loan_terms.get(key) for key in
                                     ('deal_code','kind_code','purpose_code'))
                                 else 'В CRM нет полного набора кодов сделки на дату события'),
     }
-    # FL_20, FL_36_1, FL_30, FL_37, FL_55 and FL_19_1 are confirmed structurally
+    # FL_20, FL_36_1, FL_30, FL_37 and FL_19_1 are confirmed structurally
     # rather than per-event: the CRM loan model has no joint-debtor,
-    # offset/settlement, non-monetary-loan, guarantor-claim, bureau-application
-    # or loan-as-security-for-another-obligation concept at all, so there is
+    # offset/settlement, non-monetary-loan, guarantor-claim or
+    # loan-as-security-for-another-obligation concept at all, so there is
     # nothing a per-event check could find that a schema inspection would not.
+    # FL_55 is NOT in this group - it is the loan-application block, present in
+    # 66% of this organization's 623 real historical events; it needs
+    # report_blocks precedent, handled separately below.
     STRUCTURALLY_CONFIRMED_ABSENT = ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset',
                                      'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn',
-                                     'FL_55_Application', 'FL_19_1_AmountInfo')
+                                     'FL_19_1_AmountInfo')
     # FL_54 (government-subsidy programs) and FL_29_1 (ПДН applicability) are
     # organizational facts the operator confirmed 10.11.2026, not provable from
     # the schema alone the way the blocks above are.
@@ -124,7 +135,15 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
         if name == 'FL_21_PaymentTerms':
             return 'partial' if posting_snapshot_sha256 else 'review'
         if name == 'FL_22_TotalCost':
+            if report_blocks and not report_blocks.get('include_total_cost'):
+                return 'source_present'
             return 'source_present' if psk_candidate_status == 'cross_checked' else 'review'
+        if name == 'FL_55_Application':
+            if not report_blocks:
+                return 'review'
+            if not report_blocks.get('include_application'):
+                return 'source_present'
+            return 'source_present' if report_blocks.get('application_block') else 'review'
         if name == 'FL_29_MonthlyPayment':
             return 'partial' if smp_ready else 'review'
         return 'review'
@@ -148,10 +167,14 @@ def assess_event23(inspection: dict, accounting: dict, allocation: dict,
                            'candidate_from_posting_snapshot_formula'))
     if not debt_ready or not interest_ready:
         blockers.append('Расчёт задолженности по компонентам CRM на дату события не завершён')
-    if psk_candidate_status != 'cross_checked' or not smp_ready:
+    # FL_22 (and the PSK it needs) only matters when this loan's own history
+    # requires the block at all; otherwise only the SMP candidate matters.
+    total_cost_needed = not report_blocks or report_blocks.get('include_total_cost')
+    psk_blocking = total_cost_needed and psk_candidate_status != 'cross_checked'
+    if psk_blocking or not smp_ready:
         blockers.append('ПСК или среднемесячный платёж не прошли проверку исходных условий CRM')
-    blockers.append('Для ФЛ_28.10/28.11 применяются прочерки по письму ЦБ от 09.12.2025; '
-                    'перед выпуском проверить схему представления XSD 5.1')
+    if not report_blocks:
+        blockers.append('Нет исторического признака состава события (ФЛ_22/ФЛ_55) для этого займа')
     unresolved_blocks = [block['name'] for block in blocks if block['status'] == 'review']
     if unresolved_blocks:
         blockers.append('Не проверены условные и обязательные блоки события 2.3: '

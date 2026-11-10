@@ -109,6 +109,13 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         WHERE org_id=%s""", (org_id,))
     source = cur.fetchone()
     terms = _loan_terms_for_event(cur, org_id, loan_id, occurred_at)
+    cur.execute("""SELECT include_total_cost,include_application,application_block
+        FROM nbki_loan_report_blocks WHERE loan_id=%s""", (loan_id,))
+    report_blocks_row = cur.fetchone()
+    report_blocks = ({'include_total_cost': report_blocks_row[0],
+                      'include_application': report_blocks_row[1],
+                      'application_block': report_blocks_row[2]}
+                     if report_blocks_row else None)
     cur.execute("""SELECT COALESCE(SUM(a.amount),0) FROM loan_payment_allocations a
         WHERE a.payment_id=%s AND a.component='unapplied'""", (payment_id,))
     unapplied = cur.fetchone()[0]
@@ -143,7 +150,7 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
         'loan': {'original_principal': str(original), 'current_principal': str(balance),
                  'rate': str(rate), 'start_date': start_date.isoformat(),
                  'end_date': end_date.isoformat() if end_date else None,
-                 'schedule_type': schedule_type,
+                 'schedule_type': schedule_type, 'status': status,
                  'terms': {'deal_code': terms[0], 'kind_code': terms[1],
                            'purpose_code': terms[2], 'interest_day_basis': terms[3],
                            'annual_rate': str(terms[4]) if terms[4] is not None else None,
@@ -152,7 +159,8 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
                           if terms else None,
                  'psk': {'percent': str(psk[0]), 'amount': str(psk[1]),
                          'calculated_on': psk[2].isoformat(), 'status': psk[3]}
-                        if psk else None},
+                        if psk else None,
+                 'report_blocks': report_blocks},
         'payment': {'date': payment_date.isoformat(), 'amount': str(target[2]),
                     'principal': str(target[3]), 'interest': str(target[4]),
                     'penalty': str(target[5]), 'unapplied': str(unapplied),

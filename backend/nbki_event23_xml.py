@@ -52,6 +52,15 @@ def _exists(parent, stem, value):
     _add(parent, f'{stem}_{1 if value else 0}')
 
 
+#  sizeCode/scheduleCode (ФЛ_28.10/28.11) are required by the published XSD
+#  5.1 archive but forbidden by the Bank of Russia letter dated 09.12.2025
+#  № 44-19/8423 from 29.12.2025. None of 623 real historical events from this
+#  organization's own confirmed-accepted NBKI files include them at all, so
+#  the serializer omits them entirely (see _event()) and this is the one
+#  schema deviation this check tolerates - any other XSD error still fails.
+_KNOWN_ACCEPTED_SCHEMA_DEVIATIONS = ('sizeCode', 'scheduleCode')
+
+
 def _validate_xsd(raw: bytes) -> None:
     if etree is None:
         raise ValueError('На сервере не установлен lxml для проверки XSD 5.1')
@@ -60,8 +69,13 @@ def _validate_xsd(raw: bytes) -> None:
     schema = etree.XMLSchema(schema_doc)
     document = etree.fromstring(raw, etree.XMLParser(
         resolve_entities=False, no_network=True, load_dtd=False))
-    if not schema.validate(document):
-        error = schema.error_log.last_error
+    if schema.validate(document):
+        return
+    unexpected = [error for error in schema.error_log
+                  if not any(name in (error.message or '')
+                             for name in _KNOWN_ACCEPTED_SCHEMA_DEVIATIONS)]
+    if unexpected:
+        error = unexpected[0]
         raise ValueError(f'Не удалось проверить XML по XSD 5.1: строка {error.line}: {error.message}')
 
 
@@ -133,8 +147,14 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         _add(payterms, 'percentPayDate', next_row[0].isoformat())
     _add(payterms, 'freqCode', '3')
 
+    # FL_22 presence follows this loan's own historical precedent (across 623
+    # real events, always included or always omitted per deal UID, never
+    # mixed) rather than a blanket rule; see nbki_seed_report_block_flags.py.
+    report_blocks = loan.get('report_blocks')
     psk = loan.get('psk')
-    if psk:
+    if report_blocks and report_blocks.get('include_total_cost'):
+        if not psk or psk.get('status') != 'cross_checked':
+            raise ValueError('Исторический признак требует блок ФЛ_22, но ПСК не прошла сверку CRM')
         cost = _add(event, 'FL_22_TotalCost')
         for key, value in (('minPercentCost', psk['percent']), ('minCost', psk['amount']),
                            ('calcDate', psk['calculated_on']), ('maxPercentCost', psk['percent']),
@@ -156,8 +176,12 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         d = _add(group, 'FL_25_Debt')
         for key, value in (('debtSum', total), ('debtMainSum', due_main + overdue_main),
                            ('debtPercentSum', due_interest + overdue_interest),
-                           ('debtOtherSum', penalty), ('currency', 'RUB')):
-            _add(d, key, value if key == 'currency' else _money(value))
+                           ('debtOtherSum', penalty)):
+            _add(d, key, _money(value))
+        # Present in 100% of 435 real FL_25_Debt blocks observed; this CRM has
+        # no concept of an unconfirmed grace period to report otherwise.
+        _add(d, 'graceUnconfExist_0')
+        _add(d, 'currency', 'RUB')
     if due_main + due_interest + penalty:
         d = _add(group, 'FL_26_DebtDue')
         _add(d, 'debtDueExist_1')
@@ -188,14 +212,20 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     else:
         _add(overdue, 'missFact_0')
     p = _add(group, 'FL_28_Payment')
+    # sizeCode/scheduleCode (ФЛ_28.10/28.11) are the exact codes the letter from
+    # the Bank of Russia dated 09.12.2025 (№ 44-19/8423) forbids sending from
+    # 29.12.2025. None of 623 real historical events observed include these
+    # elements at all - not even as a dash - so they are omitted entirely,
+    # matching the organization's own confirmed-accepted precedent rather
+    # than the published XSD 5.1's minOccurs requirement for them.
     for key, value in (('paymentSum', payment['amount']), ('paymentMainSum', payment['principal']),
                        ('paymentPercentSum', payment['interest']), ('paymentOtherSum', payment['penalty']),
                        ('totalSum', payment['cumulative']['amount']),
                        ('totalMainSum', payment['cumulative']['principal']),
                        ('totalPercentSum', payment['cumulative']['interest']),
                        ('totalOtherSum', payment['cumulative']['penalty']), ('date', payment['date']),
-                       ('sizeCode', '-'), ('scheduleCode', '-'), ('payCurrency', 'RUB')):
-        _add(p, key, value if key in ('sizeCode', 'scheduleCode', 'payCurrency', 'date') else _money(value))
+                       ('payCurrency', 'RUB')):
+        _add(p, key, value if key in ('payCurrency', 'date') else _money(value))
 
     if smp and smp.get('value_without_penalty_uncapped') is not None:
         monthly = _add(event, 'FL_29_MonthlyPayment')
@@ -212,12 +242,25 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _add(accounting_block, 'calcDate', calc_date)
     _add(accounting_block, 'unaccountedSum', '0.00')
     _add(accounting_block, 'unaccountedCurrency', 'RUB')
+    # FL_55 presence follows this loan's own historical precedent too; its
+    # static application fields are reused verbatim from the organization's
+    # last confirmed-accepted report for this UID, since CRM has no concept
+    # of the original loan-application process (source/way/stage codes) to
+    # compute them itself.
+    if report_blocks and report_blocks.get('include_application'):
+        block = report_blocks.get('application_block') or {}
+        if not block:
+            raise ValueError('Исторический признак требует блок ФЛ_55, но нет сохранённых данных заявки')
+        application = _add(event, 'FL_55_Application')
+        for key, value in block.items():
+            _add(application, key, value)
+
     participation = _add(event, 'FL_56_Participation')
     _add(participation, 'role', '1')
     _add(participation, 'kindCode', terms['kind_code'])
     _add(participation, 'uid', facts['uid'])
     _add(participation, 'fundDate', loan['start_date'])
-    _add(participation, 'overdueExist_0')
+    _exists(participation, 'overdueExist', loan.get('status') == 'overdue')
     _add(participation, 'stopExist_0')
     return event
 

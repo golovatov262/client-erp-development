@@ -32,13 +32,44 @@ class Event23ReadinessTests(unittest.TestCase):
         result = assess_event23(inspection, accounting, {'status': 'checked'}, None, None)
         statuses = {block['name']: block['status'] for block in result['blocks']}
         for name in ('FL_20_JointDebtors', 'FL_36_1_ProvisionPaymentOffset',
-                     'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn', 'FL_55_Application',
+                     'FL_30_NonMonetarySource', 'FL_37_WarrantyReturn',
                      'FL_19_1_AmountInfo', 'FL_54_Accounting', 'FL_29_1_DebtBurdenInfo',
                      'FL_19_Amount'):
             self.assertEqual(statuses[name], 'source_present')
         for name in ('FL_18_Deal', 'FL_56_Participation', 'FL_21_PaymentTerms',
-                     'FL_22_TotalCost', 'FL_29_MonthlyPayment'):
+                     'FL_22_TotalCost', 'FL_29_MonthlyPayment', 'FL_55_Application'):
             self.assertEqual(statuses[name], 'review')
+
+    def test_fl55_and_fl22_follow_loan_report_block_precedent(self):
+        inspection = {'uid': 'uid', 'snapshot': {'loan': {
+            'contract_no': '123', 'start_date': '2026-01-01', 'amount': Decimal('1000')}}}
+        accounting = {'status': 'checked', 'principal_after': '900.00',
+                      'cumulative_crm_payments': {'amount': '200.00'}}
+
+        never_needed = assess_event23(inspection, accounting, {'status': 'checked'}, None, None,
+                                      report_blocks={'include_total_cost': False,
+                                                     'include_application': False,
+                                                     'application_block': None})
+        statuses = {block['name']: block['status'] for block in never_needed['blocks']}
+        self.assertEqual(statuses['FL_22_TotalCost'], 'source_present')
+        self.assertEqual(statuses['FL_55_Application'], 'source_present')
+
+        needed_with_data = assess_event23(inspection, accounting, {'status': 'checked'}, None, None,
+                                          psk_candidate_status='cross_checked',
+                                          smp_candidate={'status': 'candidate_from_crm_schedule'},
+                                          report_blocks={'include_total_cost': True,
+                                                         'include_application': True,
+                                                         'application_block': {'role': '1'}})
+        statuses = {block['name']: block['status'] for block in needed_with_data['blocks']}
+        self.assertEqual(statuses['FL_22_TotalCost'], 'source_present')
+        self.assertEqual(statuses['FL_55_Application'], 'source_present')
+
+        needed_without_psk = assess_event23(inspection, accounting, {'status': 'checked'}, None, None,
+                                            report_blocks={'include_total_cost': True,
+                                                           'include_application': True,
+                                                           'application_block': {'role': '1'}})
+        statuses = {block['name']: block['status'] for block in needed_without_psk['blocks']}
+        self.assertEqual(statuses['FL_22_TotalCost'], 'review')
 
     def test_fl19_amount_needs_loan_amount_present(self):
         inspection = {'uid': 'uid', 'snapshot': {'loan': {

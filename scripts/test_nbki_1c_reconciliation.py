@@ -136,6 +136,8 @@ class ReconciliationTests(unittest.TestCase):
             def fetchone(self):
                 if 'FROM nbki_loan_terms_versions' in self.query:
                     return None
+                if 'FROM nbki_loan_report_blocks' in self.query:
+                    return None
                 if 'SUM(penalty_amount)' in self.query:
                     return (Decimal('0'), date(2032, 4, 30))
                 return (0,)
