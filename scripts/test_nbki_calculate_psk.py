@@ -45,6 +45,18 @@ class CalculatePskManualDecisionsTests(unittest.TestCase):
         self.assertEqual(row['status'], 'cross_checked')
         self.assertEqual(row['note'], 'ставка CRM принята как верная')
 
+    def test_trust_crm_value_overrides_review_with_no_source_at_all(self):
+        # Loan 191: 0% loan, no matching 1C event at all - nothing to cross-check,
+        # but the operator confirmed trusting CRM for this whole batch.
+        rows = [(191, '100-000049131102023', Decimal('2699519.00'), Decimal('0'),
+                 60, date(2023, 10, 31), 'annuity', None, None, None, None, None,
+                 'trust_crm_value', None, 'значения CRM принимаются как верные')]
+        cur = FakeCursor(rows)
+        report = run(cur, 2)
+        row = report['rows'][0]
+        self.assertEqual(row['status'], 'cross_checked')
+        self.assertEqual(row['note'], 'значения CRM принимаются как верные')
+
     def test_no_decision_keeps_default_classification(self):
         rows = [(999, 'X', Decimal('100000'), Decimal('20'), 12, date(2026, 1, 1),
                  'annuity', None, None, None, None, None, None, None, None)]

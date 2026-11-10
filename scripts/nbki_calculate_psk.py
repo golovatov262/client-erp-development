@@ -38,7 +38,7 @@ def run(cur, org_id: int, apply: bool = False):
             status, note = classify_psk(item, source_pct, source_sum, source_status)
             if psk_decision == 'override_origination_term':
                 note += f'; {psk_decision_note}'
-            elif psk_decision == 'trust_crm_rate' and status == 'review':
+            elif psk_decision in ('trust_crm_rate', 'trust_crm_value') and status == 'review':
                 status, note = 'cross_checked', psk_decision_note
             if confirmed_purpose == 'consumer':
                 note += '; потребительская цель подтверждена оператором CRM'
