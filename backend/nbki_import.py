@@ -229,8 +229,14 @@ def parse_receipt_zip(payload: bytes | Path) -> dict:
     if root.tag == "NotificationOfReceipt":
         reg_number = _text(root, "outgoingDocNumber")
         status = "received" if root.find("acceptanceStatusOK") is not None else "rejected"
+        # Unlike ticket2, each top-level repeated <Errors> here is one
+        # envelope-level error (no errorNum/uid/block - the file was rejected
+        # before any per-event processing happened).
+        errors = [{"error_code": _text(node, "errorCode"),
+                  "error_message": _text(node, "errorMessage")}
+                 for node in root.findall("Errors")]
         return {"reg_number": reg_number, "kind": 1, "status": status,
-                "receipt_time": _datetime(_text(root, "docDateTime"))}
+                "receipt_time": _datetime(_text(root, "docDateTime")), "errors": errors}
     if root.tag == "NotificationOfAcceptance":
         info = root.find("DocInfo")
         status_code = _text(info, "dataReceivedStatus")
@@ -238,10 +244,24 @@ def parse_receipt_zip(payload: bytes | Path) -> dict:
         rejected = int(_text(info, "eventsRejected") or 0)
         status = "accepted" if status_code == "ACCEPTED" and rejected == 0 else (
             "partial" if accepted else "rejected")
+        errors_block = root.find("Errors")
+        errors = [{"error_num": int(node.get("errorNum")) if node.get("errorNum") else None,
+                  "event_date_time": _datetime(_text(node, "eventDateTime")),
+                  "error_code": _text(node, "errorCode"),
+                  "error_message": _text(node, "errorMessage"),
+                  "uid": _text(node, "uid"),
+                  "order_num": int(_text(node, "orderNum")) if _text(node, "orderNum") else None,
+                  "subject_code": _text(node, "subjectCode"),
+                  "subject_id": _text(node, "subjectID"),
+                  "event_name": _text(node, "eventName"),
+                  "block_name": _text(node, "blockName"),
+                  "field_name": _text(node, "fieldName"),
+                  "field_value": _text(node, "fieldValue")}
+                 for node in (errors_block.findall("Error") if errors_block is not None else [])]
         return {"reg_number": _text(info, "outgoingDocNumber"), "kind": 2,
                 "status": status, "accepted": accepted, "rejected": rejected,
                 "events_received": int(_text(info, "eventsReceived") or 0),
-                "receipt_time": _datetime(_text(info, "docDateTime"))}
+                "receipt_time": _datetime(_text(info, "docDateTime")), "errors": errors}
     raise ValueError("Неизвестный формат квитанции")
 
 
@@ -411,6 +431,20 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                     receipt.get("rejected") if receipt else None,
                     receipt.get("receipt_time") if receipt else None))
             file_id = cur.fetchone()[0]
+            if receipt and receipt.get("errors"):
+                cur.execute("""DELETE FROM nbki_receipt_errors
+                    WHERE source_file_id=%s AND receipt_kind=%s""", (file_id, receipt["kind"]))
+                for item in receipt["errors"]:
+                    cur.execute("""INSERT INTO nbki_receipt_errors
+                        (source_file_id, receipt_kind, error_num, event_date_time, error_code,
+                         error_message, uid, order_num, subject_code, subject_id, event_name,
+                         block_name, field_name, field_value)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (file_id, receipt["kind"], item.get("error_num"), item.get("event_date_time"),
+                         item.get("error_code"), item.get("error_message"), item.get("uid"),
+                         item.get("order_num"), item.get("subject_code"), item.get("subject_id"),
+                         item.get("event_name"), item.get("block_name"), item.get("field_name"),
+                         item.get("field_value")))
             deal_ids: dict[str, int] = {}
             for deal in source["deals"].values():
                 loan_id, status, reason = _match_loan(cur, org_id, deal)

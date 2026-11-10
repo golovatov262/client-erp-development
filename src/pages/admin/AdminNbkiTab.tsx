@@ -224,16 +224,27 @@ const AdminNbkiTab = () => {
         <CardContent className="space-y-2">
           {!summary?.files.length && <p className="text-sm text-muted-foreground">Файлы пока не импортированы.</p>}
           {summary?.files.map(file => (
-            <div key={file.reg_number} className="flex flex-wrap items-center justify-between gap-2 border-b py-2 last:border-b-0">
-              <div className="min-w-0">
-                <div className="break-all font-mono text-xs">{file.reg_number}</div>
-                <div className="text-xs text-muted-foreground">Схема {file.schema_version} · {file.subjects_count} субъектов · {file.events_count} событий</div>
+            <div key={file.reg_number} className="border-b py-2 last:border-b-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="break-all font-mono text-xs">{file.reg_number}</div>
+                  <div className="text-xs text-muted-foreground">Схема {file.schema_version} · {file.subjects_count} субъектов · {file.events_count} событий</div>
+                </div>
+                <div className="text-right">
+                  <Badge variant={file.receipt_status === "accepted" ? "default" : "secondary"}>{receiptLabel[file.receipt_status] || file.receipt_status}</Badge>
+                  {file.receipt_status === "accepted" && <div className="mt-1 text-xs text-muted-foreground">Принято {file.events_accepted}, отклонено {file.events_rejected}</div>}
+                  {!file.receipt_signature_verified && file.receipt_status !== "unknown" && <div className="text-xs text-amber-700">Подпись квитанции требует проверки CryptoPro</div>}
+                </div>
               </div>
-              <div className="text-right">
-                <Badge variant={file.receipt_status === "accepted" ? "default" : "secondary"}>{receiptLabel[file.receipt_status] || file.receipt_status}</Badge>
-                {file.receipt_status === "accepted" && <div className="mt-1 text-xs text-muted-foreground">Принято {file.events_accepted}, отклонено {file.events_rejected}</div>}
-                {!file.receipt_signature_verified && file.receipt_status !== "unknown" && <div className="text-xs text-amber-700">Подпись квитанции требует проверки CryptoPro</div>}
-              </div>
+              {file.errors.length > 0 && <details className="mt-2">
+                <summary className="cursor-pointer text-xs font-medium text-destructive">Ошибки квитанции: {file.errors.length} — для корректировочного файла</summary>
+                <div className="mt-1 space-y-1 text-xs">
+                  {file.errors.map((err, index) => <div key={index} className="rounded border border-destructive/30 bg-destructive/5 p-1.5">
+                    <span className="font-mono">{err.error_code}</span>{err.uid && <> · УИД {err.uid}</>}{err.block_name && <> · блок {err.block_name}</>}{err.field_name && <> · поле {err.field_name}{err.field_value ? ` = ${err.field_value}` : ""}</>}
+                    {err.error_message && <div className="text-muted-foreground">{err.error_message}</div>}
+                  </div>)}
+                </div>
+              </details>}
             </div>
           ))}
         </CardContent>

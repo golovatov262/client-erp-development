@@ -10011,13 +10011,25 @@ def handle_nbki(method, params, body, staff, cur, conn):
             COUNT(*) FILTER (WHERE deal_role='guarantor')
             FROM nbki_deals WHERE org_id=%s""", (org_id,))
         row = cur.fetchone()
-        cur.execute("""SELECT reg_number, schema_version, document_time, subjects_count,
-            events_count, receipt_status, events_accepted, events_rejected,
-            receipt_signature_verified FROM nbki_source_files
-            WHERE org_id=%s ORDER BY document_time DESC""", (org_id,))
-        files = [dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
+        cur.execute("""SELECT f.reg_number, f.schema_version, f.document_time, f.subjects_count,
+            f.events_count, f.receipt_status, f.events_accepted, f.events_rejected,
+            f.receipt_signature_verified,
+            (SELECT json_agg(json_build_object(
+                'receipt_kind', e.receipt_kind, 'error_code', e.error_code,
+                'error_message', e.error_message, 'uid', e.uid,
+                'event_name', e.event_name, 'block_name', e.block_name,
+                'field_name', e.field_name, 'field_value', e.field_value
+             ) ORDER BY e.id) FROM nbki_receipt_errors e WHERE e.source_file_id=f.id) AS errors
+            FROM nbki_source_files f
+            WHERE f.org_id=%s ORDER BY f.document_time DESC""", (org_id,))
+        files = []
+        for item in cur.fetchall():
+            *values, errors = item
+            row = dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
                            'events_count', 'receipt_status', 'events_accepted', 'events_rejected',
-                           'receipt_signature_verified'), (serialize(v) for v in item))) for item in cur.fetchall()]
+                           'receipt_signature_verified'), (serialize(v) for v in values)))
+            row['errors'] = errors or []
+            files.append(row)
         cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE role='borrower'),
             COUNT(*) FILTER (WHERE role='guarantor'),
             COUNT(*) FILTER (WHERE role='borrower' AND match_status='matched'),

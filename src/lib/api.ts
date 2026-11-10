@@ -6,6 +6,17 @@ const API_URL = new URL(funcUrls.api, window.location.origin).toString();
 
 type Params = Record<string, string | number | undefined>;
 
+export type NbkiReceiptError = {
+  receipt_kind: 1 | 2;
+  error_code: string | null;
+  error_message: string | null;
+  uid: string | null;
+  event_name: string | null;
+  block_name: string | null;
+  field_name: string | null;
+  field_value: string | null;
+};
+
 export type NbkiFile = {
   reg_number: string;
   schema_version: string;
@@ -16,6 +27,7 @@ export type NbkiFile = {
   events_accepted: number | null;
   events_rejected: number | null;
   receipt_signature_verified: boolean;
+  errors: NbkiReceiptError[];
 };
 
 export type NbkiSummary = {
