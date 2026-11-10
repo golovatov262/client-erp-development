@@ -272,6 +272,81 @@ class DebtTest(unittest.TestCase):
         self.assertEqual(result['accrued_before_payment'], '24.66')
         self.assertEqual(result['remaining_interest_candidate'], '24.66')
 
+    def test_authorized_payment_reconstructs_missing_intermediate_snapshot(self):
+        evidence = {'loan_id': 1, 'payment_id': 6, 'payment_date': '2026-10-20',
+                    'before': {'loan': {'balance': '950.00', 'rate': '36'}},
+                    'after': {'loan': {'balance': '900.00', 'rate': '36',
+                                       'amount': '1100.00', 'start_date': '2026-01-01',
+                                       'end_date': '2027-01-31', 'schedule_type': 'annuity',
+                                       'status': 'active'},
+                              'schedule': [
+                                  {'id': 10, 'payment_date': '2026-10-01', 'status': 'paid'},
+                                  {'id': 11, 'payment_date': '2026-11-01',
+                                   'status': 'pending', 'interest_amount': '50.00',
+                                   'paid_amount': '0.00', 'covered_interest_v2': '0.00',
+                                   'covered_total_v2': '0.00'}]}}
+        digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                                           separators=(',', ':')).encode()).hexdigest()
+
+        class ReconstructCursor:
+            def execute(self, query, params):
+                self.query, self.params = query, params
+
+            def fetchone(self):
+                if 'nbki_payment_ledger_reconstruction_decisions' in self.query:
+                    return (1,) if self.params[0] == 5 else None
+                if 'nbki_loan_terms_versions' in self.query:
+                    return (False,)
+                if 'SUM(principal_part)' in self.query:
+                    return (Decimal('100.00'),)
+                raise AssertionError(self.query)
+
+            def fetchall(self):
+                return [(5, date(2026, 10, 10), Decimal('50'), None, None),
+                        (6, date(2026, 10, 20), Decimal('50'), digest, evidence)]
+
+        result = estimate_posting_snapshot_interest(
+            ReconstructCursor(), evidence, digest, 1, 6, date(2026, 10, 20))
+        self.assertEqual(result['status'], 'candidate_from_posting_snapshot_formula')
+        self.assertEqual(result['accrued_before_payment'], '18.25')
+        self.assertEqual(result['remaining_interest_candidate'], '18.25')
+
+    def test_unauthorized_missing_intermediate_snapshot_stays_review(self):
+        evidence = {'loan_id': 1, 'payment_id': 6, 'payment_date': '2026-10-20',
+                    'before': {'loan': {'balance': '950.00', 'rate': '36'}},
+                    'after': {'loan': {'balance': '900.00', 'rate': '36',
+                                       'amount': '1100.00', 'start_date': '2026-01-01',
+                                       'end_date': '2027-01-31', 'schedule_type': 'annuity',
+                                       'status': 'active'},
+                              'schedule': [
+                                  {'id': 10, 'payment_date': '2026-10-01', 'status': 'paid'},
+                                  {'id': 11, 'payment_date': '2026-11-01',
+                                   'status': 'pending', 'interest_amount': '50.00',
+                                   'paid_amount': '0.00', 'covered_interest_v2': '0.00',
+                                   'covered_total_v2': '0.00'}]}}
+        digest = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True,
+                                           separators=(',', ':')).encode()).hexdigest()
+
+        class NoDecisionCursor:
+            def execute(self, query, params):
+                self.query, self.params = query, params
+
+            def fetchone(self):
+                if 'nbki_payment_ledger_reconstruction_decisions' in self.query:
+                    return None
+                if 'SUM(principal_part)' in self.query:
+                    return (Decimal('100.00'),)
+                raise AssertionError(self.query)
+
+            def fetchall(self):
+                return [(5, date(2026, 10, 10), Decimal('50'), None, None),
+                        (6, date(2026, 10, 20), Decimal('50'), digest, evidence)]
+
+        result = estimate_posting_snapshot_interest(
+            NoDecisionCursor(), evidence, digest, 1, 6, date(2026, 10, 20))
+        self.assertEqual(result['status'], 'review')
+        self.assertIn('нет неизменяемого снимка CRM', result['issues'][0])
+
 
 if __name__ == '__main__':
     unittest.main()

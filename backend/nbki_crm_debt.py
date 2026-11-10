@@ -335,16 +335,42 @@ def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str
     target_seen = False
     for pid, payment_date, principal_part, snapshot_hash, payment_evidence in payments:
         target = pid == payment_id
+        reconstructed = False
         if target:
             target_seen = True
             payment_evidence = evidence
             snapshot_hash = expected_sha256
         if not payment_evidence or not snapshot_hash:
-            return review(f'Для платежа {pid} внутри периода нет неизменяемого снимка CRM')
-        encoded_payment = json.dumps(payment_evidence, ensure_ascii=False, sort_keys=True,
-                                     separators=(',', ':')).encode('utf-8')
-        if hashlib.sha256(encoded_payment).hexdigest() != snapshot_hash.strip():
-            return review(f'Контрольная сумма снимка платежа {pid} не совпала')
+            # Only a payment explicitly authorized here (one-off, per-payment
+            # evidence) may substitute a ledger-sum reconstruction for a
+            # missing frozen snapshot; everything else still hard-fails.
+            cur.execute("""SELECT 1 FROM nbki_payment_ledger_reconstruction_decisions
+                WHERE payment_id=%s""", (pid,))
+            if not cur.fetchone():
+                return review(f'Для платежа {pid} внутри периода нет неизменяемого снимка CRM')
+            if principal_part is None:
+                return review(f'Для платежа {pid} нет суммы основного долга в журнале CRM')
+            cur.execute("""SELECT EXISTS (SELECT 1 FROM nbki_loan_terms_versions
+                WHERE loan_id=%s AND annual_rate IS NOT NULL
+                  AND valid_from::date>%s AND valid_from::date<=%s)""",
+                (loan_id, anchor, event_date))
+            if cur.fetchone()[0]:
+                return review(f'Внутри периода могла измениться ставка; восстановление платежа {pid} по журналу не подтверждено')
+            cur.execute("""SELECT COALESCE(SUM(principal_part),0) FROM loan_payments
+                WHERE loan_id=%s AND (payment_date,id)<(%s,%s)""", (loan_id, payment_date, pid))
+            principal_before_ledger = _money(cur.fetchone()[0])
+            reconstructed_before = _money(loan['amount']) - principal_before_ledger
+            reconstructed_after = reconstructed_before - _money(principal_part)
+            payment_evidence = {'loan_id': loan_id, 'payment_id': pid,
+                                'payment_date': payment_date.isoformat(),
+                                'before': {'loan': {'balance': str(reconstructed_before), 'rate': str(rate)}},
+                                'after': {'loan': {'balance': str(reconstructed_after), 'rate': str(rate)}}}
+            reconstructed = True
+        if not reconstructed:
+            encoded_payment = json.dumps(payment_evidence, ensure_ascii=False, sort_keys=True,
+                                         separators=(',', ':')).encode('utf-8')
+            if hashlib.sha256(encoded_payment).hexdigest() != snapshot_hash.strip():
+                return review(f'Контрольная сумма снимка платежа {pid} не совпала')
         if (payment_evidence.get('loan_id') != loan_id or
                 payment_evidence.get('payment_id') != pid or
                 payment_evidence.get('payment_date') != payment_date.isoformat()):
