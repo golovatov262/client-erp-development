@@ -327,7 +327,7 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     reg_number = f"{facts['source']['source_id']}_{created.astimezone(MSK).strftime('%Y%m%d_%H%M%S')}"
     raw, digest = document_xml(facts['source'], [(facts['subject'], [ev])], reg_number, created)
     _validate_xsd(raw)
-    return {'file_name': f"NBKI_2_3_{facts['contract_no']}_{event_id}.xml",
+    return {'file_name': f'{reg_number}.xml',
             'content_base64': base64.b64encode(raw).decode('ascii'),
             'sha256': digest, 'xsd_version': '5.1', 'xsd_valid': True,
             'business_status': 'candidate_requires_regulatory_review',
@@ -395,7 +395,7 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
     first_root.set('groupBlocksCount', str(total_events))
     raw = ET.tostring(first_root, encoding='utf-8', xml_declaration=True)
     _validate_xsd(raw)
-    return {'file_name': f"NBKI_2_3_batch_{len(exported)}_events.xml",
+    return {'file_name': f"{first_root.get('regNumberDoc')}.xml",
             'content_base64': base64.b64encode(raw).decode('ascii'),
             'sha256': hashlib.sha256(raw).hexdigest(), 'xsd_version': '5.1',
             'xsd_valid': True, 'business_status': 'candidate_requires_regulatory_review',
