@@ -17,19 +17,29 @@ def run(cur, org_id: int, apply: bool = False):
         c.psk_percent,c.psk_amount,c.status,p.purpose,
         (SELECT value->>'value' FROM nbki_1c_loan_facts f,
             LATERAL jsonb_each(f.indicators::jsonb) WHERE f.loan_id=l.id
-              AND value->>'code'='ФЛ_18.5/ЮЛ_11.5' LIMIT 1) AS historic_purpose
+              AND value->>'code'='ФЛ_18.5/ЮЛ_11.5' LIMIT 1) AS historic_purpose,
+        m.decision,m.override_term_months,m.note
         FROM loans l LEFT JOIN nbki_contract_cost_facts c ON c.loan_id=l.id
         LEFT JOIN nbki_loan_purpose_confirmations p ON p.loan_id=l.id AND p.org_id=l.org_id
+        LEFT JOIN nbki_psk_manual_decisions m ON m.loan_id=l.id AND m.org_id=l.org_id
         WHERE l.org_id=%s AND l.status IN ('active','overdue','holiday')
           AND EXISTS (SELECT 1 FROM nbki_event_deals e WHERE e.loan_id=l.id AND e.org_id=l.org_id
             AND e.role='borrower' AND e.match_status='matched')
         ORDER BY l.id""", (org_id,))
     report = {'total': 0, 'cross_checked': 0, 'review': 0, 'errors': [], 'rows': []}
-    for loan_id, contract_no, amount, rate, term, start, kind, source_pct, source_sum, source_status, confirmed_purpose, purpose in cur.fetchall():
+    for (loan_id, contract_no, amount, rate, term, start, kind, source_pct, source_sum,
+         source_status, confirmed_purpose, purpose, psk_decision, override_term,
+         psk_decision_note) in cur.fetchall():
         report['total'] += 1
+        if psk_decision == 'override_origination_term':
+            term = override_term
         try:
             item = calculate_psk(amount, rate, term, start, kind)
             status, note = classify_psk(item, source_pct, source_sum, source_status)
+            if psk_decision == 'override_origination_term':
+                note += f'; {psk_decision_note}'
+            elif psk_decision == 'trust_crm_rate' and status == 'review':
+                status, note = 'cross_checked', psk_decision_note
             if confirmed_purpose == 'consumer':
                 note += '; потребительская цель подтверждена оператором CRM'
             elif confirmed_purpose == 'business':
