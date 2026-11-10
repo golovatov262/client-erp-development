@@ -20,6 +20,32 @@ def _money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def _effective_latest_payment(cur, loan_id: int, event_date: date, payment_id: int) -> bool:
+    """A later payment exists, but is authorized and proven to never touch
+    any schedule row this event's debt/interest reconstruction depends on
+    (every row due on or before the nearest current-period row).
+
+    Authorization is per-payment (nbki_effective_latest_payment_decisions);
+    the "never touches a relevant row" half is verified here every call, not
+    assumed, so a decision can never silently cover a later edit.
+    """
+    cur.execute("""SELECT 1 FROM nbki_effective_latest_payment_decisions
+        WHERE payment_id=%s""", (payment_id,))
+    if not cur.fetchone():
+        return False
+    cur.execute("""SELECT EXISTS (
+        SELECT 1 FROM loan_payment_allocations a
+        JOIN loan_payments p ON p.id=a.payment_id
+        JOIN loan_schedule s ON s.id=a.schedule_id
+        WHERE p.loan_id=%s AND (p.payment_date,p.id)>(%s,%s)
+          AND s.payment_date<=COALESCE(
+            (SELECT MIN(payment_date) FROM loan_schedule
+             WHERE loan_id=%s AND payment_date>=%s), %s))""",
+        (loan_id, event_date, payment_id, loan_id, event_date, event_date))
+    touched_relevant_row = cur.fetchone()[0]
+    return not touched_relevant_row
+
+
 def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
                                 loan_id: int, payment_id: int,
                                 event_date: date) -> dict:
@@ -115,7 +141,7 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
               'period_start': None, 'accrued_before_payment': None,
               'interest_covered_in_period': None, 'remaining_interest_candidate': None,
               'issues': []}
-    if not latest_payment:
+    if not latest_payment and not _effective_latest_payment(cur, loan_id, event_date, payment_id):
         result['issues'].append('Есть более поздние платежи; текущий график не фиксирует прежний срез')
         return result
     if not principal_checked:
@@ -426,14 +452,17 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
         WHERE loan_id=%s AND (payment_date,id)>(%s,%s)""",
         (loan_id, event_date, payment_id))
     later_count = cur.fetchone()[0]
+    effectively_latest = bool(later_count) and _effective_latest_payment(
+        cur, loan_id, event_date, payment_id)
     result = {'basis': 'Текущий график и распределения CRM; только последний платёж',
-              'status': 'unavailable' if later_count else 'calculated_from_current_crm',
+              'status': 'unavailable' if later_count and not effectively_latest
+                        else 'calculated_from_current_crm',
               'later_payments': later_count, 'overdue_principal': None,
               'overdue_interest': None, 'term_principal': None,
               'interest_debt': None, 'total_debt': None,
               'penalty_candidate': None,
               'rows': [], 'issues': []}
-    if later_count:
+    if later_count and not effectively_latest:
         result['issues'].append('После события есть платежи: текущий график не является состоянием на дату события')
         return result
     if principal_after is None:

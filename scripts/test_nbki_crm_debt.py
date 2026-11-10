@@ -10,11 +10,14 @@ from backend.nbki_crm_debt import estimate_posting_snapshot_interest
 
 
 class Cursor:
-    def __init__(self, later, rows, replaced=False, penalty_decision=None):
+    def __init__(self, later, rows, replaced=False, penalty_decision=None,
+                effective_latest_decision=None, later_touches_relevant_row=True):
         self.later = later
         self.rows = rows
         self.replaced = replaced
         self.penalty_decision = penalty_decision
+        self.effective_latest_decision = effective_latest_decision
+        self.later_touches_relevant_row = later_touches_relevant_row
         self.query = ''
 
     def execute(self, query, params):
@@ -29,6 +32,10 @@ class Cursor:
             return (Decimal('0'),)
         if 'nbki_penalty_reconciliation_decisions' in self.query:
             return self.penalty_decision
+        if 'nbki_effective_latest_payment_decisions' in self.query:
+            return (1,) if self.effective_latest_decision else None
+        if 'loan_payment_allocations a' in self.query and 'JOIN loan_schedule s' in self.query:
+            return (self.later_touches_relevant_row,)
         return (self.later,)
 
     def fetchall(self):
@@ -64,6 +71,19 @@ class DebtTest(unittest.TestCase):
 
     def test_later_payment_fails_closed(self):
         result = split_latest_crm_debt(Cursor(1, []), 1, 2, date(2026, 10, 1), '900')
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIsNone(result['overdue_principal'])
+
+    def test_authorized_later_payment_proven_irrelevant_is_treated_as_latest(self):
+        cur = Cursor(1, [], effective_latest_decision=True, later_touches_relevant_row=False)
+        result = split_latest_crm_debt(cur, 63, 2652, date(2026, 10, 27), '900')
+        self.assertEqual(result['status'], 'calculated_from_current_crm')
+        self.assertEqual(result['overdue_principal'], '0.00')
+        self.assertEqual(result['term_principal'], '900.00')
+
+    def test_authorized_later_payment_that_touches_relevant_row_stays_blocked(self):
+        cur = Cursor(1, [], effective_latest_decision=True, later_touches_relevant_row=True)
+        result = split_latest_crm_debt(cur, 63, 2652, date(2026, 10, 27), '900')
         self.assertEqual(result['status'], 'unavailable')
         self.assertIsNone(result['overdue_principal'])
 
@@ -232,6 +252,44 @@ class DebtTest(unittest.TestCase):
         result = estimate_current_interest(Cursor(1, []), 1, 2,
                                            date(2026, 10, 1), latest_payment=False)
         self.assertEqual(result['status'], 'unavailable')
+
+    def test_interest_preview_accepts_authorized_irrelevant_later_payment(self):
+        class AuthorizedLaterCursor:
+            def execute(self, query, params):
+                self.query = query
+
+            def fetchone(self):
+                if 'nbki_effective_latest_payment_decisions' in self.query:
+                    return (1,)
+                if 'JOIN loan_payments p ON p.id=a.payment_id' in self.query:
+                    return (False,)
+                if 'approved_loan_schedule_replacements' in self.query:
+                    return (False,)
+                if 'FROM loan_payment_allocations a' in self.query:
+                    return (0,)
+                if 'FROM loans WHERE' in self.query:
+                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
+                if 'MAX(payment_date)' in self.query:
+                    return (date(2026, 9, 30),)
+                return (143567, Decimal('9642.77'), Decimal('0'), Decimal('0'), Decimal('0'))
+
+            def fetchall(self):
+                return [(100, date(2026, 9, 30), Decimal('43732.70')),
+                        (2649, date(2026, 10, 26), Decimal('5441.74'))]
+
+        # Same fixture as the latest_payment=True case above, reached instead
+        # through the authorized-later-payment bypass; the result must match.
+        result = estimate_current_interest(AuthorizedLaterCursor(), 87, 2649,
+                                           date(2026, 10, 26), latest_payment=False)
+        self.assertEqual(result['status'], 'candidate_from_crm_formula')
+        self.assertEqual(result['accrued_before_payment'], '8382.13')
+
+    def test_interest_preview_keeps_refusing_when_later_payment_touches_row(self):
+        result = estimate_current_interest(Cursor(1, [], effective_latest_decision=True,
+                                                   later_touches_relevant_row=True),
+                                           1, 2, date(2026, 10, 1), latest_payment=False)
+        self.assertEqual(result['status'], 'unavailable')
+        self.assertIn('Есть более поздние платежи', result['issues'][0])
 
     def test_interest_preview_refuses_replaced_schedule(self):
         result = estimate_current_interest(Cursor(0, [], replaced=True), 90, 2417,
