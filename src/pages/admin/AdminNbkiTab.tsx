@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api, { NbkiCrmEvents, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { NbkiCrmEvents, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,20 @@ const receiptLabel: Record<string, string> = {
   received: "Файл получен",
   rejected: "Отклонён",
   unknown: "Квитанция не загружена",
+};
+
+const toBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return btoa(binary);
+};
+
+const gzipFile = async (file: File): Promise<string> => {
+  const stream = file.stream().pipeThrough(new CompressionStream("gzip"));
+  return toBase64(await new Response(stream).arrayBuffer());
 };
 
 const dateInputValue = (date: Date) => {
@@ -38,6 +52,10 @@ const AdminNbkiTab = () => {
   const [eventPeriodLoading, setEventPeriodLoading] = useState(false);
   const [buildingEventId, setBuildingEventId] = useState<number | null>(null);
   const [buildingEventBatch, setBuildingEventBatch] = useState(false);
+  const [xmlFiles, setXmlFiles] = useState<File[]>([]);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
+  const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
 
   const refresh = async () => {
     try {
@@ -117,6 +135,21 @@ const AdminNbkiTab = () => {
     finally { setBuildingEventBatch(false); }
   };
 
+  const confirmReceipt = async () => {
+    if (!xmlFiles.length || !receiptFiles.length) return;
+    setConfirmingReceipt(true);
+    setError("");
+    setImportResult(null);
+    try {
+      const xml = await Promise.all(xmlFiles.map(gzipFile));
+      const receipts = await Promise.all(receiptFiles.map(async file => toBase64(await file.arrayBuffer())));
+      const result = await api.nbki.importHistorical(xml, receipts);
+      setImportResult(result);
+      await refresh();
+    } catch (e) { setError(humanizeError(e)); }
+    finally { setConfirmingReceipt(false); }
+  };
+
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -163,6 +196,26 @@ const AdminNbkiTab = () => {
           <p className="text-sm text-muted-foreground">Переносит показатели из уже загруженного отчёта событий 1С (ПСК, признак блоков ФЛ_22/ФЛ_55) в карточки займов, впервые получивших сопоставленный УИД. Учётные суммы, даты и платежи при этом не изменяются.</p>
           <Button variant="outline" disabled={syncingFacts} onClick={() => void sync1CFacts()}>{syncingFacts ? "Переношу…" : "Перенести показатели 1С в карточки"}</Button>
           {factsResult && <p role="status" className="whitespace-pre-wrap text-sm">{factsResult}</p>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Подтвердить приём нового файла</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">После отправки сформированного здесь файла в НБКИ и получения квитанции — загрузите сюда тот же XML и расшифрованную ZIP-квитанцию к нему, чтобы зафиксировать результат приёма. Если в квитанции есть отказы — готовьте корректировочный файл по требованиям НБКИ отдельно.</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm">Отправленный XML
+              <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".xml,text/xml,application/xml" multiple onChange={event => setXmlFiles(Array.from(event.target.files || []))} />
+            </label>
+            <label className="space-y-1 text-sm">ZIP-квитанция
+              <input className="block w-full rounded-md border p-2 text-sm" type="file" accept=".zip,application/zip" multiple onChange={event => setReceiptFiles(Array.from(event.target.files || []))} />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={!xmlFiles.length || !receiptFiles.length || confirmingReceipt} onClick={() => void confirmReceipt()}>{confirmingReceipt ? "Сопоставляем…" : "Подтвердить приём"}</Button>
+            <span className="text-xs text-muted-foreground">Выбрано: {xmlFiles.length} XML, {receiptFiles.length} квитанций</span>
+          </div>
+          {importResult && <p role="status" className="text-sm">Обработано {importResult.unique_deals} УИД: {importResult.matched} сопоставлено. По квитанциям принято {importResult.reported_accepted_deals} договоров.</p>}
         </CardContent>
       </Card>
 
