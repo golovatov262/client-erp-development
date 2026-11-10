@@ -10,10 +10,11 @@ from backend.nbki_crm_debt import estimate_posting_snapshot_interest
 
 
 class Cursor:
-    def __init__(self, later, rows, replaced=False):
+    def __init__(self, later, rows, replaced=False, penalty_decision=None):
         self.later = later
         self.rows = rows
         self.replaced = replaced
+        self.penalty_decision = penalty_decision
         self.query = ''
 
     def execute(self, query, params):
@@ -26,6 +27,8 @@ class Cursor:
             return (Decimal('0'), date(2030, 1, 31))
         if 'SUM(penalty_part)' in self.query:
             return (Decimal('0'),)
+        if 'nbki_penalty_reconciliation_decisions' in self.query:
+            return self.penalty_decision
         return (self.later,)
 
     def fetchall(self):
@@ -87,6 +90,36 @@ class DebtTest(unittest.TestCase):
         self.assertEqual(result['penalty_candidate']['due_classification'], 'term_until_final_scheduled_payment')
         self.assertEqual(result['penalty_candidate']['due_at'], '2030-05-31')
         self.assertIsNone(result['total_debt'])
+
+    def test_paid_exceeding_assessed_penalty_stays_review_without_decision(self):
+        class OverpaidPenaltyCursor(Cursor):
+            def fetchone(self):
+                if 'SUM(penalty_amount)' in self.query:
+                    return (Decimal('209.63'), date(2029, 1, 30))
+                if 'SUM(penalty_part)' in self.query:
+                    return (Decimal('214.64'),)
+                return super().fetchone()
+
+        result = split_latest_crm_debt(OverpaidPenaltyCursor(0, []), 110, 2653,
+                                       date(2026, 10, 27), '456128.83')
+        self.assertEqual(result['status'], 'review')
+        self.assertIsNone(result['penalty_candidate'])
+
+    def test_paid_exceeding_assessed_penalty_accepted_within_confirmed_variance(self):
+        class OverpaidPenaltyCursor(Cursor):
+            def fetchone(self):
+                if 'SUM(penalty_amount)' in self.query:
+                    return (Decimal('209.63'), date(2029, 1, 30))
+                if 'SUM(penalty_part)' in self.query:
+                    return (Decimal('214.64'),)
+                return super().fetchone()
+
+        result = split_latest_crm_debt(
+            OverpaidPenaltyCursor(0, [], penalty_decision=(Decimal('5.01'), 'известный исторический пробел')),
+            110, 2653, date(2026, 10, 27), '456128.83')
+        self.assertEqual(result['status'], 'calculated_from_current_crm')
+        self.assertEqual(result['penalty_candidate']['remaining'], '0.00')
+        self.assertEqual(result['penalty_candidate']['reconciliation_note'], 'известный исторический пробел')
 
     def test_posting_snapshot_survives_future_schedule_changes(self):
         evidence = {'loan_id': 1, 'payment_id': 2, 'payment_date': '2026-10-01',

@@ -477,8 +477,24 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
         (loan_id, event_date, payment_id))
     paid_penalty = _money(cur.fetchone()[0])
     if assessed_penalty < paid_penalty or last_due is None:
-        result['status'] = 'review'
-        result['issues'].append('Пени или дата последнего платежа не согласованы с графиком CRM')
+        variance = assessed_penalty is not None and paid_penalty - assessed_penalty or None
+        decision = None
+        if last_due is not None and variance is not None:
+            cur.execute("""SELECT accepted_variance, note FROM nbki_penalty_reconciliation_decisions
+                WHERE loan_id=%s""", (loan_id,))
+            decision = cur.fetchone()
+        if decision and variance <= _money(decision[0]):
+            result['penalty_candidate'] = {
+                'assessed_crm': str(assessed_penalty),
+                'paid_crm': str(paid_penalty),
+                'remaining': '0.00',
+                'due_at': last_due.isoformat(),
+                'due_classification': ('term_until_final_scheduled_payment'
+                                       if last_due > event_date else 'review_after_final_due'),
+                'reconciliation_note': decision[1]}
+        else:
+            result['status'] = 'review'
+            result['issues'].append('Пени или дата последнего платежа не согласованы с графиком CRM')
     else:
         result['penalty_candidate'] = {
             'assessed_crm': str(assessed_penalty),
