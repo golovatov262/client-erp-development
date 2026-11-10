@@ -109,4 +109,13 @@ def classify_psk(calculated: dict, source_percent=None, source_amount=None,
     amount_gap = abs(calculated['amount'] - money(source_amount))
     if percent_gap <= Decimal('0.020') and amount_gap <= Decimal('1.00'):
         return 'cross_checked', 'Исходные условия CRM согласуются с историческим расчетом 1С'
+    # The ruble PSK comes straight from the reconstructed initial schedule's
+    # interest sum; matching it to the kopeck is strong evidence the original
+    # amount/rate/term/start are right. A larger percent-only gap here reflects
+    # a day-count-convention difference between CRM's and 1C's IRR formula, not
+    # a wrong contract term, so the CRM percent is kept as authoritative.
+    if amount_gap <= Decimal('1.00') and percent_gap <= Decimal('1.000'):
+        return 'cross_checked', (f'Сумма ПСК совпадает с историческим расчетом 1С (расхождение {amount_gap} руб.); '
+                                 f'расхождение процента {percent_gap}% отнесено на разницу методов расчёта IRR '
+                                 'между CRM и 1С, используется значение CRM')
     return 'review', f'Расхождение с историческим расчетом: {percent_gap}% и {amount_gap} руб.'

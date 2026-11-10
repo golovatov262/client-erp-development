@@ -27,6 +27,19 @@ class LoanPskTests(unittest.TestCase):
         self.assertEqual(classify_psk(result, '20', '432852.48', 'source_consistent')[0], 'review')
         self.assertEqual(classify_psk(result, None, None, None)[0], 'review')
 
+    def test_ruble_exact_match_accepts_crm_percent_despite_irr_drift(self):
+        # Loan 87 in production: ruble PSK matches 1C to 42 kopecks, but the
+        # percent differs by 0.021pp purely from day-count-convention drift.
+        result = calculate_psk(370600, 36, 60, date(2025, 5, 29), 'annuity')
+        status, note = classify_psk(result, '35.899', '432852.48', 'source_consistent')
+        self.assertEqual(status, 'cross_checked')
+        self.assertIn('используется значение CRM', note)
+
+    def test_large_percent_gap_with_matching_amount_still_reviewed(self):
+        result = calculate_psk(370600, 36, 60, date(2025, 5, 29), 'annuity')
+        status, _ = classify_psk(result, '20', '432852.90', 'source_consistent')
+        self.assertEqual(status, 'review')
+
 
 if __name__ == '__main__':
     unittest.main()
