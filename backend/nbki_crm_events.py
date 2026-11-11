@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 
 def list_crm_events(cur, org_id: int, limit: int = 100,
@@ -24,12 +25,27 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         raise ValueError('Период событий должен быть указан в формате ГГГГ-ММ-ДД') from exc
     if start and end and start > end:
         raise ValueError('Начало периода не может быть позже его окончания')
-    period = """AND (%s::date IS NULL OR (e.event_occurred_at AT TIME ZONE 'Europe/Moscow')::date >= %s::date)
-        AND (%s::date IS NULL OR (e.event_occurred_at AT TIME ZONE 'Europe/Moscow')::date <= %s::date)"""
+    cur.execute("""SELECT MAX((fe.event_time AT TIME ZONE 'Europe/Moscow')::date)
+        FROM nbki_file_events fe JOIN nbki_source_files f ON f.id=fe.source_file_id
+        WHERE f.org_id=%s AND f.archived_at IS NULL AND fe.crm_event_id IS NOT NULL""", (org_id,))
+    exported_through = cur.fetchone()[0]
+    today = datetime.now(ZoneInfo('Europe/Moscow')).date()
+    suggested_start = exported_through + timedelta(days=1) if exported_through else today - timedelta(days=90)
+    if not date_from and not date_to:
+        start = suggested_start
+        end = max(today, suggested_start)
+    # Include unfinished backlog before the selected start; otherwise advancing
+    # the default period could silently strand rejected or never-exported events.
+    period = """AND NOT EXISTS (
+            SELECT 1 FROM nbki_file_events fe JOIN nbki_source_files sf ON sf.id=fe.source_file_id
+            WHERE fe.crm_event_id=e.id AND sf.org_id=e.org_id AND sf.archived_at IS NULL
+              AND fe.delivery_status='accepted')
+        AND (%s::date IS NULL OR (e.event_occurred_at AT TIME ZONE 'Europe/Moscow')::date <= %s::date
+             OR e.event_occurred_at IS NULL)"""
     cur.execute("""SELECT COUNT(*) FROM nbki_crm_events e
         JOIN loans l ON l.id=e.loan_id
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
-        """ + period, (org_id, start, start, end, end))
+        """ + period, (org_id, end, end))
     total = cur.fetchone()[0]
     cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_type,e.source_id,
         e.event_kind,e.event_occurred_at,e.recorded_at,e.status,e.evidence_sha256,
@@ -47,7 +63,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         LEFT JOIN loan_payments p ON e.source_type='loan_payment' AND p.id=e.source_id
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         """ + period + " ORDER BY e.event_occurred_at DESC NULLS LAST,e.id DESC LIMIT %s",
-        (org_id, start, start, end, end, limit))
+        (org_id, end, end, limit))
     if __package__:
         from .nbki_event23_xml import assess_event_generation
     else:
@@ -76,6 +92,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'event_occurred_at': occurred_at.isoformat() if occurred_at else None,
             'recorded_at': recorded_at.isoformat(), 'status': delivery['status'],
             'delivery': delivery,
+            'earlier_period': bool(start and occurred_at and occurred_at.astimezone(ZoneInfo('Europe/Moscow')).date() < start),
             'evidence_sha256': digest.strip() if digest else None,
             'uid': uid, 'payment_date': payment_date.isoformat() if payment_date else None,
             'payment': {key: str(value) if value is not None else None
@@ -90,4 +107,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'source_complete': bool(uid and occurred_at and components_match),
             'readiness': assess_event_generation(cur, org_id, event_id),
         })
-    return {'total': total, 'rows': rows}
+    return {'total': total, 'rows': rows,
+            'period': {'from': start.isoformat() if start else None, 'to': end.isoformat() if end else None},
+            'exported_through': exported_through.isoformat() if exported_through else None,
+            'suggested_date_from': suggested_start.isoformat()}

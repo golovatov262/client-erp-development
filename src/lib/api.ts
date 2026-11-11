@@ -387,10 +387,14 @@ export type NbkiEventReadiness = {
 
 export type NbkiCrmEvents = {
   total: number;
+  period: { from: string | null; to: string | null };
+  exported_through: string | null;
+  suggested_date_from: string;
   rows: {
     id: number; loan_id: number; contract_no: string;
     source_type: string; source_id: number; event_kind: string;
     event_occurred_at: string | null; recorded_at: string; status: string;
+    earlier_period: boolean;
     delivery: { status: string; file: string | null; errors: { code: string | null; message: string | null; block: string | null; field: string | null; value: string | null }[] };
     evidence_sha256: string | null; uid: string | null;
     payment_date: string | null;
