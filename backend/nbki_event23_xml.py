@@ -61,7 +61,13 @@ def _exists(parent, stem, value):
 _KNOWN_ACCEPTED_SCHEMA_DEVIATIONS = ('sizeCode', 'scheduleCode')
 
 
-def _validate_xsd(raw: bytes) -> None:
+class XsdValidationError(ValueError):
+    def __init__(self, message, errors):
+        super().__init__(message)
+        self.errors = errors
+
+
+def _validate_xsd(raw: bytes) -> dict:
     if etree is None:
         raise ValueError('На сервере не установлен lxml для проверки XSD 5.1')
     schema_doc = etree.parse(str(XSD_DIR / 'Main.xsd'), etree.XMLParser(
@@ -70,14 +76,18 @@ def _validate_xsd(raw: bytes) -> None:
     document = etree.fromstring(raw, etree.XMLParser(
         resolve_entities=False, no_network=True, load_dtd=False))
     if schema.validate(document):
-        return
+        return {'xsd_valid': True, 'xsd_status': 'valid', 'xsd_errors': []}
     unexpected = [error for error in schema.error_log
                   if not any(name in (error.message or '')
                              for name in _KNOWN_ACCEPTED_SCHEMA_DEVIATIONS)]
     if unexpected:
         error = unexpected[0]
-        raise ValueError(f'Не удалось проверить XML по XSD 5.1: строка {error.line}: {error.message}')
+        raise XsdValidationError(
+            f'Не удалось проверить XML по XSD 5.1: строка {error.line}: {error.message}',
+            [item.message for item in schema.error_log])
 
+    return {'xsd_valid': False, 'xsd_status': 'accepted_deviations',
+            'xsd_errors': [error.message for error in schema.error_log]}
 
 def _loan_terms(cur, facts):
     terms = facts['loan'].get('terms')
@@ -326,10 +336,11 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     created = datetime.now(timezone.utc)
     reg_number = f"{facts['source']['source_id']}_{created.astimezone(MSK).strftime('%Y%m%d_%H%M%S')}"
     raw, digest = document_xml(facts['source'], [(facts['subject'], [ev])], reg_number, created)
-    _validate_xsd(raw)
+    validation = _validate_xsd(raw)
     return {'file_name': f'{reg_number}.xml',
             'content_base64': base64.b64encode(raw).decode('ascii'),
-            'sha256': digest, 'xsd_version': '5.1', 'xsd_valid': True,
+            'sha256': digest, 'xsd_version': '5.1', **validation,
+            'readiness': generation_readiness(validation),
             'business_status': 'candidate_requires_regulatory_review',
             'event_id': event_id, 'contract_no': facts['contract_no'], 'uid': facts['uid'],
             'debt': debt_preview, 'interest': interest, 'smp': smp,
@@ -394,9 +405,43 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
     first_root.set('subjectsCount', str(len(grouped)))
     first_root.set('groupBlocksCount', str(total_events))
     raw = ET.tostring(first_root, encoding='utf-8', xml_declaration=True)
-    _validate_xsd(raw)
+    validation = _validate_xsd(raw)
     return {'file_name': f"{first_root.get('regNumberDoc')}.xml",
             'content_base64': base64.b64encode(raw).decode('ascii'),
             'sha256': hashlib.sha256(raw).hexdigest(), 'xsd_version': '5.1',
-            'xsd_valid': True, 'business_status': 'candidate_requires_regulatory_review',
+            **validation, 'readiness': generation_readiness(validation), 'business_status': 'candidate_requires_regulatory_review',
             'events': exported, 'excluded': excluded}
+
+
+def generation_readiness(validation: dict) -> dict:
+    """Generation and strict schema validity are separate from dispatch approval."""
+    return {'can_generate_xml': True, 'xml_ready': True, 'blockers': [],
+            **validation, 'ready_to_send': False,
+            'business_status': 'candidate_requires_regulatory_review'}
+
+
+def assess_event_generation(cur, org_id: int, event_id: int) -> dict:
+    """Run exactly the exporter checks without storing or sending the document."""
+    try:
+        return build_event23_xml(cur, org_id, event_id)['readiness']
+    except (ValueError, TypeError) as exc:
+        return {'can_generate_xml': False, 'xml_ready': False,
+                'blockers': [str(exc)], 'xsd_valid': False,
+                'xsd_status': 'invalid' if isinstance(exc, XsdValidationError) else 'not_validated',
+                'xsd_errors': exc.errors if isinstance(exc, XsdValidationError) else [],
+                'ready_to_send': False, 'business_status': 'blocked'}
+
+
+def event_readiness_report(cur, org_id: int) -> dict:
+    """All eligible CRM events, without a historical-import cutoff or page cap."""
+    cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_id
+        FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE
+          AND l.status IN ('active','overdue','holiday') ORDER BY e.id""", (org_id,))
+    events = cur.fetchall()
+    rows = [dict(event_id=eid, loan_id=lid, contract_no=contract,
+                 payment_id=pid, **assess_event_generation(cur, org_id, eid))
+            for eid, lid, contract, pid in events]
+    return {'org_id': org_id, 'candidate_count': len(rows),
+            'can_generate_count': sum(r['can_generate_xml'] for r in rows),
+            'rows': rows}

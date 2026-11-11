@@ -246,7 +246,7 @@ export type NbkiPaymentCandidates = {
     ledger_entries: number; accrued_amount: string;
     source: "crm_daily_penalty_ledger";
     event_code_candidate: "2.3"; event_code_confirmed: false;
-    historical_debt_confirmed: false; xml_ready: false;
+    historical_debt_confirmed: false; xml_ready: boolean;
   }[];
   schedule_due_review_total: number;
   schedule_due_review: {
@@ -258,7 +258,7 @@ export type NbkiPaymentCandidates = {
     overdue_transition_review_date: string | null;
     crm_schedule_issues: string[];
     event_code_candidate: "2.3"; event_code_confirmed: false;
-    historical_state_confirmed: false; xml_ready: false;
+    historical_state_confirmed: false; xml_ready: boolean;
   }[];
   acceptance_basis: "operator_assumed";
   note: string;
@@ -377,12 +377,21 @@ export type NbkiPaymentCandidates = {
         overdue_debt: string | null;
         cumulative_payments_crm: Record<string, string | null> | null;
       };
-      xml_ready: false;
+      xml_ready: boolean;
     };
     gutdf_event_code: null;
     event_code_confirmed: false;
-    xml_ready: false;
+    xml_ready: boolean;
   }[];
+};
+
+export type NbkiEventReadiness = {
+  can_generate_xml: boolean;
+  blockers: string[];
+  xsd_valid: boolean;
+  xsd_status: "valid" | "accepted_deviations" | "invalid" | "not_validated";
+  xsd_errors: string[];
+  ready_to_send: boolean;
 };
 
 export type NbkiCrmEvents = {
@@ -398,6 +407,7 @@ export type NbkiCrmEvents = {
     original_principal: string; current_principal: string;
     components_match: boolean; has_posting_snapshot: boolean;
     source_complete: boolean;
+    readiness: NbkiEventReadiness;
   }[];
 };
 

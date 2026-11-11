@@ -338,20 +338,32 @@ def inspect_loan(cur, org_id: int, loan_id: int) -> dict:
 
 
 def readiness_report(cur, org_id: int) -> dict:
+    if __package__:
+        from .nbki_event23_xml import event_readiness_report
+    else:
+        from nbki_event23_xml import event_readiness_report
+    events = event_readiness_report(cur, org_id)
     cur.execute("""SELECT id FROM loans WHERE org_id=%s
         AND bki_enabled IS TRUE AND status IN ('active','overdue','holiday') ORDER BY id""", (org_id,))
     loan_ids = [row[0] for row in cur.fetchall()]
     rows = []
     for loan_id in loan_ids:
         result = inspect_loan(cur, org_id, loan_id)
+        checks = [r for r in events['rows'] if r['loan_id'] == loan_id]
+        blockers = list(dict.fromkeys(b for r in checks for b in r['blockers']))
         rows.append({'loan_id': loan_id, 'contract_no': result['contract_no'],
                      'uid': result['uid'], 'status': result['snapshot']['loan']['status'],
                      'crm_issues': result['checks']['crm_issues'],
-                     'missing_fields': result['readiness']['missing_fields'],
-                     'xml_ready': False})
+                     'missing_fields': blockers if checks else ['Нет событий в очереди CRM'],
+                     'xml_ready': any(r['can_generate_xml'] for r in checks),
+                     'events': checks, 'event_count': len(checks),
+                     'ready_event_count': sum(r['can_generate_xml'] for r in checks),
+                     'ready_to_send': False})
     return {'total': len(rows), 'with_uid': sum(bool(row['uid']) for row in rows),
             'with_crm_issues': sum(bool(row['crm_issues']) for row in rows),
-            'xml_ready': 0, 'rows': rows}
+            'xml_ready': sum(row['xml_ready'] for row in rows),
+            'event_count': events['candidate_count'],
+            'ready_event_count': events['can_generate_count'], 'rows': rows}
 
 
 def create_draft(cur, org_id: int, loan_id: int, user_id: int | None) -> dict:

@@ -165,7 +165,7 @@ const AdminNbkiTab = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Пакет проходит проверку XSD 5.1; исключённые события показываются с номером договора и причиной. Скачанный XML нужно подписать и зашифровать локально CryptoPro и отправить в НБКИ самостоятельно.</p>
+          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Готовность рассчитывается теми же проверками, что используются при формировании XML; исключённые события показываются с номером договора и причиной. Скачанный XML нужно подписать и зашифровать локально CryptoPro и отправить в НБКИ самостоятельно.</p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="grid gap-1 text-xs text-muted-foreground">События с (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodFrom} onChange={event => setEventPeriodFrom(event.target.value)} /></label>
             <label className="grid gap-1 text-xs text-muted-foreground">по (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodTo} onChange={event => setEventPeriodTo(event.target.value)} /></label>
@@ -181,7 +181,14 @@ const AdminNbkiTab = () => {
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
               <div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.components_match ? "части платежа сходятся" : "проверить части платежа"}</div>
-              <Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.uid || !event.event_occurred_at || buildingEventId !== null}>
+              <div className="mt-1 text-xs">
+                {event.readiness.can_generate_xml ? "XML можно сформировать" : "XML заблокирован"}
+                {event.readiness.xsd_status === "valid" && " · XSD пройдена"}
+                {event.readiness.xsd_status === "accepted_deviations" && " · XSD: исключения sizeCode/scheduleCode; строгая проверка не пройдена"}
+                {event.readiness.can_generate_xml && !event.readiness.ready_to_send && " · требуется проверка перед отправкой"}
+                {event.readiness.blockers.map(reason => <div key={reason} className="text-destructive">{reason}</div>)}
+              </div>
+              <Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.readiness.can_generate_xml || buildingEventId !== null || buildingEventBatch}>
                 {buildingEventId === event.id ? "Формирую XML…" : "Сформировать XML 2.3"}
               </Button>
             </div>)}

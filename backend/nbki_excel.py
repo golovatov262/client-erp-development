@@ -140,7 +140,7 @@ def make_readiness_xlsx(report: dict) -> bytes:
     sheet = book.active
     sheet.title = 'Готовность НБКИ'
     sheet.append(('ID договора CRM', 'Номер договора', 'Статус займа', 'УИД',
-                  'Замечания CRM', 'Блокирующие пункты для XML', 'Готовность XML'))
+                  'Замечания CRM', 'Блокирующие пункты для XML', 'Есть события для формирования XML'))
     for row in report['rows']:
         sheet.append((row['loan_id'], row['contract_no'], row['status'], row['uid'],
                       '; '.join(row['crm_issues']), '; '.join(row['missing_fields']),

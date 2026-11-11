@@ -296,6 +296,27 @@ def list_payment_candidates(cur, org_id: int) -> dict:
             'event_code_candidate': '2.3', 'event_code_confirmed': False,
             'historical_debt_confirmed': False, 'xml_ready': False,
         })
+    # Historical accounting diagnostics remain useful, but must not decide
+    # whether today's exporter can generate a CRM event.
+    if __package__:
+        from .nbki_event23_xml import assess_event_generation
+    else:
+        from nbki_event23_xml import assess_event_generation
+    for candidate in rows:
+        cur.execute("""SELECT id FROM nbki_crm_events WHERE org_id=%s
+            AND source_type='loan_payment' AND source_id=%s""",
+            (org_id, candidate['payment_id']))
+        event = cur.fetchone()
+        readiness = (assess_event_generation(cur, org_id, event[0]) if event and event[0]
+                     else {'can_generate_xml': False, 'xml_ready': False,
+                           'blockers': ['Нет события в очереди CRM'],
+                           'xsd_valid': False, 'xsd_status': 'not_validated',
+                           'xsd_errors': [], 'ready_to_send': False,
+                           'business_status': 'blocked'})
+        candidate['component_diagnostics'] = candidate['event23_readiness'].copy()
+        candidate['event23_readiness'].update(readiness)
+        candidate['readiness'] = readiness
+        candidate['xml_ready'] = readiness['can_generate_xml']
     return {'total': len(rows), 'rows': rows,
             'schedule_due_review_total': len(schedule_due_review),
             'schedule_due_review': schedule_due_review,

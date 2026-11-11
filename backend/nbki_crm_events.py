@@ -48,6 +48,10 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         """ + period + " ORDER BY e.event_occurred_at DESC NULLS LAST,e.id DESC LIMIT %s",
         (org_id, start, start, end, end, limit))
+    if __package__:
+        from .nbki_event23_xml import assess_event_generation
+    else:
+        from nbki_event23_xml import assess_event_generation
     rows = []
     for row in cur.fetchall():
         (event_id, loan_id, contract_no, source_type, source_id, event_kind,
@@ -78,5 +82,6 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'components_match': components_match,
             'has_posting_snapshot': bool(digest),
             'source_complete': bool(uid and occurred_at and components_match),
+            'readiness': assess_event_generation(cur, org_id, event_id),
         })
     return {'total': total, 'rows': rows}
