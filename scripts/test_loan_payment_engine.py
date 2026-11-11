@@ -10,13 +10,14 @@ from loan_payment_engine import post_loan_payment
 
 
 def make_loan(cur, suffix):
-    cur.execute("SELECT id FROM members ORDER BY id LIMIT 1")
-    member_id = cur.fetchone()[0]
+    cur.execute("SELECT member_id,org_id FROM loans WHERE org_id IS NOT NULL ORDER BY id LIMIT 1")
+    member_id, org_id = cur.fetchone()
     cur.execute("""INSERT INTO loans(contract_no,member_id,amount,rate,term_months,schedule_type,
         start_date,end_date,monthly_payment,balance,status)
         VALUES(%s,%s,300,12,3,'annuity','2026-08-31','2026-11-30',110,300,'active') RETURNING id""",
         ('ENGINE-TEST-' + suffix, member_id))
     loan_id = cur.fetchone()[0]
+    cur.execute("UPDATE loans SET org_id=%s WHERE id=%s", (org_id, loan_id))
     for no, due, after in ((1, '2026-09-30', 200), (2, '2026-10-31', 100), (3, '2026-11-30', 0)):
         cur.execute("""INSERT INTO loan_schedule(loan_id,payment_no,payment_date,payment_amount,
             principal_amount,interest_amount,balance_after,status,paid_amount,penalty_amount)
@@ -25,13 +26,14 @@ def make_loan(cur, suffix):
 
 
 def make_long_loan(cur, suffix):
-    cur.execute("SELECT id FROM members ORDER BY id LIMIT 1")
-    member_id = cur.fetchone()[0]
+    cur.execute("SELECT member_id,org_id FROM loans WHERE org_id IS NOT NULL ORDER BY id LIMIT 1")
+    member_id, org_id = cur.fetchone()
     cur.execute("""INSERT INTO loans(contract_no,member_id,amount,rate,term_months,schedule_type,
         start_date,end_date,monthly_payment,balance,status)
         VALUES(%s,%s,600,12,6,'annuity','2026-08-31','2027-02-28',110,600,'active') RETURNING id""",
         ('ENGINE-TEST-' + suffix, member_id))
     loan_id = cur.fetchone()[0]
+    cur.execute("UPDATE loans SET org_id=%s WHERE id=%s", (org_id, loan_id))
     dues = ('2026-09-30', '2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31', '2027-02-28')
     for no, due in enumerate(dues, 1):
         cur.execute("""INSERT INTO loan_schedule(loan_id,payment_no,payment_date,payment_amount,
@@ -73,10 +75,12 @@ assert cur.fetchone() == (Decimal('110.00'), 'paid')
 cur.execute("SELECT evidence->'after'->>'paid_penalty_to_date' FROM nbki_payment_posting_snapshots WHERE payment_id=%s", (r['payment_id'],))
 assert cur.fetchone()[0] == '21.00'
 
-# Идемпотентность банковской операции.
-again = post_loan_payment(cur, loan, 230, date(2026, 10, 7), source='bank', source_ref='test-over')
-assert again.get('duplicate') is True
-cur.execute("SELECT count(*) FROM loan_payments WHERE loan_id=%s", (loan,))
+# Идемпотентность банковской операции: повтор относится к исходному займу.
+cur.execute("SELECT loan_id,id FROM loan_payments WHERE source='bank' AND source_ref='test-over'")
+duplicate_loan, duplicate_id = cur.fetchone()
+again = post_loan_payment(cur, duplicate_loan, 230, date(2026, 10, 7), source='bank', source_ref='test-over')
+assert again.get('duplicate') is True and again['payment_id'] == duplicate_id
+cur.execute("SELECT count(*) FROM loan_payments WHERE loan_id=%s", (duplicate_loan,))
 assert cur.fetchone()[0] == 1
 
 # Принудительное распределение сохраняется точно и не портит следующий автоплатёж.
@@ -131,11 +135,11 @@ assert cur.fetchone()[0] == 0
 loan = make_long_loan(cur, 'ACTUAL-DAYS')
 cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110,paid_date='2026-09-30' WHERE loan_id=%s AND payment_no=1", (loan,))
 cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
-r1 = post_loan_payment(cur, loan, 280, date(2026, 10, 20), source='bank', source_ref='actual-days-1')
+r1 = post_loan_payment(cur, loan, 280, date(2026, 10, 20), source='manual', source_ref='actual-days-1', interest_basis='actual_days')
 expected_first_interest = float((Decimal('500') * Decimal('0.12') * Decimal('20') / Decimal('365')).quantize(Decimal('0.01')))
 assert r1['interest_part'] == expected_first_interest, r1
 balance_after_first = Decimal(str(r1['new_balance']))
-r2 = post_loan_payment(cur, loan, 100, date(2026, 10, 21), source='bank', source_ref='actual-days-2')
+r2 = post_loan_payment(cur, loan, 100, date(2026, 10, 21), source='manual', source_ref='actual-days-2', interest_basis='actual_days')
 expected_second_interest = float((balance_after_first * Decimal('0.12') / Decimal('365')).quantize(Decimal('0.01')))
 assert r2['interest_part'] == expected_second_interest, r2
 
@@ -146,6 +150,49 @@ cur.execute("SELECT status,paid_amount,overdue_days FROM loan_schedule WHERE loa
 assert cur.fetchone() == ('paid', Decimal('110.00'), 7)
 cur.execute("SELECT status,paid_amount FROM loan_schedule WHERE loan_id=%s AND payment_no=2", (loan,))
 assert cur.fetchone() == ('pending', Decimal('0.00'))
+
+# Обычная переплата не меняет проценты периода независимо от размера/источника.
+for source in ('bank', 'manual'):
+    for amount in (Decimal('110.01'), Decimal('280.00')):
+        loan = make_long_loan(cur, f'SCHEDULE-{source}-{amount}')
+        cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110 WHERE loan_id=%s AND payment_no=1", (loan,))
+        cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
+        r = post_loan_payment(cur, loan, amount, date(2026, 10, 20), source=source)
+        assert r['interest_part'] == 10.0 and r['early_principal'] == float(amount - 110), r
+        cur.execute("SELECT payment_amount,interest_amount,paid_amount FROM loan_schedule WHERE loan_id=%s AND payment_no=2", (loan,))
+        assert cur.fetchone() == (Decimal('110'), Decimal('10'), Decimal('110'))
+        # Повторный перевод в уже оплаченный месяц не начисляет проценты повторно.
+        r2 = post_loan_payment(cur, loan, 5, date(2026, 10, 21), source=source)
+        assert (r2['interest_part'], r2['principal_part'], r2['early_principal']) == (0, 5, 5), r2
+
+# Разделённая оплата текущего периода: проценты учитываются ровно один раз.
+loan = make_long_loan(cur, 'SPLIT-CURRENT')
+cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110 WHERE loan_id=%s AND payment_no=1", (loan,))
+cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
+r1 = post_loan_payment(cur, loan, 5, date(2026, 10, 10), source='bank')
+r2 = post_loan_payment(cur, loan, 106, date(2026, 10, 11), source='bank')
+assert (r1['interest_part'], r1['principal_part']) == (5, 0), r1
+assert (r2['interest_part'], r2['principal_part'], r2['early_principal']) == (5, 101, 1), r2
+
+# Банковский импорт не может включить модель фактических дней.
+try:
+    post_loan_payment(cur, loan, 1, date(2026, 10, 12), source='bank', interest_basis='actual_days')
+except ValueError:
+    pass
+else:
+    raise AssertionError('Bank payment accepted actual_days')
+
+# Регрессия Петрова: 155,85 сверх графика идут только в досрочный ОД.
+loan = make_long_loan(cur, 'PETROV')
+cur.execute("UPDATE loans SET amount=2010400.09,balance=2010400.09,rate=21 WHERE id=%s", (loan,))
+cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110 WHERE loan_id=%s AND payment_no<3", (loan,))
+cur.execute("UPDATE loan_schedule SET payment_amount=37844.15,principal_amount=2662.15,interest_amount=35182.00 WHERE loan_id=%s AND payment_no=3", (loan,))
+r = post_loan_payment(cur, loan, 38000, date(2026, 11, 10), source='bank')
+assert (r['interest_part'], r['principal_part'], r['early_principal'], r['new_balance']) == (35182.00, 2818.00, 155.85, 2007582.09), r
+cur.execute("SELECT payment_amount,interest_amount,paid_amount,status FROM loan_schedule WHERE loan_id=%s AND payment_no=3", (loan,))
+assert cur.fetchone() == (Decimal('37844.15'), Decimal('35182.00'), Decimal('37844.15'), 'paid')
+cur.execute("SELECT SUM(principal_amount) FROM loan_schedule WHERE loan_id=%s AND payment_no>3", (loan,))
+assert cur.fetchone()[0] == Decimal('2007582.09')
 
 conn.rollback()
 conn.close()

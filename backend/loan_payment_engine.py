@@ -155,8 +155,17 @@ def _recalculate_future_reduce_term(cur, loan_id, balance, payment_date, include
 
 def post_loan_payment(cur, loan_id, amount, payment_date, description='', source='manual',
                       source_ref=None, forced=None, early_strategy='reduce_payment',
-                      event_time_msk=None):
-    """Post one payment atomically. Caller owns commit/rollback."""
+                      event_time_msk=None, interest_basis='schedule'):
+    """Post atomically; caller owns commit/rollback.
+
+    Ordinary/manual/bank payments use unchanged scheduled interest, then scheduled
+    principal, then early principal. Overpayment never selects actual-day interest.
+    Only the dedicated early-repayment API explicitly opts into actual_days.
+    """
+    if interest_basis not in ('schedule', 'actual_days'):
+        raise ValueError('Неизвестная модель начисления процентов')
+    if interest_basis == 'actual_days' and (source != 'manual' or forced):
+        raise ValueError('Расчёт за фактические дни доступен только отдельной операции досрочного погашения')
     payment_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
     event_occurred_at = parse_event_time_msk(payment_date, event_time_msk)
     if event_occurred_at is not None and source != 'manual':
@@ -196,27 +205,27 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
     remaining = amount
     totals = {'interest': Decimal('0'), 'principal': Decimal('0'), 'penalty': Decimal('0'), 'early_principal': Decimal('0')}
 
-    # При крупном досрочном платеже в текущем периоде проценты начисляются
-    # за фактические дни от предыдущей даты графика, а не за полный месяц.
-    cur.execute("""SELECT s.id,s.payment_no,s.payment_date,s.payment_amount,s.principal_amount,
-        s.interest_amount,COALESCE(s.paid_amount,0) FROM loan_schedule s
-        WHERE s.loan_id=%s AND s.payment_date>=%s AND s.payment_date<=%s
-          AND s.status NOT IN ('paid','holiday','holiday_pending')
-        ORDER BY s.payment_no LIMIT 1 FOR UPDATE""", (loan_id, payment_date, _month_end(payment_date)))
-    current_row = cur.fetchone()
-    if (current_row and payment_date < current_row[2] and
-            amount > money(current_row[3]) + EPS and money(current_row[6]) <= EPS):
-        cur.execute("""SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s
-            AND status NOT IN ('paid','holiday','holiday_pending')""", (loan_id, current_row[1]))
-        if cur.fetchone()[0] == 0:
-            cur.execute("SELECT MAX(payment_date) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s", (loan_id, current_row[1]))
-            previous_due = cur.fetchone()[0]
-            if previous_due:
-                actual_days = max(0, (payment_date - previous_due).days)
-                actual_interest = money(old_balance * annual_rate / Decimal('100') * Decimal(actual_days) / Decimal('365'))
-                cur.execute("""UPDATE loan_schedule SET interest_amount=%s,payment_amount=principal_amount+%s
-                    WHERE id=%s""", (actual_interest, actual_interest, current_row[0]))
-
+    if interest_basis == 'actual_days':
+        # Только явно выбранная операция может менять проценты текущего периода.
+        # Размер переплаты сам по себе не переключает модель распределения.
+        cur.execute("""SELECT s.id,s.payment_no,s.payment_date,s.payment_amount,s.principal_amount,
+            s.interest_amount,COALESCE(s.paid_amount,0) FROM loan_schedule s
+            WHERE s.loan_id=%s AND s.payment_date>=%s AND s.payment_date<=%s
+              AND s.status NOT IN ('paid','holiday','holiday_pending')
+            ORDER BY s.payment_no LIMIT 1 FOR UPDATE""", (loan_id, payment_date, _month_end(payment_date)))
+        current_row = cur.fetchone()
+        if (current_row and payment_date < current_row[2] and
+                amount > money(current_row[3]) + EPS and money(current_row[6]) <= EPS):
+            cur.execute("""SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s
+                AND status NOT IN ('paid','holiday','holiday_pending')""", (loan_id, current_row[1]))
+            if cur.fetchone()[0] == 0:
+                cur.execute("SELECT MAX(payment_date) FROM loan_schedule WHERE loan_id=%s AND payment_no<%s", (loan_id, current_row[1]))
+                previous_due = cur.fetchone()[0]
+                if previous_due:
+                    actual_days = max(0, (payment_date - previous_due).days)
+                    actual_interest = money(old_balance * annual_rate / Decimal('100') * Decimal(actual_days) / Decimal('365'))
+                    cur.execute("""UPDATE loan_schedule SET interest_amount=%s,payment_amount=principal_amount+%s
+                        WHERE id=%s""", (actual_interest, actual_interest, current_row[0]))
     cur.execute("""SELECT id,payment_no,principal_amount,interest_amount,COALESCE(paid_amount,0),payment_date
         FROM loan_schedule WHERE loan_id=%s AND payment_date<=%s
           AND status NOT IN ('paid','holiday','holiday_pending') ORDER BY payment_no,id FOR UPDATE""",
@@ -226,7 +235,7 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
 
     # Если текущий период уже закрыт крупным досрочным платежом, начисляем
     # проценты только за дни до следующего перевода на уменьшившийся остаток.
-    if not rows:
+    if interest_basis == 'actual_days' and not rows:
         cur.execute("""SELECT MAX(payment_date) FROM loan_payments WHERE loan_id=%s AND id<>%s
             AND engine_version='v2' AND payment_type IN ('early_partial','early_full')
             AND payment_date<%s""", (loan_id, payment_id, payment_date))

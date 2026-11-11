@@ -1038,9 +1038,8 @@ def accrue_loan_penalties_until(cur, lid, target_date):
 
 def process_loan_payment(cur, conn, loan_id, amount, payment_date, description, source_ref=None):
     """Разнесение платежа по займу.
-    При досрочном погашении (сумма > текущего периода) проценты считаются
-    за фактические дни от предыдущего платежа, а не по графику.
-    Перед разнесением доначисляет пени по всем просроченным периодам до даты платежа."""
+    Движок v2 распределяет платёж по графику; превышение идёт в досрочный ОД.
+    Историческая ветка до 07.10.2026 сохранена для старых операций."""
     effective_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date)[:10])
     if effective_date >= date(2026, 10, 7):
         result = post_loan_payment(cur, loan_id, amount, effective_date, description,

@@ -751,7 +751,7 @@ def preview_early_repayment(cur, loan_id, payment_date, repayment_type, amount=N
             ceiling = (Decimal(str(balance)) + unpaid_interest +
                        Decimal(str(balance)) * Decimal(str(rate)) / 100 * Decimal(days + 365) / 365 + 1)
             probe = post_loan_payment(cur, loan_id, ceiling, payment_date,
-                                      early_strategy=repayment_type)
+                                      early_strategy=repayment_type, interest_basis='actual_days')
             if probe['new_balance'] > 0.005:
                 raise ValueError('Не удалось определить сумму полного погашения')
             amount = (ceiling - Decimal(str(probe['unapplied']))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -760,7 +760,7 @@ def preview_early_repayment(cur, loan_id, payment_date, repayment_type, amount=N
         if amount <= 0:
             raise ValueError('Сумма платежа должна быть больше нуля')
         result = post_loan_payment(cur, loan_id, amount, payment_date,
-                                   early_strategy=repayment_type)
+                                   early_strategy=repayment_type, interest_basis='actual_days')
         if result['unapplied'] > 0.005:
             raise ValueError('Сумма досрочного погашения превышает общую задолженность')
         cur.execute("SELECT monthly_payment,end_date,term_months FROM loans WHERE id=%s", (loan_id,))
@@ -1498,7 +1498,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     raise ValueError('Данные займа изменились. Рассчитайте погашение повторно')
             result = post_loan_payment(
                 cur, lid, amt, pd, 'Досрочное погашение',
-                source='manual', early_strategy=rt,
+                source='manual', early_strategy=rt, interest_basis='actual_days',
                 event_time_msk=body.get('event_time_msk'))
             if result.get('unapplied', 0) > 0.01:
                 raise ValueError('Сумма досрочного погашения превышает общую задолженность')
