@@ -41,8 +41,8 @@ class Event23XmlTests(unittest.TestCase):
         # FL_28_Payment never carries ФЛ_28.10/28.11 - omitted entirely to
         # match the organization's own confirmed-accepted historical files.
         payment = event.find('./FL_25_26_27_28_Group/FL_28_Payment')
-        self.assertIsNone(payment.find('./sizeCode'))
-        self.assertIsNone(payment.find('./scheduleCode'))
+        self.assertEqual(payment.findtext('./sizeCode'), '-')
+        self.assertEqual(payment.findtext('./scheduleCode'), '-')
         # Present in every real FL_25_Debt block observed.
         self.assertIsNotNone(event.find('./FL_25_26_27_28_Group/FL_25_Debt/graceUnconfExist_0'))
         # No report_blocks precedent and loan status not overdue in this fixture.

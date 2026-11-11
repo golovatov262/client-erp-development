@@ -54,7 +54,7 @@ class GateReportTest(unittest.TestCase):
         self.assertEqual(result['rows'][1]['missing_fields'], ['Нет событий в очереди CRM'])
 
 class StrictXsdStatusTests(unittest.TestCase):
-    def test_valid_exception_and_unexpected_error_are_distinct(self):
+    def test_valid_xml_passes_and_all_schema_errors_fail(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
         from backend.nbki_event23_xml import _validate_xsd, XsdValidationError
@@ -68,9 +68,8 @@ class StrictXsdStatusTests(unittest.TestCase):
             with patch('backend.nbki_event23_xml.XSD_DIR', path):
                 valid = _validate_xsd(b'<Document><sizeCode>-</sizeCode><payCurrency>1</payCurrency></Document>')
                 self.assertTrue(valid['xsd_valid'])
-                tolerated = _validate_xsd(b'<Document><payCurrency>1</payCurrency></Document>')
-                self.assertFalse(tolerated['xsd_valid'])
-                self.assertEqual(tolerated['xsd_status'], 'accepted_deviations')
+                with self.assertRaises(XsdValidationError):
+                    _validate_xsd(b'<Document><payCurrency>1</payCurrency></Document>')
                 with self.assertRaises(XsdValidationError):
                     _validate_xsd(b'<Document><sizeCode>-</sizeCode><payCurrency>invalid</payCurrency></Document>')
 

@@ -52,15 +52,6 @@ def _exists(parent, stem, value):
     _add(parent, f'{stem}_{1 if value else 0}')
 
 
-#  sizeCode/scheduleCode (ФЛ_28.10/28.11) are required by the published XSD
-#  5.1 archive but forbidden by the Bank of Russia letter dated 09.12.2025
-#  № 44-19/8423 from 29.12.2025. None of 623 real historical events from this
-#  organization's own confirmed-accepted NBKI files include them at all, so
-#  the serializer omits them entirely (see _event()) and this is the one
-#  schema deviation this check tolerates - any other XSD error still fails.
-_KNOWN_ACCEPTED_SCHEMA_DEVIATIONS = ('sizeCode', 'scheduleCode')
-
-
 class XsdValidationError(ValueError):
     def __init__(self, message, errors):
         super().__init__(message)
@@ -77,17 +68,11 @@ def _validate_xsd(raw: bytes) -> dict:
         resolve_entities=False, no_network=True, load_dtd=False))
     if schema.validate(document):
         return {'xsd_valid': True, 'xsd_status': 'valid', 'xsd_errors': []}
-    unexpected = [error for error in schema.error_log
-                  if not any(name in (error.message or '')
-                             for name in _KNOWN_ACCEPTED_SCHEMA_DEVIATIONS)]
-    if unexpected:
-        error = unexpected[0]
-        raise XsdValidationError(
-            f'Не удалось проверить XML по XSD 5.1: строка {error.line}: {error.message}',
-            [item.message for item in schema.error_log])
+    error = schema.error_log[0]
+    raise XsdValidationError(
+        f'Не удалось проверить XML по XSD 5.1: строка {error.line}: {error.message}',
+        [item.message for item in schema.error_log])
 
-    return {'xsd_valid': False, 'xsd_status': 'accepted_deviations',
-            'xsd_errors': [error.message for error in schema.error_log]}
 
 def _loan_terms(cur, facts):
     terms = facts['loan'].get('terms')
@@ -222,20 +207,17 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     else:
         _add(overdue, 'missFact_0')
     p = _add(group, 'FL_28_Payment')
-    # sizeCode/scheduleCode (ФЛ_28.10/28.11) are the exact codes the letter from
-    # the Bank of Russia dated 09.12.2025 (№ 44-19/8423) forbids sending from
-    # 29.12.2025. None of 623 real historical events observed include these
-    # elements at all - not even as a dash - so they are omitted entirely,
-    # matching the organization's own confirmed-accepted precedent rather
-    # than the published XSD 5.1's minOccurs requirement for them.
+    # CBR technical requirements 5.1 §3.3: required empty indicators use '-'.
+    # FL_28.10/28.11 information is not supplied under letter ИН-018-44/6;
+    # the published XSD still requires both elements and permits emptyValueType.
     for key, value in (('paymentSum', payment['amount']), ('paymentMainSum', payment['principal']),
                        ('paymentPercentSum', payment['interest']), ('paymentOtherSum', payment['penalty']),
                        ('totalSum', payment['cumulative']['amount']),
                        ('totalMainSum', payment['cumulative']['principal']),
                        ('totalPercentSum', payment['cumulative']['interest']),
                        ('totalOtherSum', payment['cumulative']['penalty']), ('date', payment['date']),
-                       ('payCurrency', 'RUB')):
-        _add(p, key, value if key in ('payCurrency', 'date') else _money(value))
+                       ('sizeCode', '-'), ('scheduleCode', '-'), ('payCurrency', 'RUB')):
+        _add(p, key, value if key in ('payCurrency', 'date', 'sizeCode', 'scheduleCode') else _money(value))
 
     if smp and smp.get('value_without_penalty_uncapped') is not None:
         monthly = _add(event, 'FL_29_MonthlyPayment')
