@@ -105,6 +105,50 @@ class Event23XmlTests(unittest.TestCase):
             _event(Cursor(), facts, {}, self._base_debt(), {},
                   {'remaining_interest_candidate': '10'}, {})
 
+    def test_receipt_rules_cost_currency_and_zero_interest_date(self):
+        from datetime import date
+        from unittest.mock import Mock
+        facts = self._base_facts(report_blocks={'include_total_cost': True},
+            psk={'percent': '12.345', 'amount': '100', 'calculated_on': '2026-01-01',
+                 'status': 'cross_checked'})
+        cur = Mock(); cur.fetchone.return_value = (date(2026, 11, 30), 100, 0, 100, 0, 'pending')
+        event = _event(cur, facts, {}, self._base_debt(), {}, {'remaining_interest_candidate': '10'}, {})
+        self.assertIsNone(event.find('./FL_21_PaymentTerms/percentPayDate'))
+        self.assertEqual(event.findtext('./FL_21_PaymentTerms/mainPayDate'), '2026-11-30')
+        self.assertIsNone(event.find('./FL_54_Accounting/unaccountedCurrency'))
+        for tag in ('maxPercentCash', 'maxPercentCashless'):
+            self.assertEqual(event.findtext('./FL_22_TotalCost/' + tag), '12.345')
+
+    def test_last_missed_dates_are_separate_and_missing_evidence_blocks(self):
+        debt = self._base_debt()
+        debt.update(overdue_principal='20', overdue_interest='10', rows=[
+            {'due': '2026-08-31', 'overdue_principal': '10', 'overdue_interest': '10'},
+            {'due': '2026-09-30', 'overdue_principal': '10', 'overdue_interest': '0'}])
+        event = _event(Cursor(), self._base_facts(), {}, debt, {}, {'remaining_interest_candidate': '10'}, {})
+        block = event.find('./FL_25_26_27_28_Group/FL_27_DebtOverdue')
+        self.assertEqual(block.findtext('mainMissDate'), '2026-09-30')
+        self.assertEqual(block.findtext('percentMissDate'), '2026-08-31')
+        debt['rows'] = []
+        with self.assertRaisesRegex(ValueError, 'Нет подтверждённой даты'):
+            _event(Cursor(), self._base_facts(), {}, debt, {}, {'remaining_interest_candidate': '10'}, {})
+
+    def test_inconsistent_application_date_blocks_without_changing_source(self):
+        block = {'stageCode': '5', 'stageDate': '2026-01-02'}
+        facts = self._base_facts(report_blocks={'include_application': True, 'application_block': block})
+        with self.assertRaisesRegex(ValueError, 'дата стадии'):
+            _event(Cursor(), facts, {}, self._base_debt(), {}, {'remaining_interest_candidate': '10'}, {})
+        self.assertEqual(block['stageDate'], '2026-01-02')
+
+    def test_verified_inn_is_reported(self):
+        from backend.nbki_xml_builder import fl_title
+        title = fl_title(dict(last_name='Тест', first_name='Тест', birth_date='1990-01-01',
+            passport_series='1234', passport_number='123456', passport_issue_date='2010-01-01',
+            passport_issued_by='Тест', inn='123456789012'))
+        group = title.find('./FL_6_Tax/TaxNum_group_FL_6_Tax')
+        self.assertEqual(group.findtext('taxCode'), '1')
+        self.assertIsNotNone(group.find('innChecked_1'))
+        self.assertIsNone(group.find('innChecked_0'))
+
 
 if __name__ == '__main__':
     unittest.main()

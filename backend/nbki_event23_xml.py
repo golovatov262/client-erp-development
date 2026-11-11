@@ -135,10 +135,10 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     next_row = cur.fetchone()
     payterms = _add(event, 'FL_21_PaymentTerms')
     _add(payterms, 'mainPaySum', _money(next_row[1]) if next_row else '-')
-    if next_row:
+    if next_row and Decimal(str(next_row[1])) > 0:
         _add(payterms, 'mainPayDate', next_row[0].isoformat())
     _add(payterms, 'percentPaySum', _money(next_row[2]) if next_row else '-')
-    if next_row:
+    if next_row and Decimal(str(next_row[2])) > 0:
         _add(payterms, 'percentPayDate', next_row[0].isoformat())
     _add(payterms, 'freqCode', '3')
 
@@ -153,7 +153,8 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         cost = _add(event, 'FL_22_TotalCost')
         for key, value in (('minPercentCost', psk['percent']), ('minCost', psk['amount']),
                            ('calcDate', psk['calculated_on']), ('maxPercentCost', psk['percent']),
-                           ('maxCost', psk['amount'])):
+                           ('maxCost', psk['amount']), ('maxPercentCash', psk['percent']),
+                           ('maxPercentCashless', psk['percent'])):
             _add(cost, key, value)
 
     group = _add(event, 'FL_25_26_27_28_Group')
@@ -196,11 +197,21 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         first_overdue = min(overdue_dates).isoformat() if overdue_dates else '-'
         overdue_days = ((date.fromisoformat(payment['date']) - min(overdue_dates)).days
                         if overdue_dates else '-')
+        missed = {}
+        for component, tag, amount in (('overdue_principal', 'mainMissDate', overdue_main),
+                                        ('overdue_interest', 'percentMissDate', overdue_interest)):
+            if amount > 0:
+                dates = [date.fromisoformat(row['due']) for row in debt.get('rows', [])
+                         if Decimal(row.get(component, '0')) > 0
+                         and date.fromisoformat(row['due']) < date.fromisoformat(payment['date'])]
+                if not dates:
+                    raise ValueError(f'Нет подтверждённой даты пропущенного платежа: {tag}')
+                missed[tag] = max(dates).isoformat()
         for key, value in (('debtOverdueSum', overdue_main + overdue_interest),
                            ('debtOverdueMainSum', overdue_main),
                            ('debtOverduePercentSum', overdue_interest),
                            ('debtOverdueOtherSum', 0), ('debtOverdueStartDate', first_overdue),
-                           ('missDuration', overdue_days), ('repaidMissDuration', 0)):
+                           *missed.items(), ('missDuration', overdue_days), ('repaidMissDuration', 0)):
             _add(overdue, key, _money(value) if key in {
                 'debtOverdueSum', 'debtOverdueMainSum', 'debtOverduePercentSum',
                 'debtOverdueOtherSum'} else value)
@@ -233,7 +244,6 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _add(accounting_block, 'supportExist_0')
     _add(accounting_block, 'calcDate', calc_date)
     _add(accounting_block, 'unaccountedSum', '0.00')
-    _add(accounting_block, 'unaccountedCurrency', 'RUB')
     # FL_55 presence follows this loan's own historical precedent too; its
     # static application fields are reused verbatim from the organization's
     # last confirmed-accepted report for this UID, since CRM has no concept
@@ -243,6 +253,8 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         block = report_blocks.get('application_block') or {}
         if not block:
             raise ValueError('Исторический признак требует блок ФЛ_55, но нет сохранённых данных заявки')
+        if block.get('stageDate') and block['stageDate'] > loan['start_date']:
+            raise ValueError('ФЛ_55.12: дата стадии обращения позже даты договора; подтвердите даты по договору')
         application = _add(event, 'FL_55_Application')
         for key, value in block.items():
             _add(application, key, value)

@@ -82,7 +82,8 @@ def fl_title(subject: dict) -> ET.Element:
         tax_number = _add(tax, 'TaxNum_group_FL_6_Tax')
         _add(tax_number, 'taxCode', '1')
         _add(tax_number, 'taxNum', subject['inn'])
-        _add(tax_number, 'innChecked_0')
+        # INN verification at origination confirmed by the operator on 2026-11-11.
+        _add(tax_number, 'innChecked_1')
         _add(tax, 'specialMode_0')
     return title
 
