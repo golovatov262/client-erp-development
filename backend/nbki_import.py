@@ -431,7 +431,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                     receipt.get("rejected") if receipt else None,
                     receipt.get("receipt_time") if receipt else None))
             file_id = cur.fetchone()[0]
-            if receipt and receipt.get("errors"):
+            if receipt:
                 cur.execute("""DELETE FROM nbki_receipt_errors
                     WHERE source_file_id=%s AND receipt_kind=%s""", (file_id, receipt["kind"]))
                 for item in receipt["errors"]:

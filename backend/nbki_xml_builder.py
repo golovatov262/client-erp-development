@@ -87,6 +87,20 @@ def fl_title(subject: dict) -> ET.Element:
     return title
 
 
+def format_document_bytes(root: ET.Element) -> bytes:
+    """Serialize a Document tree to match the organization's own historical
+    NBKI files (one of which is confirmed accepted): indented, double-quoted
+    uppercase-encoding declaration, CRLF line endings, UTF-8 BOM, trailing
+    CRLF. XML parsers are whitespace/BOM-insensitive, but this removes a
+    needless formatting difference from what has actually been accepted.
+    """
+    ET.indent(root, space='  ')
+    raw = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+    raw = raw.replace(b"<?xml version='1.0' encoding='utf-8'?>",
+                      b'<?xml version="1.0" encoding="UTF-8"?>')
+    return b'\xef\xbb\xbf' + raw.replace(b'\n', b'\r\n') + b'\r\n'
+
+
 def document_xml(source: dict, subjects: list[tuple[dict, list[ET.Element]]],
                  reg_number: str, created_at: datetime) -> tuple[bytes, str]:
     """Wrap fully mapped event elements in a deterministic NBKI document.
@@ -118,5 +132,5 @@ def document_xml(source: dict, subjects: list[tuple[dict, list[ET.Element]]],
             if not event.tag.startswith('FL_Event_') or event.get('eventDateTime') is None:
                 raise ValueError('Событие ГУТДФ не содержит типа или времени')
             event_container.append(event)
-    raw = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+    raw = format_document_bytes(root)
     return raw, hashlib.sha256(raw).hexdigest()

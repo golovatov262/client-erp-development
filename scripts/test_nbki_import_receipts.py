@@ -1,8 +1,9 @@
 import io
 import unittest
 import zipfile
+from unittest.mock import MagicMock, patch
 
-from backend.nbki_import import parse_receipt_zip
+from backend.nbki_import import import_payloads, parse_receipt_zip
 
 
 def _zip_with(xml_bytes: bytes) -> bytes:
@@ -11,6 +12,40 @@ def _zip_with(xml_bytes: bytes) -> bytes:
         archive.writestr("receipt.xml", xml_bytes)
         archive.writestr("receipt.xml.sig", b"signature-placeholder")
     return buffer.getvalue()
+
+
+class ReceiptReplacementTests(unittest.TestCase):
+    def test_receipt_replaces_only_its_own_errors_even_when_empty(self):
+        for kind in (1, 2):
+            for errors in ([], [{'error_code': 'E001'}]):
+                with self.subTest(kind=kind, errors=errors):
+                    self.check_import(kind, errors)
+
+    def test_import_without_receipt_preserves_errors(self):
+        self.check_import(None, [])
+
+    def check_import(self, kind, errors):
+        source = dict(reg_number='REG1', document_time='2026-11-01',
+                      schema_version='5.1', xml_sha256='hash', xml_gzip=b'xml',
+                      subjects_count=0, events_count=0, deals={}, events=[],
+                      collateral_events=[])
+        receipt = dict(reg_number='REG1', kind=kind, status='accepted',
+                       events_received=0, accepted=0, rejected=0, errors=errors)
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [(17, 'hash'), (17,)]
+        with patch('backend.nbki_import.parse_source_xml', return_value=source), \
+             patch('backend.nbki_import.parse_receipt_zip', return_value=receipt), \
+             patch('backend.nbki_import.resolve_source_org_id', return_value=1):
+            import_payloads(conn, [b'xml'], [b'receipt'] if kind else [])
+        deletes = [call.args for call in cur.execute.call_args_list
+                   if 'DELETE FROM nbki_receipt_errors' in call.args[0]]
+        inserts = [call.args for call in cur.execute.call_args_list
+                   if 'INSERT INTO nbki_receipt_errors' in call.args[0]]
+        self.assertEqual(len(deletes), 1 if kind else 0)
+        if kind:
+            self.assertEqual(deletes[0][1], (17, kind))
+        self.assertEqual(len(inserts), len(errors) if kind else 0)
 
 
 class ReceiptParsingTests(unittest.TestCase):

@@ -10025,11 +10025,11 @@ def handle_nbki(method, params, body, staff, cur, conn):
         files = []
         for item in cur.fetchall():
             *values, errors = item
-            row = dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
+            file_row = dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
                            'events_count', 'receipt_status', 'events_accepted', 'events_rejected',
                            'receipt_signature_verified'), (serialize(v) for v in values)))
-            row['errors'] = errors or []
-            files.append(row)
+            file_row['errors'] = errors or []
+            files.append(file_row)
         cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE role='borrower'),
             COUNT(*) FILTER (WHERE role='guarantor'),
             COUNT(*) FILTER (WHERE role='borrower' AND match_status='matched'),

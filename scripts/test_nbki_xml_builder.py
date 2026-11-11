@@ -1,4 +1,5 @@
 import unittest
+import hashlib
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -22,6 +23,10 @@ class XmlBuilderTests(unittest.TestCase):
         raw, digest = document_xml(source, [(subject, [event])],
                                    'QY01GG000001_20261029_000001', created)
         root = ET.fromstring(raw)
+        self.assertTrue(raw.startswith(b'\xef\xbb\xbf<?xml version="1.0" encoding="UTF-8"?>\r\n'))
+        self.assertTrue(raw.endswith(b'\r\n'))
+        self.assertNotIn(b'\n', raw.replace(b'\r\n', b''))
+        self.assertEqual(digest, hashlib.sha256(raw).hexdigest())
         self.assertEqual(root.get('schemaVersion'), '5.1')
         self.assertEqual(root.get('groupBlocksCount'), '1')
         self.assertEqual(root.findtext('./Source/FL_46_UL_36_OrgSource/sourceCode'), '3')
