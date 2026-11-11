@@ -160,12 +160,12 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
 
     Ordinary/manual/bank payments use unchanged scheduled interest, then scheduled
     principal, then early principal. Overpayment never selects actual-day interest.
-    Only the dedicated early-repayment API explicitly opts into actual_days.
+    Only explicit FULL early repayment opts into actual_days; it must close the loan.
     """
     if interest_basis not in ('schedule', 'actual_days'):
         raise ValueError('Неизвестная модель начисления процентов')
     if interest_basis == 'actual_days' and (source != 'manual' or forced):
-        raise ValueError('Расчёт за фактические дни доступен только отдельной операции досрочного погашения')
+        raise ValueError('Расчёт за фактические дни доступен только операции полного досрочного погашения')
     payment_date = payment_date if isinstance(payment_date, date) else date.fromisoformat(str(payment_date))
     event_occurred_at = parse_event_time_msk(payment_date, event_time_msk)
     if event_occurred_at is not None and source != 'manual':
@@ -328,6 +328,8 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
 
     principal_total = money(totals['principal'] + totals['early_principal'])
     new_balance = max(Decimal('0'), money(old_balance - principal_total))
+    if interest_basis == 'actual_days' and new_balance > EPS:
+        raise ValueError('Расчёт за фактические дни допустим только при полном погашении основного долга')
     payment_type = 'early_full' if new_balance <= EPS else ('early_partial' if totals['early_principal'] > 0 else 'regular')
     cur.execute("""UPDATE loan_payments SET principal_part=%s,interest_part=%s,penalty_part=%s,
         payment_type=%s WHERE id=%s""", (principal_total, totals['interest'], totals['penalty'], payment_type, payment_id))

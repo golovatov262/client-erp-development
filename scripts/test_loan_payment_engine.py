@@ -130,18 +130,22 @@ assert cur.fetchone() == ('closed', date(2026, 10, 7))
 cur.execute("SELECT count(*) FROM loan_schedule WHERE loan_id=%s AND payment_date>'2026-10-31'", (loan,))
 assert cur.fetchone()[0] == 0
 
-# Досрочное погашение внутри месяца использует фактические дни, а следующий
-# перевод начисляет проценты только за дни между переводами.
-loan = make_long_loan(cur, 'ACTUAL-DAYS')
+# Фактические дни разрешены только при полном погашении.
+loan = make_long_loan(cur, 'ACTUAL-DAYS-FULL')
 cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110,paid_date='2026-09-30' WHERE loan_id=%s AND payment_no=1", (loan,))
 cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
-r1 = post_loan_payment(cur, loan, 280, date(2026, 10, 20), source='manual', source_ref='actual-days-1', interest_basis='actual_days')
-expected_first_interest = float((Decimal('500') * Decimal('0.12') * Decimal('20') / Decimal('365')).quantize(Decimal('0.01')))
-assert r1['interest_part'] == expected_first_interest, r1
-balance_after_first = Decimal(str(r1['new_balance']))
-r2 = post_loan_payment(cur, loan, 100, date(2026, 10, 21), source='manual', source_ref='actual-days-2', interest_basis='actual_days')
-expected_second_interest = float((balance_after_first * Decimal('0.12') / Decimal('365')).quantize(Decimal('0.01')))
-assert r2['interest_part'] == expected_second_interest, r2
+cur.execute('SAVEPOINT reject_partial_actual_days')
+try:
+    post_loan_payment(cur, loan, 280, date(2026, 10, 20), interest_basis='actual_days')
+except ValueError as exc:
+    assert 'полном погашении' in str(exc), exc
+else:
+    raise AssertionError('Partial repayment accepted actual days')
+cur.execute('ROLLBACK TO SAVEPOINT reject_partial_actual_days')
+cur.execute('RELEASE SAVEPOINT reject_partial_actual_days')
+expected_interest = (Decimal('500') * Decimal('0.12') * Decimal('20') / Decimal('365')).quantize(Decimal('0.01'))
+r = post_loan_payment(cur, loan, Decimal('500') + expected_interest, date(2026, 10, 20), interest_basis='actual_days')
+assert (r['interest_part'], r['principal_part'], r['new_balance'], r['unapplied']) == (float(expected_interest), 500, 0, 0), r
 
 loan = make_loan(cur, 'OVERDUE-PRIORITY')
 r = post_loan_payment(cur, loan, 150, date(2026, 10, 7), source='bank', source_ref='overdue-priority')
@@ -193,6 +197,36 @@ cur.execute("SELECT payment_amount,interest_amount,paid_amount,status FROM loan_
 assert cur.fetchone() == (Decimal('37844.15'), Decimal('35182.00'), Decimal('37844.15'), 'paid')
 cur.execute("SELECT SUM(principal_amount) FROM loan_schedule WHERE loan_id=%s AND payment_no>3", (loan,))
 assert cur.fetchone()[0] == Decimal('2007582.09')
+
+# Реальные API preview/проведение выбирают одну модель для обоих вариантов срока.
+from api.index import handle_loans
+
+class NoCommit:
+    def commit(self):
+        pass  # Все тестовые операции остаются в общей откатываемой транзакции.
+
+for strategy in ('reduce_payment', 'reduce_term'):
+    for full in (False, True):
+        loan = make_long_loan(cur, f'API-{strategy}-{full}')
+        cur.execute("UPDATE loan_schedule SET status='paid',paid_amount=110,paid_date='2026-09-30' WHERE loan_id=%s AND payment_no=1", (loan,))
+        cur.execute("UPDATE loans SET balance=500 WHERE id=%s", (loan,))
+        preview = handle_loans('POST', {}, {
+            'action': 'early_repayment_preview', 'loan_id': loan,
+            'payment_date': '2026-10-20', 'repayment_type': strategy,
+            'mode': 'full' if full else 'partial', 'amount': 280,
+        }, cur, NoCommit())
+        assert preview['interest_part'] == (float(expected_interest) if full else 10), preview
+        cur.execute("SELECT count(*) FROM loan_payments WHERE loan_id=%s", (loan,))
+        assert cur.fetchone()[0] == 0, 'Preview wrote a payment'
+        result = handle_loans('POST', {}, {
+            'action': 'early_repayment', 'loan_id': loan,
+            'payment_date': '2026-10-20', 'repayment_type': strategy,
+            'full_repayment': full, 'amount': preview['amount'],
+            'expected_preview': preview,
+        }, cur, NoCommit())
+        for field in ('interest_part', 'principal_part', 'new_balance'):
+            assert result[field] == preview[field], (field, result, preview)
+        assert (result['new_balance'] == 0) == full
 
 conn.rollback()
 conn.close()

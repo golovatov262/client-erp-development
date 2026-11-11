@@ -744,6 +744,8 @@ def preview_early_repayment(cur, loan_id, payment_date, repayment_type, amount=N
         raise ValueError('Договор займа закрыт')
     cur.execute("SELECT COALESCE(SUM(GREATEST(interest_amount-COALESCE(paid_amount,0),0)),0) FROM loan_schedule WHERE loan_id=%s AND status NOT IN ('paid','holiday','holiday_pending')", (loan_id,))
     unpaid_interest = Decimal(str(cur.fetchone()[0]))
+    full_repayment = amount is None
+    interest_basis = 'actual_days' if full_repayment else 'schedule'
     cur.execute("SAVEPOINT early_repayment_preview")
     try:
         if amount is None:
@@ -751,7 +753,7 @@ def preview_early_repayment(cur, loan_id, payment_date, repayment_type, amount=N
             ceiling = (Decimal(str(balance)) + unpaid_interest +
                        Decimal(str(balance)) * Decimal(str(rate)) / 100 * Decimal(days + 365) / 365 + 1)
             probe = post_loan_payment(cur, loan_id, ceiling, payment_date,
-                                      early_strategy=repayment_type, interest_basis='actual_days')
+                                      early_strategy=repayment_type, interest_basis=interest_basis)
             if probe['new_balance'] > 0.005:
                 raise ValueError('Не удалось определить сумму полного погашения')
             amount = (ceiling - Decimal(str(probe['unapplied']))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -760,7 +762,7 @@ def preview_early_repayment(cur, loan_id, payment_date, repayment_type, amount=N
         if amount <= 0:
             raise ValueError('Сумма платежа должна быть больше нуля')
         result = post_loan_payment(cur, loan_id, amount, payment_date,
-                                   early_strategy=repayment_type, interest_basis='actual_days')
+                                   early_strategy=repayment_type, interest_basis=interest_basis)
         if result['unapplied'] > 0.005:
             raise ValueError('Сумма досрочного погашения превышает общую задолженность')
         cur.execute("SELECT monthly_payment,end_date,term_months FROM loans WHERE id=%s", (loan_id,))
@@ -1484,13 +1486,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             pd = body.get('payment_date', date.today().isoformat())
             if rt not in ('reduce_payment', 'reduce_term'):
                 return {'error': 'Выберите: уменьшить платёж или сократить срок'}
-            if body.get('full_repayment'):
+            full_repayment = body.get('full_repayment') is True
+            if full_repayment:
                 current_quote = preview_early_repayment(cur, lid, pd, rt)
                 if amt != Decimal(str(current_quote['amount'])):
                     raise ValueError('Сумма полного погашения изменилась. Рассчитайте её повторно')
             expected = body.get('expected_preview')
             if expected:
-                current = preview_early_repayment(cur, lid, pd, rt, amt)
+                current = current_quote if full_repayment else preview_early_repayment(cur, lid, pd, rt, amt)
                 fields = ('new_balance', 'principal_part', 'interest_part', 'new_monthly')
                 if (any(Decimal(str(current[field])).quantize(Decimal('0.01')) !=
                         Decimal(str(expected[field])).quantize(Decimal('0.01')) for field in fields)
@@ -1498,7 +1501,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     raise ValueError('Данные займа изменились. Рассчитайте погашение повторно')
             result = post_loan_payment(
                 cur, lid, amt, pd, 'Досрочное погашение',
-                source='manual', early_strategy=rt, interest_basis='actual_days',
+                source='manual', early_strategy=rt,
+                interest_basis='actual_days' if full_repayment else 'schedule',
                 event_time_msk=body.get('event_time_msk'))
             if result.get('unapplied', 0) > 0.01:
                 raise ValueError('Сумма досрочного погашения превышает общую задолженность')
