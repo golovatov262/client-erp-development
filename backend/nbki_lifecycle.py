@@ -347,7 +347,7 @@ def build_lifecycle_xml(cur, org_id, event_id, row):
             from .nbki_debt_changes import require_debt_change
         else:
             from nbki_debt_changes import require_debt_change
-        require_debt_change(cur,org_id,payload)
+        require_debt_change(cur,org_id,payload,event_id)
     payload = prepare_guarantor_payload(payload) if payload.get('guarantor') else payload
     s = payload['snapshot']
     facts = copy.deepcopy(payload['facts'])

@@ -98,6 +98,17 @@ def compare_states(current, previous, occurred_at, baseline_at):
     return {'decision':'unchanged','reason':'Суммы и признаки задолженности совпадают с принятым срезом; повторная выгрузка не требуется','changes':{}}
 
 
+def initial_snapshot(cur, org_id, uid, occurred_at=None):
+    """Only the explicitly authorized event may bootstrap a missing archive."""
+    cur.execute("""SELECT a.event_id,a.event_at,a.financial_state,a.basis
+        FROM nbki_initial_debt_snapshots a JOIN nbki_crm_events e ON e.id=a.event_id
+        WHERE a.org_id=%s AND a.subject_uid=%s AND e.org_id=a.org_id
+          AND e.subject_uid=a.subject_uid AND e.event_occurred_at=a.event_at
+          AND e.event_kind='debt_change' AND e.status NOT IN ('excluded','accepted')
+          AND (%s::timestamptz IS NULL OR a.event_at=%s)""",(org_id,uid,occurred_at,occurred_at))
+    return cur.fetchone()
+
+
 def review_debt_change(cur,org_id,uid,occurred_at,evidence):
     cur.execute("""SELECT f.id,f.reg_number,fe.order_num,fe.event_time,f.xml_gzip,f.xml_sha256,fe.event_name
         FROM nbki_file_events fe JOIN nbki_source_files f ON f.id=fe.source_file_id
@@ -108,6 +119,13 @@ def review_debt_change(cur,org_id,uid,occurred_at,evidence):
         ORDER BY fe.event_time DESC NULLS LAST,f.document_time DESC,f.id DESC,fe.order_num DESC LIMIT 1""",(org_id,uid))
     row=cur.fetchone()
     if not row:
+        initial=initial_snapshot(cur,org_id,uid,occurred_at)
+        if initial:
+            current=evidence_state(evidence)
+            if current!=initial[2]:
+                raise ValueError('Показатели первоначального среза изменились после подтверждения')
+            return {'decision':'initial_snapshot','reason':'Первоначальный срез CRM: архив недоступен; приёмка НБКИ ещё не подтверждена',
+                    'changes':{},'current':current,'authorization':{'event_id':initial[0],'basis':initial[3]}}
         return {'decision':'missing_baseline','reason':'Нет подтверждённого принятого среза НБКИ по этому УИД. Загрузите отправленный XML и успешную ticket2 для сравнения','changes':{}}
     fid,reg,order,when,compressed,digest,name=row
     ref={'file_id':fid,'file':reg,'order_num':order,'event_at':when.isoformat() if when else None}
@@ -133,10 +151,12 @@ def review_debt_change(cur,org_id,uid,occurred_at,evidence):
     return dict(result,baseline=ref,accepted=previous,current=current)
 
 
-def require_debt_change(cur,org_id,payload):
+def require_debt_change(cur,org_id,payload,event_id=None):
     from datetime import datetime
     review=review_debt_change(cur,org_id,payload['facts']['uid'],
         datetime.fromisoformat(payload['snapshot']['occurred_at']),payload['debt_evidence'])
-    if review['decision'] not in ('changed','periodic'):
+    if review['decision']=='initial_snapshot' and review['authorization']['event_id']!=event_id:
+        raise ValueError('Первоначальный срез разрешён только для подтверждённого события')
+    if review['decision'] not in ('changed','periodic','initial_snapshot'):
         raise ValueError(review['reason'])
     return review

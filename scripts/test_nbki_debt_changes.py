@@ -2,7 +2,7 @@ import gzip
 import unittest
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend.nbki_debt_changes import accepted_state, compare_states, money, review_debt_change, require_debt_change, evidence_state
 from scripts import test_nbki_lifecycle as fixtures
 from backend.nbki_lifecycle import obligation_event
@@ -60,9 +60,37 @@ class DebtComparisonTests(unittest.TestCase):
         payload={'facts':{'uid':'UID'},'snapshot':{'occurred_at':self.now.isoformat()},'debt_evidence':{}}
         with self.assertRaisesRegex(ValueError,'Нет подтверждённого'):
             require_debt_change(cur,2,payload)
-        sql=cur.execute.call_args.args[0]
+        sql=cur.execute.call_args_list[0].args[0]
         self.assertIn("fe.delivery_status='accepted'",sql)
         self.assertIn('f.archived_at IS NULL',sql)
+
+    def test_authorized_initial_snapshot_does_not_claim_acceptance(self):
+        e={'as_of':'2026-11-11','preview':dict(status='candidate_from_crm_components',term_principal='100',term_interest_candidate='1',term_other_candidate='0',overdue_principal='0',overdue_interest='0',overdue_other='0'), 'debt':{'rows':[]}}
+        cur=Mock();cur.fetchone.side_effect=[None,(438,self.now,evidence_state(e),'Архив недоступен')]
+        r=review_debt_change(cur,2,'UID',self.now,e)
+        self.assertEqual(r['decision'],'initial_snapshot')
+        self.assertNotIn('accepted',r)
+        self.assertNotIn('baseline',r)
+        self.assertEqual(cur.execute.call_args.args[1],(2,'UID',self.now,self.now))
+
+    def test_initial_authorization_is_not_transferable_to_another_event(self):
+        p={'facts':{'uid':'UID'},'snapshot':{'occurred_at':self.now.isoformat()},'debt_evidence':{}}
+        r={'decision':'initial_snapshot','authorization':{'event_id':438}}
+        with patch('backend.nbki_debt_changes.review_debt_change',return_value=r):
+            self.assertEqual(require_debt_change(None,2,p,438),r)
+            with self.assertRaisesRegex(ValueError,'только для подтверждённого'):
+                require_debt_change(None,2,p,439)
+
+    def test_initial_snapshot_cannot_bypass_financial_check(self):
+        cur=Mock();cur.fetchone.side_effect=[None,(438,self.now,{},'Архив недоступен')]
+        with self.assertRaisesRegex(ValueError,'не прошёл сверку'):
+            review_debt_change(cur,2,'UID',self.now,{'preview':{'status':'blocked'},'debt':{}})
+
+    def test_initial_snapshot_cannot_change_authorized_amounts(self):
+        e={'as_of':'2026-11-11','preview':dict(status='candidate_from_crm_components',term_principal='100',term_interest_candidate='1',term_other_candidate='0',overdue_principal='0',overdue_interest='0',overdue_other='0'), 'debt':{'rows':[]}}
+        cur=Mock();cur.fetchone.side_effect=[None,(438,self.now,{},'Архив недоступен')]
+        with self.assertRaisesRegex(ValueError,'изменились после подтверждения'):
+            review_debt_change(cur,2,'UID',self.now,e)
 
     def test_corrupt_accepted_xml_blocks_comparison(self):
         ev=self.event();raw=ET.tostring(ev)

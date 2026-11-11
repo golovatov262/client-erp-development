@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg2
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from backend.nbki_lifecycle import capture, facts_from_snapshot, debt_evidence, record_operation, MSK
-from backend.nbki_debt_changes import review_debt_change, evidence_state
+from backend.nbki_debt_changes import review_debt_change, evidence_state, initial_snapshot
 
 
 def signature(evidence):
@@ -84,11 +84,16 @@ def run(conn):
                     _, principal = facts_from_snapshot(state)
                     evidence = debt_evidence(cur,state,principal)
                     review = review_debt_change(cur,org,state['uid'],when,evidence)
+                    if review['decision']=='missing_baseline' and initial_snapshot(cur,org,state['uid']):
+                        # Wait for the first receipt instead of creating daily bootstrap duplicates.
+                        cur.execute('DELETE FROM nbki_debt_scan_issues WHERE loan_id=%s',(lid,))
+                        conn.commit()
+                        continue
                     if review['decision']=='unchanged':
                         cur.execute('DELETE FROM nbki_debt_scan_issues WHERE loan_id=%s',(lid,))
                         conn.commit()
                         continue
-                    if review['decision'] not in ('changed','periodic'):
+                    if review['decision'] not in ('changed','periodic','initial_snapshot'):
                         raise ValueError(review['reason'])
                     cur.execute("""SELECT event_payload FROM nbki_crm_events WHERE loan_id=%s
                         AND event_kind='debt_change' AND event_payload IS NOT NULL
