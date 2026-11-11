@@ -255,6 +255,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
             raise ValueError('Исторический признак требует блок ФЛ_55, но нет сохранённых данных заявки')
         if block.get('stageDate') and block['stageDate'] > loan['start_date']:
             raise ValueError('ФЛ_55.12: дата стадии обращения позже даты договора; подтвердите даты по договору')
+        if (block.get('applicationDate') and block.get('stageDate')
+                and block['applicationDate'] > block['stageDate']):
+            raise ValueError('ФЛ_55.5: дата обращения позже даты перехода в стадию; подтвердите дату обращения')
         application = _add(event, 'FL_55_Application')
         for key, value in block.items():
             _add(application, key, value)

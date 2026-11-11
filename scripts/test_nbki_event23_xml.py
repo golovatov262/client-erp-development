@@ -139,6 +139,15 @@ class Event23XmlTests(unittest.TestCase):
             _event(Cursor(), facts, {}, self._base_debt(), {}, {'remaining_interest_candidate': '10'}, {})
         self.assertEqual(block['stageDate'], '2026-01-02')
 
+    def test_application_cannot_postdate_stage_and_equal_dates_pass(self):
+        block = {'applicationDate': '2026-01-02', 'stageDate': '2026-01-01', 'stageCode': '5'}
+        facts = self._base_facts(report_blocks={'include_application': True, 'application_block': block})
+        with self.assertRaisesRegex(ValueError, 'ФЛ_55.5'):
+            _event(Cursor(), facts, {}, self._base_debt(), {}, {'remaining_interest_candidate': '10'}, {})
+        block['applicationDate'] = '2026-01-01'
+        event = _event(Cursor(), facts, {}, self._base_debt(), {}, {'remaining_interest_candidate': '10'}, {})
+        self.assertEqual(event.findtext('./FL_55_Application/applicationDate'), '2026-01-01')
+
     def test_verified_inn_is_reported(self):
         from backend.nbki_xml_builder import fl_title
         title = fl_title(dict(last_name='Тест', first_name='Тест', birth_date='1990-01-01',
