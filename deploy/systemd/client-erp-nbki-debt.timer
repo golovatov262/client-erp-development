@@ -1,9 +1,9 @@
 [Unit]
-Description=Record daily CRM debt changes for NBKI
+Description=Check CRM debt after bank posting, with daytime retries
 
 [Timer]
-OnCalendar=*-*-* 06:00:00 Europe/Moscow
-Persistent=true
+OnCalendar=*-*-* 09..18:00:00 Europe/Moscow
+Persistent=false
 Unit=client-erp-nbki-debt.service
 
 [Install]
