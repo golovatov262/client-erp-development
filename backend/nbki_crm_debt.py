@@ -131,7 +131,7 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
 
 def estimate_current_interest(cur, loan_id: int, payment_id: int,
                               event_date: date, *, latest_payment: bool,
-                              principal_checked: bool = True) -> dict:
+                              principal_checked: bool = True, require_target: bool = True) -> dict:
     """Preview actual-period interest under the CRM v2 daily-interest rule.
 
     The contract's day-count convention and any historical rate change are not
@@ -205,7 +205,7 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
         WHERE loan_id=%s AND (payment_date,id)<=(%s,%s)
         ORDER BY payment_date,id""", (loan_id, event_date, payment_id))
     payments = cur.fetchall()
-    if not any(row[0] == payment_id for row in payments):
+    if require_target and not any(row[0] == payment_id for row in payments):
         result['issues'].append('Целевой платёж отсутствует в журнале CRM')
         return result
     balance = _money(original)

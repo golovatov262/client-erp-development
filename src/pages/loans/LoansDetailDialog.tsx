@@ -15,6 +15,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
 import LoanCollateralTab from "./LoanCollateralTab";
 import NbkiContractFields from "./NbkiContractFields";
+import LoanNbkiOperation from "./LoanNbkiOperation";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -285,6 +286,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
             </div>
             <p className="text-sm text-muted-foreground">Персональные сведения заёмщика подставляются из карточки пайщика, условия и события — из договора, платежей и графика CRM. Исторические сведения источников показываются отдельно; приём файла подтверждается квитанцией конкретного бюро.</p>
             <NbkiContractFields loanId={detail.id} />
+            {(isAdmin || isManager) && <LoanNbkiOperation key={detail.id} loanId={detail.id} />}
             {detail.nbki_1c_facts ? <>
               <div className="rounded-md border p-3 text-sm">
                 <div className="font-medium">{detail.nbki_1c_facts.event_type} · {new Date(detail.nbki_1c_facts.event_time).toLocaleString("ru-RU")}</div>

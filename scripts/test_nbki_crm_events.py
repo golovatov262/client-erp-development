@@ -25,8 +25,10 @@ class CrmEventsPeriodTests(unittest.TestCase):
         result = list_crm_events(cur, 2, date_from='2026-08-01', date_to='2026-10-31')
         self.assertEqual(result['total'], 0)
         self.assertEqual(result['period'], {'from': '2026-08-01', 'to': '2026-10-31'})
-        self.assertEqual(len(cur.queries), 3)
-        for query, _ in cur.queries[1:]:
+        self.assertEqual(result['debt_scan_issues'], [])
+        period_queries = [(q,p) for q,p in cur.queries if "JOIN loans l ON l.id=e.loan_id" in q]
+        self.assertEqual(len(period_queries), 2)
+        for query, _ in period_queries:
             self.assertIn("e.event_occurred_at AT TIME ZONE 'Europe/Moscow'", query)
             self.assertIn("fe.delivery_status='accepted'", query)
         self.assertEqual(cur.queries[1][1], (2, date(2026, 10, 31), date(2026, 10, 31)))

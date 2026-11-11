@@ -1,4 +1,4 @@
-"""CRM-only serializer for individual NBKI GUTDF 5.1 event 2.3 files."""
+"""CRM GUTDF 5.1 payment serializer and shared lifecycle/batch dispatch."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                            ('debtDueMainSum', due_main), ('debtDuePercentSum', due_interest),
                            ('debtDueOtherSum', penalty)):
             _add(d, key, _money(value))
-    else:
+    elif total:
         _add(_add(group, 'FL_26_DebtDue'), 'debtDueExist_0')
     overdue = _add(group, 'FL_27_DebtOverdue')
     overdue_days = 0
@@ -195,9 +195,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         overdue_dates = [date.fromisoformat(row['due']) for row in debt.get('rows', [])
                          if Decimal(row.get('overdue_principal', '0')) +
                          Decimal(row.get('overdue_interest', '0')) > 0]
-        first_overdue = min(overdue_dates).isoformat() if overdue_dates else '-'
-        overdue_days = ((date.fromisoformat(payment['date']) - min(overdue_dates)).days
-                        if overdue_dates else '-')
+        first_overdue = debt.get('first_overdue_date') or (min(overdue_dates).isoformat() if overdue_dates else '-')
+        overdue_days = ((date.fromisoformat(payment['date']) - date.fromisoformat(first_overdue)).days
+                        if first_overdue != '-' else '-')
         missed = {}
         for component, tag, amount in (('overdue_principal', 'mainMissDate', overdue_main),
                                         ('overdue_interest', 'percentMissDate', overdue_interest)):
@@ -260,8 +260,11 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                 and block['applicationDate'] > block['stageDate']):
             raise ValueError('ФЛ_55.5: дата обращения позже даты перехода в стадию; подтвердите дату обращения')
         application = _add(event, 'FL_55_Application')
-        for key, value in block.items():
-            _add(application, key, value)
+        for key in ('role','sum','currency','uid','applicationDate','sourceCode','wayCode',
+                    'approvalEndDate','stageEndDate','purposeCode','stageCode','stageDate',
+                    'applicationCode','num','loanSum','loanCurrency','platformExist_0','platformExist_1'):
+            if key in block:
+                _add(application, key, block[key])
 
     participation = _add(event, 'FL_56_Participation')
     _add(participation, 'role', '1')
@@ -282,6 +285,14 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     else:
         from nbki_delivery import check_delivery
     check_delivery(cur, org_id, event_id)
+    cur.execute('SELECT event_payload,evidence_sha256 FROM nbki_crm_events WHERE id=%s AND org_id=%s', (event_id,org_id))
+    lifecycle = cur.fetchone()
+    if lifecycle and lifecycle[0] is not None:
+        if __package__:
+            from .nbki_lifecycle import build_lifecycle_xml
+        else:
+            from nbki_lifecycle import build_lifecycle_xml
+        return build_lifecycle_xml(cur,org_id,event_id,lifecycle)
     facts = payment_event_facts(cur, org_id, event_id)
     payment_id = facts['payment_id']
     # The event facts identify the loan through the event table; keep this query CRM-only.
@@ -372,10 +383,10 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
             result = build_event23_xml(cur, org_id, event_id)
             root = ET.fromstring(base64.b64decode(result['content_base64']))
             subject_node = root.find('./Data/Subject_FL')
-            event_node = subject_node.find('./Events/FL_Event_2_3') if subject_node is not None else None
+            event_node = subject_node.find('./Events/*') if subject_node is not None else None
             title_node = subject_node.find('./Title') if subject_node is not None else None
             if subject_node is None or event_node is None or title_node is None:
-                raise ValueError('Не удалось прочитать сформированное событие 2.3')
+                raise ValueError('Не удалось прочитать сформированное событие')
             if root.find('./Source') is None:
                 raise ValueError('В документе отсутствует источник кредитной информации')
             if first_root is None:
@@ -444,7 +455,7 @@ def event_readiness_report(cur, org_id: int) -> dict:
     cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_id
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         WHERE e.org_id=%s AND l.bki_enabled IS TRUE
-          AND l.status IN ('active','overdue','holiday') ORDER BY e.id""", (org_id,))
+          AND l.status IN ('active','overdue','holiday','closed') ORDER BY e.id""", (org_id,))
     events = cur.fetchall()
     rows = [dict(event_id=eid, loan_id=lid, contract_no=contract,
                  payment_id=pid, **assess_event_generation(cur, org_id, eid))

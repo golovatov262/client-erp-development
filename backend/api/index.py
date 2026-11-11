@@ -1009,6 +1009,24 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
     elif method == 'POST':
         action = body.get('action', 'create')
+        if action in ('nbki_operation', 'nbki_operation_references', 'nbki_refresh_event'):
+            if not staff or staff.get('role') not in ('admin', 'manager'):
+                return {'error': 'Недостаточно прав', '_status': 403}
+            from nbki_lifecycle import record_operation, references, refresh_event_metadata
+            if action == 'nbki_operation_references':
+                return references()
+            try:
+                if action == 'nbki_refresh_event':
+                    result = refresh_event_metadata(cur, resolve_source_org_id(cur), int(body['event_id']))
+                    conn.commit()
+                    return result
+                result = record_operation(cur, resolve_source_org_id(cur), int(body['loan_id']), body)
+                audit_log(cur, staff, 'create', 'nbki_lifecycle', result['operation_id'], '', str(body.get('basis', '')), ip)
+                conn.commit()
+                return result
+            except (ValueError, KeyError, TypeError) as exc:
+                conn.rollback()
+                return {'error': str(exc), '_status': 400}
         if action == 'set_bki_enabled':
             if not staff or staff.get('role') not in ('admin', 'manager'):
                 return {'error': 'Недостаточно прав', '_status': 403}
@@ -1521,6 +1539,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             if not old:
                 return {'error': 'Платёж не найден'}
             lid = old[0]
+            cur.execute("SELECT 1 FROM nbki_lifecycle_operations WHERE loan_id=%s AND kind='close'",(lid,))
+            if cur.fetchone():
+                return {'error':'Прекращение обязательств уже зарегистрировано; изменение платежа требует отдельной процедуры исправления истории', '_status':409}
             old_principal = Decimal(str(old[2]))
             new_date = body.get('payment_date', str(old[5]))
             new_amount = Decimal(str(body.get('amount', float(old[1]))))
@@ -8181,6 +8202,34 @@ def handle_member_orgs(method, params, body, cur, conn, staff=None, ip=''):
         conn.commit()
         return {'success': True}
 
+def save_nbki_collateral_flags(cur, row_id, body):
+    for key in ('nbki_acquired','nbki_inhabited','nbki_insured','nbki_insurance_franchise','nbki_guarantee_no_payments','nbki_guarantee_no_debt'):
+        if key in body:
+            raw = body[key]
+            if raw not in (None, '', 'true', 'false', True, False):
+                raise ValueError('Некорректный признак обеспечения')
+            value = None if raw in (None,'') else raw in ('true',True)
+            cur.execute('UPDATE loan_collateral SET '+key+'=%s WHERE id=%s', (value,row_id))
+    for key in ('nbki_insurance_start','nbki_insurance_end'):
+        if key in body:
+            value = date.fromisoformat(body[key]) if body[key] else None
+            cur.execute('UPDATE loan_collateral SET '+key+'=%s WHERE id=%s',(value,row_id))
+    if 'nbki_guarantor_accounting' in body:
+        from nbki_lifecycle import validate_guarantor_accounting
+        from psycopg2.extras import Json
+        value = body['nbki_guarantor_accounting']
+        if value is not None:
+            validate_guarantor_accounting(value)
+        cur.execute('UPDATE loan_collateral SET nbki_guarantor_accounting=%s WHERE id=%s', (Json(value) if value else None,row_id))
+    if 'nbki_guarantor_member_id' in body:
+        value = body['nbki_guarantor_member_id']
+        cur.execute('UPDATE loan_collateral SET nbki_guarantor_member_id=%s WHERE id=%s',
+                    (int(value) if value else None,row_id))
+    if 'nbki_guarantee_contract_no' in body:
+        cur.execute('UPDATE loan_collateral SET nbki_guarantee_contract_no=%s WHERE id=%s',
+                    (body['nbki_guarantee_contract_no'] or None,row_id))
+
+
 def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
     """CRUD для обеспечения по договору займа (залоги/поручительства)"""
     if method == 'POST' and body.get('action') == 'resolve_fias_okato':
@@ -8209,6 +8258,25 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
     if not loan_id:
         return {'error': 'loan_id обязателен'}
 
+    before_nbki = None
+    if method in ('POST','PUT'):
+        from nbki_lifecycle import capture, MSK
+        cur.execute('SELECT org_id,bki_enabled FROM loans WHERE id=%s FOR UPDATE', (int(loan_id),))
+        nbki_loan = cur.fetchone()
+        if nbki_loan and nbki_loan[1]:
+            before_nbki = capture(cur,int(loan_id),datetime.now(MSK))
+
+    def queue_collateral_change():
+        if before_nbki is None:
+            return
+        cur.execute("SELECT 1 FROM nbki_lifecycle_operations WHERE loan_id=%s AND kind='close'",(int(loan_id),))
+        if cur.fetchone():
+            return  # Metadata correction for an existing closure uses its revision action.
+        from nbki_lifecycle import record_operation, MSK
+        record_operation(cur,nbki_loan[0],int(loan_id),
+                         {'kind':'collateral_change','occurred_at':datetime.now(MSK).isoformat(),
+                          'basis':'Изменение карточки обеспечения CRM'}, before_snapshot=before_nbki)
+
     if method == 'GET':
         return query_rows(cur, """
             SELECT id, loan_id, collateral_type, pledger_name, description, collateral_value, identifier,
@@ -8218,7 +8286,7 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
                    nbki_collateral_sum, nbki_collateral_currency, nbki_assess_date,
                    nbki_price_code, nbki_actual_cost, nbki_calc_date,
                    nbki_actual_price_code, nbki_contract_total_sum, nbki_contract_count,
-                   nbki_location, nbki_location_address,
+                   nbki_location, nbki_location_address, nbki_guarantor_member_id, nbki_guarantee_contract_no, nbki_guarantee_no_payments, nbki_guarantee_no_debt, nbki_guarantor_accounting, nbki_acquired, nbki_inhabited, nbki_insured, nbki_insurance_franchise, nbki_insurance_start, nbki_insurance_end,
                    source_facts.facts AS nbki_source_facts,
                    created_at, updated_at
             FROM loan_collateral
@@ -8270,7 +8338,9 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             VALUES (%s, '%s', %s, %s, %s, %s, %s) RETURNING id
         """ % (nbki_columns, loan_id, esc(ctype), pledger, desc, val_sql, ident, nbki_values))
         row_id = cur.fetchone()[0]
+        save_nbki_collateral_flags(cur, row_id, body)
         audit_log(cur, staff, 'create', 'loan_collateral', row_id, esc(ctype), '', ip)
+        queue_collateral_change()
         conn.commit()
         return {'id': row_id}
 
@@ -8312,10 +8382,12 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
             elif kind == 'int': updates.append(column + '=%s' % int(value))
             elif kind == 'date': updates.append(column + "='%s'::date" % esc(value))
             else: updates.append(column + "='%s'" % esc(value))
-        if updates:
+        if updates or any(k in body for k in ('nbki_acquired','nbki_inhabited','nbki_insured','nbki_insurance_franchise','nbki_guarantee_no_payments','nbki_guarantee_no_debt','nbki_guarantee_contract_no','nbki_guarantor_member_id','nbki_guarantor_accounting','nbki_insurance_start','nbki_insurance_end')):
             updates.append("updated_at=NOW()")
             cur.execute("UPDATE loan_collateral SET %s WHERE id=%s AND loan_id=%s" % (', '.join(updates), row_id, loan_id))
+            save_nbki_collateral_flags(cur, row_id, body)
             audit_log(cur, staff, 'update', 'loan_collateral', row_id, '', '', ip)
+            queue_collateral_change()
             conn.commit()
         return {'success': True}
 
@@ -8323,6 +8395,10 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
         row_id = params.get('id') or (body.get('id') if body else None)
         if not row_id:
             return {'error': 'id обязателен'}
+        cur.execute('SELECT bki_enabled FROM loans WHERE id=%s', (int(loan_id),))
+        bki_row = cur.fetchone()
+        if bki_row and bki_row[0]:
+            return {'error':'Обеспечение договора БКИ сохраняется для истории. Его прекращение фиксируется при закрытии займа.', '_status':409}
         cur.execute("DELETE FROM loan_collateral WHERE id=%s AND loan_id=%s" % (row_id, loan_id))
         audit_log(cur, staff, 'delete', 'loan_collateral', row_id, '', '', ip)
         conn.commit()

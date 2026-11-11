@@ -1,0 +1,10 @@
+[Unit]
+Description=Record daily CRM debt changes for NBKI
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Europe/Moscow
+Persistent=true
+Unit=client-erp-nbki-debt.service
+
+[Install]
+WantedBy=timers.target

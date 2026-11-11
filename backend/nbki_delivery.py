@@ -59,6 +59,10 @@ def sync_file_delivery(cur, file_id):
                     UNION SELECT loan_uid FROM loan_bki_fields WHERE org_id=e.org_id AND loan_id=e.loan_id)''',
                 (org, event['contract_no'], event['event_time'], event['uid']))
             ids = [r[0] for r in cur.fetchall()]
+        cur.execute("""SELECT id FROM nbki_crm_events WHERE org_id=%s
+            AND event_name=%s AND subject_uid=%s AND event_occurred_at=%s
+            AND operation_id IS NOT NULL""", (org,event['event_name'],event['uid'],event['event_time']))
+        ids.extend(r[0] for r in cur.fetchall())
         event_id = ids[0] if len(ids) == 1 else None
         cur.execute('''UPDATE nbki_file_events SET crm_event_id=%s,delivery_status=%s,
             reported_accepted=%s WHERE source_file_id=%s AND order_num=%s''',
@@ -107,8 +111,8 @@ def check_delivery(cur, org_id, event_id, raw=None):
         cur.execute('SELECT xml_gzip FROM nbki_source_files WHERE id=%s AND org_id=%s',
                     (state['file_id'],org_id))
         previous = ET.fromstring(gzip.decompress(bytes(cur.fetchone()[0])))
-        old = previous.find(f'.//FL_Event_2_3[@orderNum="{state["order_num"]}"]')
-        new = ET.fromstring(raw).find('.//FL_Event_2_3')
+        old = next((e for e in previous.findall('.//Events/*') if e.get('orderNum') == str(state['order_num'])), None)
+        new = ET.fromstring(raw).find('.//Events/*')
         if old is not None and new is not None:
             old_subject = next((s for s in previous.findall('.//Subject_FL') if old in list(s.findall('./Events/*'))),None)
             new_subject = ET.fromstring(raw).find('.//Subject_FL')

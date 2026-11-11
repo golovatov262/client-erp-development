@@ -103,7 +103,7 @@ const AdminNbkiTab = () => {
   };
 
   const downloadEvent23Batch = async () => {
-    const ids = (crmEvents?.rows || []).filter(event => event.source_type === "loan_payment" && event.readiness.can_generate_xml).map(event => event.id);
+    const ids = (crmEvents?.rows || []).filter(event => event.readiness.can_generate_xml).map(event => event.id);
     if (!ids.length) return;
     setBuildingEventBatch(true);
     setBatchResult("");
@@ -124,7 +124,7 @@ const AdminNbkiTab = () => {
             return `#${event.event_id}${source ? ` · ${source.contract_no} · платёж #${source.source_id}` : ""}: ${event.reason}`;
           }).join("\n")}`
         : "";
-      setBatchResult(`Пакет XML 2.3: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
+      setBatchResult(`Пакет XML: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
     } catch (e) { setError(humanizeError(e)); }
     finally { setBuildingEventBatch(false); }
   };
@@ -169,7 +169,7 @@ const AdminNbkiTab = () => {
             <Button variant="outline" onClick={() => void loadEventPeriod()} disabled={eventPeriodLoading || !eventPeriodFrom || !eventPeriodTo || eventPeriodFrom > eventPeriodTo}>
               {eventPeriodLoading ? "Загружаю события…" : "Показать период"}
             </Button>
-            <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.source_type === "loan_payment" && event.readiness.can_generate_xml) || buildingEventId !== null || buildingEventBatch || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to}>
+            <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.readiness.can_generate_xml) || buildingEventId !== null || buildingEventBatch || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to}>
               {buildingEventBatch ? "Формирую пакет XML…" : "Выгрузить новые и исправленные события"}
             </Button>
           </div>
@@ -177,12 +177,14 @@ const AdminNbkiTab = () => {
           {crmEvents?.exported_through && <p className="text-xs text-muted-foreground">Последняя дата событий в отправленных файлах: {crmEvents.exported_through}. Новый период начинается со следующего дня.</p>}
           {batchResult && <p role="status" className="whitespace-pre-wrap text-sm">{batchResult}</p>}
           <div className="max-h-96 overflow-y-auto">
+            {!!crmEvents?.debt_scan_issues?.length && <div className="rounded-md border p-3 text-sm"><div className="font-medium">Не удалось зафиксировать ежедневное изменение задолженности</div>{crmEvents.debt_scan_issues.map(issue => <div key={issue.loan_id}>{issue.contract_no}: {issue.reason}</div>)}</div>}
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
-              {event.earlier_period && <Badge variant="outline" className="mr-2">Предыдущий период</Badge>}<span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
+              {event.earlier_period && <Badge variant="outline" className="mr-2">Предыдущий период</Badge>}<span className="font-medium">{event.contract_no}</span> · {event.source_type === "loan_payment" ? `платёж #${event.source_id}` : ({close: "Закрытие обязательств", terms_change: "Изменение условий", debt_change: "Изменение задолженности", collateral_change: "Изменение обеспечения", guarantor_change: "Изменение поручительства"} as Record<string, string>)[event.event_kind] || event.event_kind} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
               <div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.components_match ? "части платежа сходятся" : "проверить части платежа"}</div>
               <div className="mt-1 text-xs">
                 <Badge variant={event.status === "accepted" ? "default" : "secondary"}>{({ accepted: "Принято НБКИ", exported: "Ожидает ticket2", rejected: "Отклонено НБКИ", new: "Новое" } as Record<string, string>)[event.status] || event.status}</Badge>
                 {event.delivery.file && <span className="ml-2">Файл {event.delivery.file}</span>}
+                {event.source_type !== "loan_payment" && ["new","rejected"].includes(event.status) && <Button size="sm" variant="outline" className="ml-2" onClick={async () => { try { await api.loans.nbkiRefreshEvent(event.id); await loadEventPeriod(); } catch (err) { setBatchResult(err instanceof Error ? err.message : "Не удалось обновить реквизиты"); } }}>Обновить исправленные реквизиты</Button>}
                 {event.delivery.errors.map((err, index) => <div key={index} className="text-destructive">{err.block} · {err.field}: {err.message}{err.value ? ` (значение: ${err.value})` : ""}</div>)}
                 {event.status === "rejected" && event.readiness.can_generate_xml && <div>Данные изменены и проверены генератором; проверьте замечания НБКИ перед повторной отправкой</div>}
 
@@ -193,7 +195,7 @@ const AdminNbkiTab = () => {
                 {event.readiness.blockers.map(reason => <div key={reason} className="text-destructive">{reason}</div>)}
               </div>
               <Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.readiness.can_generate_xml || buildingEventId !== null || buildingEventBatch}>
-                {buildingEventId === event.id ? "Формирую XML…" : event.status === "rejected" ? "Повторно выгрузить событие" : "Сформировать XML 2.3"}
+                {buildingEventId === event.id ? "Формирую XML…" : event.status === "rejected" ? "Повторно выгрузить событие" : "Сформировать XML"}
               </Button>
             </div>)}
             {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Непринятых событий за выбранный период и более ранние даты нет.</p>}

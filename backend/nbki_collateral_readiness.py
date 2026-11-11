@@ -1,4 +1,4 @@
-"""CRM-only preflight for future NBKI event 2.4 collateral changes."""
+"""Collateral metadata and the shared XML generation readiness."""
 
 from __future__ import annotations
 
@@ -29,9 +29,17 @@ def collateral_readiness(cur, org_id: int) -> dict:
         ) source_facts ON TRUE
         WHERE l.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
         ORDER BY l.contract_no,lc.id""", (org_id,))
+    collateral_rows = cur.fetchall()
+    cur.execute("SELECT loan_id,id FROM nbki_crm_events WHERE org_id=%s AND event_name='FL_Event_2_4' ORDER BY id", (org_id,))
+    latest = dict(cur.fetchall())
+    if __package__:
+        from .nbki_event23_xml import assess_event_generation
+    else:
+        from nbki_event23_xml import assess_event_generation
+    readiness = {lid: assess_event_generation(cur,org_id,eid) for lid,eid in latest.items()}
     rows = []
     by_type: dict[str, dict] = {}
-    for row in cur.fetchall():
+    for row in collateral_rows:
         (loan_id, contract_no, loan_status, collateral_id, kind, pledger,
          description, value, identifier, guarantee_uid, guarantee_amount,
          guarantee_currency, guarantee_start, guarantee_end, source_id,
@@ -85,13 +93,13 @@ def collateral_readiness(cur, org_id: int) -> dict:
                 missing.append('адрес для определения ОКАТО')
             if not location or not re.fullmatch(r'\d{11}', str(location)):
                 missing.append('код местонахождения по ОКАТО (11 цифр)')
-            if not has_xml_history:
-                missing.append('ранее переданное состояние обеспечения')
+
             if not pledger:
                 missing.append('залогодатель')
-        if not source_id and not has_xml_history:
-            missing.append('снимок исходных сведений, ранее переданных в БКИ')
-        missing.append('снимок сведений до и после изменения для события 2.4')
+        if loan_id in readiness:
+            missing = readiness[loan_id]['blockers']
+        else:
+            missing.append('не зарегистрирована операция изменения обеспечения')
         kind_report = by_type.setdefault(kind, {'type': kind, 'count': 0,
             'with_missing_data': 0, 'missing_counts': {}})
         kind_report['count'] += 1
@@ -107,5 +115,5 @@ def collateral_readiness(cur, org_id: int) -> dict:
         WHERE org_id=%s AND bki_enabled IS TRUE AND status IN ('active','overdue','holiday')""", (org_id,))
     active_loans = cur.fetchone()[0]
     return {'active_loans': active_loans, 'collateral_records': len(rows),
-            'ready_for_event24': 0, 'event24_status': 'not_implemented_pending_field_mapping',
+            'ready_for_event24': sum(r['can_generate_xml'] for r in readiness.values()), 'event24_status': 'crm_operation_snapshots',
             'by_type': list(by_type.values()), 'rows': rows}

@@ -13,8 +13,8 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
     """Show queued operations with the accounting evidence used by the exporter.
 
     The event ledger is intentionally separate from historical import receipts.
-    Closed loans and loans without a UID from an imported NBKI file or CRM are
-    not export candidates. Imported non-UID details are not compared here.
+    Closed loans retain pending final-payment and termination events.
+    Every event uses the same XML readiness checks, including its confirmed UID.
     """
     if not 1 <= limit <= 500:
         raise ValueError('Недопустимый размер страницы событий')
@@ -44,24 +44,24 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
              OR e.event_occurred_at IS NULL)"""
     cur.execute("""SELECT COUNT(*) FROM nbki_crm_events e
         JOIN loans l ON l.id=e.loan_id
-        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday','closed')
         """ + period, (org_id, end, end))
     total = cur.fetchone()[0]
     cur.execute("""SELECT e.id,e.loan_id,l.contract_no,e.source_type,e.source_id,
         e.event_kind,e.event_occurred_at,e.recorded_at,e.status,e.evidence_sha256,
         p.payment_date,p.amount,p.principal_part,p.interest_part,p.penalty_part,
         l.amount,l.balance,
-        (SELECT array_agg(DISTINCT d.uid) FROM (
+        COALESCE(CASE WHEN e.subject_uid IS NOT NULL THEN ARRAY[e.subject_uid] END, (SELECT array_agg(DISTINCT d.uid) FROM (
             SELECT uid FROM nbki_event_deals d WHERE d.org_id=e.org_id
               AND d.role='borrower' AND (d.loan_id=e.loan_id OR d.contract_no=l.contract_no)
             UNION SELECT uid FROM nbki_deals d WHERE d.org_id=e.org_id
               AND d.deal_role='borrower' AND (d.loan_id=e.loan_id OR d.contract_no=l.contract_no)
             UNION SELECT loan_uid FROM loan_bki_fields f
               WHERE f.org_id=e.org_id AND f.loan_id=e.loan_id
-        ) d WHERE d.uid IS NOT NULL AND BTRIM(d.uid)<>'') AS uids
+        ) d WHERE d.uid IS NOT NULL AND BTRIM(d.uid)<>'')) AS uids
         FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
         LEFT JOIN loan_payments p ON e.source_type='loan_payment' AND p.id=e.source_id
-        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
+        WHERE e.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday','closed')
         """ + period + " ORDER BY e.event_occurred_at DESC NULLS LAST,e.id DESC LIMIT %s",
         (org_id, end, end, limit))
     if __package__:
@@ -107,7 +107,9 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'source_complete': bool(uid and occurred_at and components_match),
             'readiness': assess_event_generation(cur, org_id, event_id),
         })
-    return {'total': total, 'rows': rows,
+    cur.execute('SELECT i.loan_id,l.contract_no,i.reason FROM nbki_debt_scan_issues i JOIN loans l ON l.id=i.loan_id WHERE i.org_id=%s ORDER BY i.loan_id', (org_id,))
+    scan_issues = [dict(loan_id=r[0],contract_no=r[1],reason=r[2]) for r in cur.fetchall()]
+    return {'total': total, 'rows': rows, 'debt_scan_issues':scan_issues,
             'period': {'from': start.isoformat() if start else None, 'to': end.isoformat() if end else None},
             'exported_through': exported_through.isoformat() if exported_through else None,
             'suggested_date_from': suggested_start.isoformat()}

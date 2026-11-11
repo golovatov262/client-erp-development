@@ -386,6 +386,7 @@ export type NbkiEventReadiness = {
 };
 
 export type NbkiCrmEvents = {
+  debt_scan_issues?: {loan_id:number;contract_no:string;reason:string}[];
   total: number;
   period: { from: string | null; to: string | null };
   exported_through: string | null;
@@ -577,6 +578,9 @@ export const api = {
   },
 
   loans: {
+    nbkiRefreshEvent: (eventId:number) => request<{success:boolean}>("POST", undefined, {entity:"loans", action:"nbki_refresh_event", event_id:eventId}),
+    nbkiOperationReferences: () => request<Record<string, {code: string; label: string}[]>>("POST", undefined, {entity:"loans", action:"nbki_operation_references"}),
+    nbkiOperation: (data: Record<string, unknown>) => request<{success:boolean; operation_id:number; events_count:number}>("POST", undefined, {entity:"loans", action:"nbki_operation", ...data}),
     list: () => request<Loan[]>("GET", { entity: "loans" }),
     get: (id: number) => request<LoanDetail>("GET", { entity: "loans", action: "detail", id }),
     calcSchedule: (amount: number, rate: number, term: number, scheduleType: string, startDate: string) =>

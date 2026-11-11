@@ -69,8 +69,8 @@ def payment_event_facts(cur, org_id: int, event_id: int) -> dict:
      middle_name,birth_date,birth_place,member_inn,passport_series,passport_number,
      passport_issue_date,passport_issued_by,passport_dept_code,
      registration_address,org_inn,org_ogrn,org_name,org_short_name,bki_enabled) = row
-    if status not in ('active','overdue','holiday'):
-        raise ValueError('Закрытый договор исключён из исходящей выгрузки')
+    if status not in ('active','overdue','holiday','closed'):
+        raise ValueError('Статус договора не поддерживается для исходящего события')
     cur.execute("SELECT loan_uid FROM loan_bki_fields WHERE org_id=%s AND loan_id=%s",
                 (org_id, loan_id))
     manual_row = cur.fetchone()
