@@ -22,14 +22,14 @@ try:
                                estimate_posting_snapshot_interest)
     from nbki_debt_preview import preview_debt
     from nbki_smp import preview_smp, preview_smp_from_posting_snapshot
-    from nbki_xml_builder import document_xml
+    from nbki_xml_builder import document_xml, format_document_bytes
 except ImportError:
     from backend.nbki_crm_export_facts import payment_event_facts
     from backend.nbki_crm_debt import (split_latest_crm_debt, estimate_current_interest,
                                         estimate_posting_snapshot_interest)
     from backend.nbki_debt_preview import preview_debt
     from backend.nbki_smp import preview_smp, preview_smp_from_posting_snapshot
-    from backend.nbki_xml_builder import document_xml
+    from backend.nbki_xml_builder import document_xml, format_document_bytes
 
 
 XSD_DIR = Path(__file__).resolve().parent / 'nbki_xsd' / '5.1'
@@ -400,11 +400,12 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
         events_node = ET.SubElement(subject_node, 'Events')
         for event in sorted(group['events'], key=lambda item: datetime.fromisoformat(
                 item.get('eventDateTime', '')).timestamp()):
-            events_node.append(event)
             total_events += 1
+            event.set('orderNum', str(total_events))
+            events_node.append(event)
     first_root.set('subjectsCount', str(len(grouped)))
     first_root.set('groupBlocksCount', str(total_events))
-    raw = ET.tostring(first_root, encoding='utf-8', xml_declaration=True)
+    raw = format_document_bytes(first_root)
     validation = _validate_xsd(raw)
     return {'file_name': f"{first_root.get('regNumberDoc')}.xml",
             'content_base64': base64.b64encode(raw).decode('ascii'),
