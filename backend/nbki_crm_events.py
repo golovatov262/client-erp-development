@@ -36,7 +36,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         end = max(today, suggested_start)
     # Include unfinished backlog before the selected start; otherwise advancing
     # the default period could silently strand rejected or never-exported events.
-    period = """AND NOT EXISTS (
+    period = """AND e.status<>'excluded' AND NOT EXISTS (
             SELECT 1 FROM nbki_file_events fe JOIN nbki_source_files sf ON sf.id=fe.source_file_id
             WHERE fe.crm_event_id=e.id AND sf.org_id=e.org_id AND sf.archived_at IS NULL
               AND fe.delivery_status='accepted')

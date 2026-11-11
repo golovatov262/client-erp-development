@@ -1,20 +1,16 @@
 """Capture changed debt only after previous-day bank statements are posted."""
 import os
 import sys
-from datetime import datetime, date, timedelta
-from decimal import Decimal
+from datetime import datetime, timedelta
 from pathlib import Path
 import psycopg2
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from backend.nbki_lifecycle import capture, facts_from_snapshot, debt_evidence, record_operation, MSK
+from backend.nbki_debt_changes import review_debt_change, evidence_state
 
 
 def signature(evidence):
-    d, i = evidence['debt'], evidence['interest']
-    dates = [date.fromisoformat(r['due']) for r in d.get('rows', []) if Decimal(str(r.get('overdue_principal',0)))+Decimal(str(r.get('overdue_interest',0))) > 0]
-    over90 = bool(dates and evidence.get('as_of') and (date.fromisoformat(evidence['as_of']) - min(dates)).days > 90)
-    return (over90, d.get('term_principal'),d.get('overdue_principal'),d.get('overdue_interest'),
-            (d.get('penalty_candidate') or {}).get('remaining'),i.get('remaining_interest_candidate'))
+    return evidence_state(evidence)
 
 
 def bank_posting_blocker(cur, org_id, now):
@@ -87,8 +83,19 @@ def run(conn):
                         continue
                     _, principal = facts_from_snapshot(state)
                     evidence = debt_evidence(cur,state,principal)
+                    review = review_debt_change(cur,org,state['uid'],when,evidence)
+                    if review['decision']=='unchanged':
+                        cur.execute('DELETE FROM nbki_debt_scan_issues WHERE loan_id=%s',(lid,))
+                        conn.commit()
+                        continue
+                    if review['decision'] not in ('changed','periodic'):
+                        raise ValueError(review['reason'])
                     cur.execute("""SELECT event_payload FROM nbki_crm_events WHERE loan_id=%s
-                        AND event_kind='debt_change' AND event_payload IS NOT NULL ORDER BY id DESC LIMIT 1""",(lid,))
+                        AND event_kind='debt_change' AND event_payload IS NOT NULL
+                        AND status NOT IN ('excluded','accepted')
+                        AND NOT EXISTS (SELECT 1 FROM nbki_file_events fe JOIN nbki_source_files sf ON sf.id=fe.source_file_id
+                            WHERE fe.crm_event_id=nbki_crm_events.id AND sf.archived_at IS NULL AND fe.delivery_status='accepted')
+                        ORDER BY id DESC LIMIT 1""",(lid,))
                     previous = cur.fetchone()
                     cur.execute('DELETE FROM nbki_debt_scan_issues WHERE loan_id=%s',(lid,))
                     if previous and previous[0].get('debt_evidence') and signature(previous[0]['debt_evidence']) == signature(evidence):

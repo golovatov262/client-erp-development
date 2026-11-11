@@ -167,7 +167,7 @@ def debt_evidence(cur, s, principal):
         debt['penalty_candidate']['due_classification'] = 'term_until_final_scheduled_payment'
     preview = preview_debt(accounting, debt, interest)
     if preview['status'] != 'candidate_from_crm_components':
-        raise ValueError('Не подтверждён срез задолженности: ' + '; '.join(preview.get('issues', [])))
+        raise ValueError('Не подтверждён срез задолженности: ' + '; '.join(dict.fromkeys(debt.get('issues', []) + interest.get('issues', []) + preview.get('issues', []))))
     smp = preview_smp(cur, loan_id, day, debt)
     return {'as_of':day.isoformat(), 'debt': debt, 'interest': interest, 'preview': preview, 'smp': smp, 'accounting': accounting}
 
@@ -342,6 +342,12 @@ def build_lifecycle_xml(cur, org_id, event_id, row):
         raise ValueError('; '.join(payload['blockers']))
     if payload.get('guarantor') and not payload['guarantor'].get('subject'):
         raise ValueError('Не установлена карточка субъекта-поручителя')
+    if payload['event_name']=='FL_Event_2_3' and not payload.get('guarantor'):
+        if __package__:
+            from .nbki_debt_changes import require_debt_change
+        else:
+            from nbki_debt_changes import require_debt_change
+        require_debt_change(cur,org_id,payload)
     payload = prepare_guarantor_payload(payload) if payload.get('guarantor') else payload
     s = payload['snapshot']
     facts = copy.deepcopy(payload['facts'])
