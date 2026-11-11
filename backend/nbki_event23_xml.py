@@ -189,6 +189,7 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     else:
         _add(_add(group, 'FL_26_DebtDue'), 'debtDueExist_0')
     overdue = _add(group, 'FL_27_DebtOverdue')
+    overdue_days = 0
     if overdue_main + overdue_interest:
         _add(overdue, 'missFact_1')
         overdue_dates = [date.fromisoformat(row['due']) for row in debt.get('rows', [])
@@ -267,7 +268,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     _add(participation, 'kindCode', terms['kind_code'])
     _add(participation, 'uid', facts['uid'])
     _add(participation, 'fundDate', loan['start_date'])
-    _exists(participation, 'overdueExist', loan.get('status') == 'overdue')
+    # FL_56.5 means arrears over 90 days at the event date, not the loan's
+    # current CRM status. Use the same duration as FL_27.11.
+    _exists(participation, 'overdueExist', isinstance(overdue_days, int) and overdue_days > 90)
     _add(participation, 'stopExist_0')
     return event
 

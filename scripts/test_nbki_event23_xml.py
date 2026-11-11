@@ -70,12 +70,32 @@ class Event23XmlTests(unittest.TestCase):
         return {'term_principal': '800', 'overdue_principal': '0',
                 'overdue_interest': '0', 'penalty_candidate': {'remaining': '0'}, 'rows': []}
 
-    def test_overdue_loan_status_sets_participation_flag(self):
+    def test_current_overdue_status_without_event_arrears_does_not_set_flag(self):
         facts = self._base_facts(status='overdue')
         event = _event(Cursor(), facts, {}, self._base_debt(), {},
                        {'remaining_interest_candidate': '10'}, {})
-        self.assertIsNotNone(event.find('./FL_56_Participation/overdueExist_1'))
-        self.assertIsNone(event.find('./FL_56_Participation/overdueExist_0'))
+        self.assertIsNotNone(event.find('./FL_56_Participation/overdueExist_0'))
+        self.assertIsNone(event.find('./FL_56_Participation/overdueExist_1'))
+
+    def test_participation_flag_uses_event_duration_independently_of_current_status(self):
+        from datetime import date, timedelta
+
+        for status in ('active', 'overdue'):
+            for days in (1, 15, 89, 90, 91, 120):
+                for component in ('overdue_principal', 'overdue_interest'):
+                    with self.subTest(status=status, days=days, component=component):
+                        facts = self._base_facts(status=status)
+                        debt = self._base_debt()
+                        debt[component] = '20'
+                        due = date.fromisoformat(facts['payment']['date']) - timedelta(days=days)
+                        debt['rows'] = [{'due': due.isoformat(), component: '20'}]
+                        event = _event(Cursor(), facts, {}, debt, {},
+                                       {'remaining_interest_candidate': '10'}, {})
+                        self.assertEqual(event.findtext(
+                            './FL_25_26_27_28_Group/FL_27_DebtOverdue/missDuration'), str(days))
+                        flag = int(days > 90)
+                        self.assertIsNotNone(event.find(f'./FL_56_Participation/overdueExist_{flag}'))
+                        self.assertIsNone(event.find(f'./FL_56_Participation/overdueExist_{1 - flag}'))
 
     def test_fl55_emitted_from_report_blocks_precedent(self):
         facts = self._base_facts(report_blocks={
