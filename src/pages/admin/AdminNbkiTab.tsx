@@ -43,8 +43,7 @@ const defaultEventPeriod = () => {
 const AdminNbkiTab = () => {
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [error, setError] = useState("");
-  const [syncingFacts, setSyncingFacts] = useState(false);
-  const [factsResult, setFactsResult] = useState("");
+  const [batchResult, setBatchResult] = useState("");
   const [crmEvents, setCrmEvents] = useState<NbkiCrmEvents | null>(null);
   const [eventPeriodFrom, setEventPeriodFrom] = useState(() => defaultEventPeriod().from);
   const [eventPeriodTo, setEventPeriodTo] = useState(() => defaultEventPeriod().to);
@@ -82,16 +81,6 @@ const AdminNbkiTab = () => {
     finally { setEventPeriodLoading(false); }
   };
 
-  const sync1CFacts = async () => {
-    setSyncingFacts(true);
-    setError("");
-    try {
-      const result = await api.nbki.sync1CFacts();
-      setFactsResult(`Последний отчёт 1С: ${result.source_last_event_time}. Действующих договоров с однозначным сопоставлением: ${result.matched_active}; заполнено: ${result.created}, обновлено: ${result.updated}, без изменений: ${result.unchanged}. Конфликтов: ${result.conflict}.`);
-    } catch (e) { setError(humanizeError(e)); }
-    finally { setSyncingFacts(false); }
-  };
-
   const downloadEvent23 = async (eventId: number) => {
     setBuildingEventId(eventId);
     setError("");
@@ -113,6 +102,7 @@ const AdminNbkiTab = () => {
     const ids = (crmEvents?.rows || []).filter(event => event.source_type === "loan_payment").map(event => event.id);
     if (!ids.length) return;
     setBuildingEventBatch(true);
+    setBatchResult("");
     setError("");
     try {
       const result = await api.nbki.event23BatchXml(ids);
@@ -130,7 +120,7 @@ const AdminNbkiTab = () => {
             return `#${event.event_id}${source ? ` · ${source.contract_no} · платёж #${source.source_id}` : ""}: ${event.reason}`;
           }).join("\n")}`
         : "";
-      setFactsResult(`Пакет XML 2.3: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
+      setBatchResult(`Пакет XML 2.3: сформировано ${result.events.length} событий по ${new Set(result.events.map(event => event.uid)).size} заёмщикам; исключено для проверки: ${result.excluded.length}.${excludedNote}`);
     } catch (e) { setError(humanizeError(e)); }
     finally { setBuildingEventBatch(false); }
   };
@@ -177,6 +167,7 @@ const AdminNbkiTab = () => {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">Период: {loadedEventPeriod.from} — {loadedEventPeriod.to}; в очереди {crmEvents?.total ?? "…"} событий.</p>
+          {batchResult && <p role="status" className="whitespace-pre-wrap text-sm">{batchResult}</p>}
           <div className="max-h-96 overflow-y-auto">
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <span className="font-medium">{event.contract_no}</span> · платёж #{event.source_id} · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽
@@ -194,15 +185,6 @@ const AdminNbkiTab = () => {
             </div>)}
             {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Новых событий после запуска журнала пока нет.</p>}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Показатели 1С для новых займов</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">Переносит показатели из уже загруженного отчёта событий 1С (ПСК, признак блоков ФЛ_22/ФЛ_55) в карточки займов, впервые получивших сопоставленный УИД. Учётные суммы, даты и платежи при этом не изменяются.</p>
-          <Button variant="outline" disabled={syncingFacts} onClick={() => void sync1CFacts()}>{syncingFacts ? "Переношу…" : "Перенести показатели 1С в карточки"}</Button>
-          {factsResult && <p role="status" className="whitespace-pre-wrap text-sm">{factsResult}</p>}
         </CardContent>
       </Card>
 
