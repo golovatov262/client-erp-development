@@ -104,7 +104,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'current_principal': str(current_balance),
             'components_match': components_match,
             'has_posting_snapshot': bool(digest),
-            'source_complete': bool(uid and occurred_at and components_match),
+            'source_complete': bool(uid and occurred_at and (components_match if source_type=='loan_payment' else digest)),
             'readiness': assess_event_generation(cur, org_id, event_id),
         })
     cur.execute('SELECT i.loan_id,l.contract_no,i.reason FROM nbki_debt_scan_issues i JOIN loans l ON l.id=i.loan_id WHERE i.org_id=%s ORDER BY i.loan_id', (org_id,))
