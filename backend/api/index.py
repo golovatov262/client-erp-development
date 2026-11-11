@@ -10041,7 +10041,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
                 'field_name', e.field_name, 'field_value', e.field_value
              ) ORDER BY e.id) FROM nbki_receipt_errors e WHERE e.source_file_id=f.id) AS errors
             FROM nbki_source_files f
-            WHERE f.org_id=%s ORDER BY f.document_time DESC""", (org_id,))
+            WHERE f.org_id=%s AND f.archived_at IS NULL ORDER BY f.document_time DESC""", (org_id,))
         files = []
         for item in cur.fetchall():
             *values, errors = item

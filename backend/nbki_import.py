@@ -416,6 +416,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                  subjects_count, events_count, receipt_status, events_accepted, events_rejected, receipt_time)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (reg_number) DO UPDATE SET
+                    archived_at=NULL,
                     receipt_status=CASE
                         WHEN nbki_source_files.receipt_status IN ('accepted', 'partial')
                             THEN nbki_source_files.receipt_status
