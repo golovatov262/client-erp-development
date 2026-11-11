@@ -26,8 +26,8 @@ interface LoansActionDialogsProps {
   handleEarlyRepay: () => void;
   showEditPayment: boolean;
   setShowEditPayment: (v: boolean) => void;
-  editPayForm: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean };
-  setEditPayForm: (v: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean }) => void;
+  editPayForm: { payment_id: number; payment_date: string; event_time_msk: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean };
+  setEditPayForm: (v: { payment_id: number; payment_date: string; event_time_msk: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean }) => void;
   handleEditPayment: () => void;
 }
 
@@ -118,6 +118,7 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
         <DialogHeader><DialogTitle>Редактирование платежа</DialogTitle></DialogHeader>
         <div className="space-y-2">
           <div><Label>Дата</Label><Input type="date" value={props.editPayForm.payment_date} onChange={e => props.setEditPayForm({ ...props.editPayForm, payment_date: e.target.value })} /></div>
+          <div><Label>Фактическое время платежа (МСК)</Label><Input type="time" step="1" value={props.editPayForm.event_time_msk} onChange={e => props.setEditPayForm({ ...props.editPayForm, event_time_msk: e.target.value })} /><p className="text-xs text-muted-foreground">При изменении даты проверьте время по документу. Если время неизвестно, оставьте поле пустым.</p></div>
           <div><Label>Сумма</Label><Input type="number" value={props.editPayForm.amount} onChange={e => props.setEditPayForm({ ...props.editPayForm, amount: e.target.value })} /></div>
           <div className="grid grid-cols-3 gap-2">
             <div><Label>Основной долг</Label><Input type="number" value={props.editPayForm.principal_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, principal_part: e.target.value })} /></div>

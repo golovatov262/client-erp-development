@@ -595,7 +595,7 @@ export const api = {
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
     previewEarlyRepayment: (data: { loan_id: number; payment_date: string; repayment_type: string; mode: "full" | "partial"; amount?: number }) =>
       request<EarlyRepaymentPreview>("POST", undefined, { entity: "loans", action: "early_repayment_preview", ...data }),
-    updatePayment: (data: { payment_id: number; payment_date: string; amount: number; principal_part: number; interest_part: number; penalty_part: number; manual_distribution: boolean }) =>
+    updatePayment: (data: { payment_id: number; payment_date: string; event_time_msk?: string; amount: number; principal_part: number; interest_part: number; penalty_part: number; manual_distribution: boolean }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
   },
 
@@ -1396,6 +1396,8 @@ export interface SavingApplication {
 }
 
 export interface LoanPayment {
+  nbki_event_occurred_at?: string | null;
+  nbki_event_time_basis?: string | null;
   id: number;
   payment_date: string;
   amount: number;

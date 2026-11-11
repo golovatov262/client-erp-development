@@ -19,9 +19,9 @@ import urllib.error
 import boto3
 import bcrypt
 try:
-    from loan_payment_engine import post_loan_payment
+    from loan_payment_engine import post_loan_payment, resolve_edited_event_time
 except ImportError:
-    from backend.loan_payment_engine import post_loan_payment
+    from backend.loan_payment_engine import post_loan_payment, resolve_edited_event_time
 try:
     from nbki_import import import_payloads, resolve_source_org_id
 except ImportError:
@@ -1515,7 +1515,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'update_payment':
             pid = int(body['payment_id'])
-            cur.execute("SELECT loan_id, amount, principal_part, interest_part, penalty_part, payment_date, engine_version FROM loan_payments WHERE id=%s" % pid)
+            cur.execute("SELECT id FROM loans WHERE id=(SELECT loan_id FROM loan_payments WHERE id=%s) FOR UPDATE", (pid,))
+            cur.execute("SELECT loan_id, amount, principal_part, interest_part, penalty_part, payment_date, engine_version, nbki_event_occurred_at, nbki_event_time_basis FROM loan_payments WHERE id=%s FOR UPDATE", (pid,))
             old = cur.fetchone()
             if not old:
                 return {'error': 'Платёж не найден'}
@@ -1527,18 +1528,25 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             new_ip = Decimal(str(body.get('interest_part', float(old[3]))))
             new_pnp = Decimal(str(body.get('penalty_part', float(old[4]))))
             manual = bool(body.get('manual_distribution', False))
+            try:
+                new_date = date.fromisoformat(str(new_date)).isoformat()
+                event_at, time_basis = resolve_edited_event_time(old[5], new_date, old[7], old[8], body)
+            except (ValueError, TypeError) as exc:
+                return {'error': str(exc)}
+            accounting_changed = (new_date != str(old[5]) or
+                (new_amount, new_pp, new_ip, new_pnp) != tuple(Decimal(str(v)) for v in old[1:5]))
             if new_amount <= 0 or min(new_pp, new_ip, new_pnp) < 0:
                 return {'error': 'Сумма и части платежа должны быть неотрицательными'}
             if abs(new_amount - new_pp - new_ip - new_pnp) > Decimal('0.01'):
                 return {'error': 'Сумма платежа должна совпадать с суммой основного долга, процентов и штрафов'}
-            if old[6] == 'v2':
+            if old[6] == 'v2' and accounting_changed:
                 cur.execute("SELECT balance,status FROM loans WHERE id=%s FOR UPDATE", (lid,))
                 loan_balance, loan_status = cur.fetchone()
                 new_balance = Decimal(str(loan_balance)) + old_principal - new_pp
                 if new_balance < 0:
                     return {'error': 'Основной долг платежа превышает остаток задолженности'}
                 cur.execute("""SELECT schedule_id,COALESCE(SUM(amount),0) FROM loan_payment_allocations
-                    WHERE payment_id=%s AND schedule_id IS NOT NULL GROUP BY schedule_id""", (pid,))
+                    WHERE payment_id=%s AND schedule_id IS NOT NULL AND component IN ('interest','principal') GROUP BY schedule_id""", (pid,))
                 for schedule_id, allocated in cur.fetchall():
                     cur.execute("UPDATE loan_schedule SET paid_amount=GREATEST(0,COALESCE(paid_amount,0)-%s) WHERE id=%s", (allocated, schedule_id))
                 cur.execute("DELETE FROM loan_payment_allocations WHERE payment_id=%s", (pid,))
@@ -1569,6 +1577,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     if left > Decimal('0.005'):
                         extra_component = 'early_principal' if component == 'principal' else 'interest'
                         cur.execute("INSERT INTO loan_payment_allocations(payment_id,schedule_id,component,amount,allocation_mode) VALUES(%s,NULL,%s,%s,'manual')", (pid, extra_component, left))
+                if new_pnp > 0:
+                    cur.execute("""INSERT INTO loan_payment_allocations
+                        (payment_id,schedule_id,component,amount,allocation_mode)
+                        VALUES (%s,NULL,'penalty',%s,'manual')""", (pid, new_pnp))
                 cur.execute("""UPDATE loan_schedule SET status=CASE
                     WHEN COALESCE(paid_amount,0)>=principal_amount+interest_amount-0.005 THEN 'paid'
                     WHEN COALESCE(paid_amount,0)>0 AND payment_date<%s THEN 'overdue'
@@ -1576,11 +1588,15 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     WHEN payment_date<%s THEN 'overdue' ELSE 'pending' END
                     WHERE loan_id=%s AND status NOT IN ('holiday','holiday_pending')""", (new_date, new_date, lid))
                 cur.execute("UPDATE loans SET balance=%s,status=%s,updated_at=NOW() WHERE id=%s", (new_balance, 'closed' if new_balance <= 0 else ('active' if loan_status == 'closed' else loan_status), lid))
-            cur.execute("UPDATE loan_payments SET payment_date='%s', amount=%s, principal_part=%s, interest_part=%s, penalty_part=%s, manual_distribution=%s WHERE id=%s" % (
-                new_date, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), manual, pid))
-            if old[6] != 'v2':
+            cur.execute("""UPDATE loan_payments SET payment_date=%s, amount=%s,
+                principal_part=%s, interest_part=%s, penalty_part=%s, manual_distribution=%s,
+                nbki_event_occurred_at=%s, nbki_event_time_basis=%s WHERE id=%s""",
+                (new_date, new_amount, new_pp, new_ip, new_pnp, manual, event_at, time_basis, pid))
+            cur.execute("""UPDATE nbki_crm_events SET event_occurred_at=%s
+                WHERE source_type='loan_payment' AND source_id=%s AND loan_id=%s""", (event_at, pid, lid))
+            if old[6] != 'v2' and accounting_changed:
                 recalc_loan_schedule_statuses(cur, lid)
-            audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s, штраф: %s%s' % (pid, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), ' (ручное)' if manual else ''), ip)
+            audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s, штраф: %s%s' % (pid, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), (' (ручное)' if manual else '') + '; дата: ' + new_date + '; время события: ' + str(event_at)), ip)
             conn.commit()
             return {'success': True}
 

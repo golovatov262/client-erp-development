@@ -34,6 +34,18 @@ def parse_event_time_msk(payment_date: date, value: str | None) -> datetime | No
     return occurred_at
 
 
+def resolve_edited_event_time(old_date, new_date, old_at, old_basis, body):
+    """Require an explicit time decision when changing a dated event."""
+    if 'event_time_msk' not in body:
+        if str(old_date) != str(new_date) and old_at is not None:
+            raise ValueError('При изменении даты укажите фактическое время платежа (МСК) или очистите его, если оно неизвестно')
+        return old_at, old_basis
+    occurred_at = parse_event_time_msk(date.fromisoformat(str(new_date)), body['event_time_msk'])
+    basis = (old_basis if occurred_at is not None and occurred_at == old_at
+             else 'operator_entered' if occurred_at else None)
+    return occurred_at, basis
+
+
 def money(value):
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
 

@@ -72,7 +72,7 @@ const Loans = () => {
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10), event_time_msk: "", manual: false, principal: "", interest: "", penalty: "" });
   const [earlyForm, setEarlyForm] = useState({ mode: "partial" as "partial" | "full", amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10), event_time_msk: "" });
   const [showEditPayment, setShowEditPayment] = useState(false);
-  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: true });
+  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", event_time_msk: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: true });
   const [exporting, setExporting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -212,7 +212,8 @@ const Loans = () => {
 
   const openEditPayment = (payment: LoanPayment) => {
     setEditPayForm({
-      payment_id: payment.id, payment_date: payment.payment_date, amount: String(payment.amount),
+      payment_id: payment.id, payment_date: payment.payment_date,
+      event_time_msk: payment.nbki_event_occurred_at ? new Date(payment.nbki_event_occurred_at).toLocaleTimeString("en-GB", { timeZone: "Europe/Moscow", hour12: false }) : "", amount: String(payment.amount),
       principal_part: String(payment.principal_part), interest_part: String(payment.interest_part),
       penalty_part: String(payment.penalty_part), manual_distribution: true,
     });
@@ -224,7 +225,7 @@ const Loans = () => {
     setSaving(true);
     try {
       await api.loans.updatePayment({
-        payment_id: editPayForm.payment_id, payment_date: editPayForm.payment_date,
+        payment_id: editPayForm.payment_id, payment_date: editPayForm.payment_date, event_time_msk: editPayForm.event_time_msk,
         amount: toNum(editPayForm.amount), principal_part: toNum(editPayForm.principal_part),
         interest_part: toNum(editPayForm.interest_part), penalty_part: toNum(editPayForm.penalty_part),
         manual_distribution: true,
