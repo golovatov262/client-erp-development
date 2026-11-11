@@ -274,6 +274,11 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
 
 def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     """Build a one-event file from CRM facts and validate it against XSD 5.1."""
+    if __package__:
+        from .nbki_delivery import check_delivery
+    else:
+        from nbki_delivery import check_delivery
+    check_delivery(cur, org_id, event_id)
     facts = payment_event_facts(cur, org_id, event_id)
     payment_id = facts['payment_id']
     # The event facts identify the loan through the event table; keep this query CRM-only.
@@ -334,6 +339,7 @@ def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
     reg_number = f"{facts['source']['source_id']}_{created.astimezone(MSK).strftime('%Y%m%d_%H%M%S')}"
     raw, digest = document_xml(facts['source'], [(facts['subject'], [ev])], reg_number, created)
     validation = _validate_xsd(raw)
+    check_delivery(cur, org_id, event_id, raw)
     return {'file_name': f'{reg_number}.xml',
             'content_base64': base64.b64encode(raw).decode('ascii'),
             'sha256': digest, 'xsd_version': '5.1', **validation,

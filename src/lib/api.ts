@@ -99,17 +99,8 @@ export type NbkiDealsPage = { total: number; rows: NbkiDeal[] };
 export type NbkiImportResult = {
   success: boolean;
   files: number;
-  unique_deals: number;
-  matched: number;
-  review: number;
-  not_in_crm: number;
-  guarantors: number;
-  reported_accepted_deals: number;
-  collateral_events: number;
-  collateral_matched: number;
-  collateral_review: number;
-  collateral_not_in_crm: number;
-  collateral_crm_values_filled: number;
+  event_results: { pending?: number; accepted?: number; rejected?: number };
+  unmatched_events: number;
 };
 
 export type NbkiDraft = {
@@ -400,6 +391,7 @@ export type NbkiCrmEvents = {
     id: number; loan_id: number; contract_no: string;
     source_type: string; source_id: number; event_kind: string;
     event_occurred_at: string | null; recorded_at: string; status: string;
+    delivery: { status: string; file: string | null; errors: { code: string | null; message: string | null; block: string | null; field: string | null; value: string | null }[] };
     evidence_sha256: string | null; uid: string | null;
     payment_date: string | null;
     payment: { amount: string | null; principal: string | null;

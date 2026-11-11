@@ -52,6 +52,10 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         from .nbki_event23_xml import assess_event_generation
     else:
         from nbki_event23_xml import assess_event_generation
+    if __package__:
+        from .nbki_delivery import delivery_state
+    else:
+        from nbki_delivery import delivery_state
     rows = []
     for row in cur.fetchall():
         (event_id, loan_id, contract_no, source_type, source_id, event_kind,
@@ -64,12 +68,14 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
                             and abs(Decimal(payment_amount) - Decimal(principal_part)
                                     - Decimal(interest_part) - Decimal(penalty_part))
                             <= Decimal('0.01'))
+        delivery = delivery_state(cur, org_id, event_id)
         rows.append({
             'id': event_id, 'loan_id': loan_id, 'contract_no': contract_no,
             'source_type': source_type, 'source_id': source_id,
             'event_kind': event_kind,
             'event_occurred_at': occurred_at.isoformat() if occurred_at else None,
-            'recorded_at': recorded_at.isoformat(), 'status': status,
+            'recorded_at': recorded_at.isoformat(), 'status': delivery['status'],
+            'delivery': delivery,
             'evidence_sha256': digest.strip() if digest else None,
             'uid': uid, 'payment_date': payment_date.isoformat() if payment_date else None,
             'payment': {key: str(value) if value is not None else None

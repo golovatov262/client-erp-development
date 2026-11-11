@@ -217,15 +217,27 @@ def parse_source_xml(raw: bytes) -> dict:
 
 
 def parse_receipt_zip(payload: bytes | Path) -> dict:
-    source = payload if isinstance(payload, Path) else BytesIO(payload)
-    with zipfile.ZipFile(source) as archive:
-        names = archive.namelist()
-        xml_names = [name for name in names if name.lower().endswith(".xml")]
-        if len(xml_names) != 1 or xml_names[0] + ".sig" not in names:
-            raise ValueError("В квитанции должны быть XML и подпись")
-        if archive.getinfo(xml_names[0]).file_size > 2 * 1024 * 1024:
-            raise ValueError("Квитанция слишком большая")
-        root = ET.fromstring(archive.read(xml_names[0]))
+    raw = payload.read_bytes() if isinstance(payload, Path) else payload
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Квитанция слишком большая")
+    if raw.startswith(b'PK'):
+        try:
+            with zipfile.ZipFile(BytesIO(raw)) as archive:
+                xml_names = [n for n in archive.namelist() if n.lower().endswith('.xml')]
+                if len(xml_names) != 1 or xml_names[0] + '.sig' not in archive.namelist():
+                    raise ValueError("В квитанции должны быть XML и подпись")
+                if archive.getinfo(xml_names[0]).file_size > 2 * 1024 * 1024:
+                    raise ValueError("Квитанция слишком большая")
+                raw = archive.read(xml_names[0])
+        except zipfile.BadZipFile as exc:
+            raise ValueError('Повреждён ZIP квитанции') from exc
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise ValueError('Повреждён XML квитанции') from exc
+    source_node = root if root.tag == 'NotificationOfReceipt' else root.find('DocInfo')
+    if _text(source_node, 'sourceId') not in (None, SOURCE_ID):
+        raise ValueError('Квитанция другого источника')
     if root.tag == "NotificationOfReceipt":
         reg_number = _text(root, "outgoingDocNumber")
         status = "received" if root.find("acceptanceStatusOK") is not None else "rejected"

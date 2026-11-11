@@ -9995,10 +9995,12 @@ def handle_nbki(method, params, body, staff, cur, conn):
         try:
             xml_items = body.get('xml_gzip_base64') or []
             receipt_items = body.get('receipt_zip_base64') or []
-            if not isinstance(xml_items, list) or not 1 <= len(xml_items) <= 10:
-                raise ValueError('Выберите от 1 до 10 XML-файлов')
+            if not isinstance(xml_items, list) or len(xml_items) > 10:
+                raise ValueError('Можно загрузить не более 10 XML-файлов')
             if not isinstance(receipt_items, list) or len(receipt_items) > 20:
                 raise ValueError('Слишком много квитанций')
+            if not xml_items and not receipt_items:
+                raise ValueError('Выберите отправленный XML или квитанцию')
             xml_payloads = []
             for item in xml_items:
                 packed = base64.b64decode(item, validate=True)
@@ -10015,7 +10017,11 @@ def handle_nbki(method, params, body, staff, cur, conn):
                 if len(raw) > 2 * 1024 * 1024:
                     raise ValueError('Квитанция превышает 2 МБ')
                 receipts.append(raw)
-            result = import_payloads(conn, xml_payloads, receipts)
+            if __package__:
+                from backend.nbki_delivery import import_delivery_payloads
+            else:
+                from nbki_delivery import import_delivery_payloads
+            result = import_delivery_payloads(conn, xml_payloads, receipts, org_id)
             conn.commit()
             return {'success': True, **result}
         except (ValueError, TypeError, zlib.error, binascii.Error) as exc:
