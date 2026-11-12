@@ -1,5 +1,5 @@
 [Unit]
-Description=CRM daily NBKI debt change snapshots
+Description=CRM NBKI payment deadlines and periodic debt reporting
 After=client-erp.service
 
 [Service]

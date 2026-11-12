@@ -278,8 +278,17 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     return event
 
 
-def build_event23_xml(cur, org_id: int, event_id: int) -> dict:
+def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True) -> dict:
     """Build a one-event file from CRM facts and validate it against XSD 5.1."""
+    if _include_related and cur is not None:
+        if __package__:
+            from .nbki_reporting_policy import paired_ids
+        else:
+            from nbki_reporting_policy import paired_ids
+        related=paired_ids(cur,org_id,[event_id])
+        if related and related!=[event_id]:
+            return build_event23_batch_xml(cur,org_id,related)
+
     if __package__:
         from .nbki_delivery import check_delivery
     else:
@@ -374,13 +383,21 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
     if not ids or len(ids) > 100 or any(value <= 0 for value in ids):
         raise ValueError('Укажите от 1 до 100 корректных ID событий')
 
+    if cur is not None:
+        if __package__:
+            from .nbki_reporting_policy import paired_ids
+        else:
+            from nbki_reporting_policy import paired_ids
+        ids=paired_ids(cur,org_id,ids)
+
+    nodes_by_id = {}
     first_root = None
     grouped = {}
     exported = []
     excluded = []
     for event_id in ids:
         try:
-            result = build_event23_xml(cur, org_id, event_id)
+            result = build_event23_xml(cur, org_id, event_id, _include_related=False)
             root = ET.fromstring(base64.b64decode(result['content_base64']))
             subject_node = root.find('./Data/Subject_FL')
             event_node = subject_node.find('./Events/*') if subject_node is not None else None
@@ -398,10 +415,28 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
                 raise ValueError('Для одного УИД CRM содержит разные идентификационные данные заёмщика')
             if not existing:
                 grouped[uid] = {'title': copy.deepcopy(title_node), 'events': []}
-            grouped[uid]['events'].append(copy.deepcopy(event_node))
+            node=copy.deepcopy(event_node)
+            grouped[uid]['events'].append(node)
+            nodes_by_id[event_id]=(uid,node)
             exported.append({'event_id': event_id, 'contract_no': result['contract_no'], 'uid': uid})
         except (ValueError, TypeError) as exc:
             excluded.append({'event_id': event_id, 'reason': str(exc)[:240]})
+
+    if cur is not None and excluded:
+        if __package__:
+            from .nbki_reporting_policy import reporting_pairs
+        else:
+            from nbki_reporting_policy import reporting_pairs
+        failed={r['event_id'] for r in excluded}
+        for before,after in reporting_pairs(cur,org_id,ids):
+            if before in failed or after in failed:
+                for eid in (before,after):
+                    if eid in nodes_by_id:
+                        uid,node=nodes_by_id.pop(eid)
+                        grouped[uid]['events'].remove(node)
+                        exported=[r for r in exported if r['event_id']!=eid]
+                        excluded.append({'event_id':eid,'reason':'Связанное событие начисления/платежа не готово; исправьте его перед общей выгрузкой'})
+        grouped={uid:g for uid,g in grouped.items() if g['events']}
 
     if not exported or first_root is None:
         reasons = '; '.join(f"{item['event_id']}: {item['reason']}" for item in excluded[:5])

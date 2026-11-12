@@ -20,7 +20,7 @@ def individual(event_id):
 
 class BatchTests(unittest.TestCase):
     def test_global_order_after_grouping_sorting_and_exclusion(self):
-        with patch('backend.nbki_event23_xml.build_event23_xml', side_effect=lambda c,o,e: individual(e)), \
+        with patch('backend.nbki_event23_xml.build_event23_xml', side_effect=lambda c,o,e,**kw: individual(e)), \
              patch('backend.nbki_event23_xml._validate_xsd', return_value={
                  'xsd_valid': False, 'xsd_status': 'accepted_deviations', 'xsd_errors': ['sizeCode']}):
             result=build_event23_batch_xml(None,2,[99,1,3,2,1])

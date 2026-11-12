@@ -17,3 +17,10 @@
 - Missing, unmatched, unposted or unidentified bank-statement rows must not block NBKI event creation or XML generation. Do not require successful bank import, statement coverage or all statement rows to be matched as an NBKI prerequisite.
 - Debt amounts and event dates come from CRM accounting and frozen operation evidence. Preserve the loan transaction lock and financial/XSD checks; never infer a payment from an unposted statement row.
 - Debt-change reporting (event 2.3), payment reporting, and bank-import status are distinct concerns. Do not describe debt snapshots as new payments or as confirmed NBKI acceptance.
+
+# NBKI reporting frequency (confirmed 2026-11-12)
+
+- Do not create outgoing daily debt snapshots merely because daily interest grows. The scheduler observes dates and CRM state; observations are not export events.
+- Report accrued debt together with an actual posted CRM payment, at a contractual payment due date, on new arrears (including the over-90-day indicator transition), and at least once in 31 calendar days for continuing obligations.
+- Keep aggregated accrual and the payment/due event as separate 2.3 groups and include the pending pair in the same XML. Keep their real timestamps; distinguish receipt outcomes without invented seconds.
+- Preserve existing prepared/exported files and initial snapshots authorized when the archive is unavailable. Payment and lifecycle accounting validations remain mandatory.

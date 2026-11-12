@@ -31,12 +31,12 @@ class Connection:
 class CrmAccountingSourceTests(unittest.TestCase):
     evidence={'as_of':'2026-11-12','preview':dict(status='candidate_from_crm_components',term_principal='100',term_interest_candidate='1',term_other_candidate='0',overdue_principal='0',overdue_interest='0',overdue_other='0'),'debt':{'rows':[]}}
 
-    def scan(self,conn,error=None):
+    def scan(self,conn,error=None,count=1):
         with patch('scripts.nbki_record_debt_changes.capture',return_value={'uid':'UID'}), \
              patch('scripts.nbki_record_debt_changes.facts_from_snapshot',return_value=({},100)), \
              patch('scripts.nbki_record_debt_changes.debt_evidence',return_value=self.evidence,side_effect=error), \
              patch('scripts.nbki_record_debt_changes.review_debt_change',return_value={'decision':'changed'}), \
-             patch('scripts.nbki_record_debt_changes.record_operation') as record:
+             patch('scripts.nbki_record_debt_changes.observe_and_record',return_value=count) as record:
             result=run(conn)
             return result,record.call_args_list
 
@@ -44,12 +44,12 @@ class CrmAccountingSourceTests(unittest.TestCase):
         conn=Connection();result,calls=self.scan(conn)
         self.assertEqual(result,{'created':1,'blocked':[]})
         self.assertTrue(any('FROM loans WHERE id=%s FOR UPDATE' in q for q,p in conn.cur.queries))
-        self.assertEqual(calls[0].args[3]['kind'],'debt_change')
+        self.assertEqual(calls[0].args[1:3],(2,19))
 
     def test_no_duplicate_snapshot_without_new_crm_change(self):
-        result,calls=self.scan(Connection(({'debt_evidence':self.evidence},)))
+        result,calls=self.scan(Connection(),count=0)
         self.assertEqual(result,{'created':0,'blocked':[]})
-        self.assertFalse(calls)
+        self.assertEqual(len(calls),1)
 
     def test_financial_errors_still_block(self):
         result,calls=self.scan(Connection(),ValueError('Не подтверждены проценты CRM'))

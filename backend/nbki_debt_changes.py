@@ -110,13 +110,19 @@ def initial_snapshot(cur, org_id, uid, occurred_at=None):
 
 
 def review_debt_change(cur,org_id,uid,occurred_at,evidence):
+    # At one actual payment timestamp, the after-payment group is the later
+    # financial state even if its accrual companion is accepted in a later file.
     cur.execute("""SELECT f.id,f.reg_number,fe.order_num,fe.event_time,f.xml_gzip,f.xml_sha256,fe.event_name
         FROM nbki_file_events fe JOIN nbki_source_files f ON f.id=fe.source_file_id
         LEFT JOIN nbki_deals d ON d.id=fe.deal_id
+        LEFT JOIN nbki_crm_events ce ON ce.id=fe.crm_event_id
+        LEFT JOIN nbki_debt_reporting_triggers rt ON rt.event_id=ce.id
         WHERE f.org_id=%s AND f.archived_at IS NULL AND fe.delivery_status='accepted'
           AND COALESCE(fe.source_uid,d.uid)=%s AND fe.event_name IN (
             'FL_Event_2_1','FL_Event_2_3','FL_Event_2_5','FL_Event_2_10','FL_Event_2_11')
-        ORDER BY fe.event_time DESC NULLS LAST,f.document_time DESC,f.id DESC,fe.order_num DESC LIMIT 1""",(org_id,uid))
+        ORDER BY fe.event_time DESC NULLS LAST,
+          CASE WHEN ce.source_type='loan_payment' OR rt.kind='payment_due' THEN 2 ELSE 1 END DESC,
+          f.document_time DESC,f.id DESC,fe.order_num DESC LIMIT 1""",(org_id,uid))
     row=cur.fetchone()
     if not row:
         initial=initial_snapshot(cur,org_id,uid,occurred_at)
@@ -153,6 +159,15 @@ def review_debt_change(cur,org_id,uid,occurred_at,evidence):
 
 def require_debt_change(cur,org_id,payload,event_id=None):
     from datetime import datetime
+    if payload.get('reporting_kind'):
+        if payload.get('time_pending') or payload.get('financial_reconstruction_required') or payload.get('blockers'):
+            raise ValueError('Не подтверждены время или финансовые данные события начисления')
+        cur.execute('SELECT kind FROM nbki_debt_reporting_triggers WHERE event_id=%s',(event_id,))
+        row=cur.fetchone()
+        if not row or row[0]!=payload['reporting_kind']:
+            raise ValueError('Не подтверждено основание формирования события задолженности')
+        evidence_state(payload['debt_evidence'])
+        return {'decision':row[0],'reason':payload['basis'],'changes':{}}
     review=review_debt_change(cur,org_id,payload['facts']['uid'],
         datetime.fromisoformat(payload['snapshot']['occurred_at']),payload['debt_evidence'])
     if review['decision']=='initial_snapshot' and review['authorization']['event_id']!=event_id:

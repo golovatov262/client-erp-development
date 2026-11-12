@@ -9,7 +9,7 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import Json
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from backend.nbki_debt_changes import review_debt_change
+from backend.nbki_debt_changes import review_debt_change,require_debt_change
 
 
 def review_queue(cur, apply=False):
@@ -25,7 +25,8 @@ def review_queue(cur, apply=False):
     results=[]
     for eid,lid,contract,org,p,linked in cur.fetchall():
         try:
-            r=review_debt_change(cur,org,p['facts']['uid'],datetime.fromisoformat(p['snapshot']['occurred_at']),p['debt_evidence'])
+            r=(require_debt_change(cur,org,p,eid) if p.get('reporting_kind') else
+               review_debt_change(cur,org,p['facts']['uid'],datetime.fromisoformat(p['snapshot']['occurred_at']),p['debt_evidence']))
         except ValueError as exc:
             r={'decision':'invalid','reason':str(exc),'changes':{}}
         result=dict(event_id=eid,loan_id=lid,contract=contract,org_id=org,linked=linked,**r)

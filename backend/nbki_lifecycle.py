@@ -131,12 +131,13 @@ def facts_from_snapshot(s):
 
 class ScheduleCursor:
     """The serializer's next-payment lookup over the operation's frozen schedule."""
-    def __init__(self, snapshot):
+    def __init__(self, snapshot, include_due_today=False):
         self.snapshot = snapshot
+        self.include_due_today = include_due_today
     def execute(self, sql, params):
         if 'FROM loan_schedule' not in sql or 'LIMIT 1' not in sql:
             raise ValueError('Неподдерживаемый запрос к снимку операции')
-        self.rows = [r for r in self.snapshot['schedule'] if r['payment_date'] > params[1]
+        self.rows = [r for r in self.snapshot['schedule'] if (r['payment_date'] >= params[1] if self.include_due_today else r['payment_date'] > params[1])
                      and r['status'] not in ('holiday','holiday_pending')]
     def fetchone(self):
         if not self.rows:
@@ -274,7 +275,7 @@ def obligation_event(payload):
     else:
         from nbki_event23_xml import _event
     s, facts, evidence = payload['snapshot'], payload['facts'], payload['debt_evidence']
-    ev = _event(ScheduleCursor(s), facts, evidence['accounting'], evidence['debt'],
+    ev = _event(ScheduleCursor(s,payload.get('include_due_today',False)), facts, evidence['accounting'], evidence['debt'],
                 evidence['preview'], evidence['interest'], evidence['smp'])
     payment = ev.find('./FL_25_26_27_28_Group/FL_28_Payment/date')
     if facts['payment']['last_payment_date'] == '-':
@@ -338,6 +339,10 @@ def build_lifecycle_xml(cur, org_id, event_id, row):
     payload, digest = row
     if checksum(payload) != digest.strip():
         raise ValueError('Контрольная сумма снимка операции не совпала')
+    if payload.get('financial_reconstruction_required'):
+        raise ValueError('Дата платежа изменена: требуется восстановление финансового снимка начислений')
+    if payload.get('time_pending'):
+        raise ValueError('Для начислений до платежа нужно подтвердить точное время платежа CRM')
     if payload.get('blockers'):
         raise ValueError('; '.join(payload['blockers']))
     if payload.get('guarantor') and not payload['guarantor'].get('subject'):

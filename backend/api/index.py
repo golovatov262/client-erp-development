@@ -1615,6 +1615,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 (new_date, new_amount, new_pp, new_ip, new_pnp, manual, event_at, time_basis, pid))
             cur.execute("""UPDATE nbki_crm_events SET event_occurred_at=%s
                 WHERE source_type='loan_payment' AND source_id=%s AND loan_id=%s""", (event_at, pid, lid))
+            try:
+                from nbki_reporting_policy import bind_payment_time
+            except ImportError:
+                from backend.nbki_reporting_policy import bind_payment_time
+            bind_payment_time(cur,pid,event_at,new_date)
             if old[6] != 'v2' and accounting_changed:
                 recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s, штраф: %s%s' % (pid, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), (' (ручное)' if manual else '') + '; дата: ' + new_date + '; время события: ' + str(event_at)), ip)

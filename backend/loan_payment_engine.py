@@ -197,6 +197,11 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
     old_balance, loan_status, annual_rate = money(loan[0]), loan[1], Decimal(str(loan[2]))
     if loan_status == 'closed' or old_balance <= EPS:
         raise ValueError('Договор займа закрыт')
+    if __package__:
+        from .nbki_reporting_policy import prepare_payment_accrual,record_payment_accrual
+    else:
+        from nbki_reporting_policy import prepare_payment_accrual,record_payment_accrual
+    accrual_before = prepare_payment_accrual(cur,loan_id,payment_date,event_occurred_at)
     nbki_state_before = capture_loan_state(cur, loan_id)
 
     mode = 'manual' if forced else 'automatic'
@@ -363,8 +368,9 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
     nbki_state_after = capture_loan_state(cur, loan_id)
     evidence_sha256 = store_payment_snapshot(cur, payment_id, loan_id, payment_date,
                                              nbki_state_before, nbki_state_after)
-    record_payment_event(cur, payment_id, loan_id, event_occurred_at,
+    payment_event_id = record_payment_event(cur, payment_id, loan_id, event_occurred_at,
                          evidence_sha256)
+    record_payment_accrual(cur,loan_id,payment_id,payment_event_id,event_occurred_at,accrual_before)
     return {'payment_id': payment_id, 'principal_part': float(principal_total),
             'interest_part': float(totals['interest']), 'penalty_part': float(totals['penalty']),
             'early_principal': float(totals['early_principal']), 'unapplied': float(max(remaining, 0)),

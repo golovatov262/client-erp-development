@@ -47,6 +47,9 @@ def sync_file_delivery(cur, file_id):
                'status': status, 'events_received': count,
                'accepted': accepted, 'rejected': rejected, 'errors': errors}
     outcomes = receipt_outcomes(events, receipt)
+    cur.execute('SELECT xml_gzip FROM nbki_source_files WHERE id=%s',(file_id,))
+    source_xml=ET.fromstring(gzip.decompress(bytes(cur.fetchone()[0])))
+    xml_events={int(n.get('orderNum')):n for n in source_xml.findall('.//Events/*')}
     linked = set()
     for event in events:
         ids = []
@@ -61,8 +64,11 @@ def sync_file_delivery(cur, file_id):
             ids = [r[0] for r in cur.fetchall()]
         cur.execute("""SELECT id FROM nbki_crm_events WHERE org_id=%s
             AND event_name=%s AND subject_uid=%s AND event_occurred_at=%s
-            AND operation_id IS NOT NULL""", (org,event['event_name'],event['uid'],event['event_time']))
+            AND event_payload IS NOT NULL""", (org,event['event_name'],event['uid'],event['event_time']))
         ids.extend(r[0] for r in cur.fetchall())
+        ids=list(dict.fromkeys(ids))
+        if len(ids)>1:
+            ids=match_same_time_events(cur,ids,xml_events[event['order_num']])
         event_id = ids[0] if len(ids) == 1 else None
         cur.execute('''UPDATE nbki_file_events SET crm_event_id=%s,delivery_status=%s,
             reported_accepted=%s WHERE source_file_id=%s AND order_num=%s''',
@@ -74,6 +80,37 @@ def sync_file_delivery(cur, file_id):
         state = delivery_state(cur, org, event_id)
         cur.execute('UPDATE nbki_crm_events SET status=%s WHERE id=%s AND org_id=%s',
                     (state['status'],event_id,org))
+
+
+def match_same_time_events(cur,ids,node):
+    """Accrual and payment may share the true event time; never invent seconds."""
+    from decimal import Decimal
+    import copy
+    if __package__:
+        from .nbki_lifecycle import obligation_event
+    else:
+        from nbki_lifecycle import obligation_event
+    matched=[]
+    for eid in ids:
+        cur.execute('SELECT source_type,source_id,loan_id,event_payload FROM nbki_crm_events WHERE id=%s',(eid,))
+        source,pid,lid,payload=cur.fetchone()
+        if payload:
+            if payload.get('blockers') or payload.get('time_pending'):continue
+            expected=obligation_event(payload)
+            actual=copy.deepcopy(node)
+            actual.set('eventDateTime',expected.get('eventDateTime'))
+            if _shape(actual)==_shape(expected):matched.append(eid)
+        elif source=='loan_payment':
+            cur.execute("""SELECT SUM(p.amount),SUM(p.principal_part),SUM(p.interest_part),SUM(p.penalty_part)
+                FROM loan_payments p JOIN loan_payments target ON target.id=%s
+                WHERE p.loan_id=%s AND (p.payment_date,p.id)<=(target.payment_date,target.id)""",(pid,lid))
+            values=cur.fetchone()
+            tags=('totalSum','totalMainSum','totalPercentSum','totalOtherSum')
+            try:
+                if all(Decimal(node.findtext('.//FL_28_Payment/'+tag))==value for tag,value in zip(tags,values)):
+                    matched.append(eid)
+            except (TypeError,ArithmeticError):pass
+    return matched
 
 
 def delivery_state(cur, org_id, event_id):
