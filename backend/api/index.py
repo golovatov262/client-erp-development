@@ -9937,6 +9937,13 @@ def handle_nbki(method, params, body, staff, cur, conn):
         org_id = resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
+    if action.startswith('exchange_'):
+        from backend.nbki_exchange import admin
+        try:
+            return admin(cur, conn, org_id, method, dict(body, action=action), staff.get('user_id'))
+        except (ValueError, TypeError, KeyError, binascii.Error) as exc:
+            conn.rollback()
+            return {'_status': 400, 'error': str(exc)[:1000]}
     if action == 'manual_contract_fields':
         loan_id = body.get('loan_id') or params.get('loan_id')
         if not loan_id:
@@ -9991,6 +9998,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}
         try:
+            from backend.nbki_exchange import reserved
+            reserved(cur, org_id, [int(body.get('event_id'))])
             return build_event23_xml(cur, org_id, int(body.get('event_id')))
         except (ValueError, TypeError) as exc:
             return {'_status': 422, 'error': str(exc)[:300]}
@@ -9998,6 +10007,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
         if method != 'POST':
             return {'_status': 405, 'error': 'Неверный метод'}
         try:
+            from backend.nbki_exchange import reserved
+            reserved(cur, org_id, body.get('event_ids') or [])
             return build_event23_batch_xml(cur, org_id, body.get('event_ids') or [])
         except (ValueError, TypeError) as exc:
             return {'_status': 422, 'error': str(exc)[:500]}
@@ -10274,7 +10285,17 @@ def handler(event, context):
         elif entity in ('push', 'notifications'):
             staff = get_staff_session(params, ev_headers, cur)
 
-        if entity == 'dashboard':
+        if entity == 'nbki_agent':
+            from backend.nbki_exchange import agent
+            try:
+                result = agent(cur, conn, ev_headers.get('x-nbki-agent-key') or ev_headers.get('X-Nbki-Agent-Key'), method, body)
+            except PermissionError as exc:
+                conn.rollback()
+                result = {'_status': 401, 'error': str(exc)}
+            except (ValueError, TypeError, KeyError, binascii.Error) as exc:
+                conn.rollback()
+                result = {'_status': 400, 'error': str(exc)[:1000]}
+        elif entity == 'dashboard':
             result = handle_dashboard(cur, params)
         elif entity == 'members':
             result = handle_members(method, params, body, cur, conn, staff, src_ip)

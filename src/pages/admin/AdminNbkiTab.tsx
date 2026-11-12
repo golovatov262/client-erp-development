@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import NbkiExchangePanel from "./NbkiExchangePanel";
 import api, { NbkiCrmEvents, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -159,10 +160,11 @@ const AdminNbkiTab = () => {
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
+      <NbkiExchangePanel eventIds={(crmEvents?.rows||[]).filter(e=>e.readiness.can_generate_xml).map(e=>e.id)} onChange={()=>void refresh()} />
       <Card>
         <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Принятые события и события, ожидающие квитанцию, повторно не выгружаются. После отказа исправьте указанные данные: изменённое событие включится в следующий пакет, если пройдёт проверку. Готовность рассчитывается теми же проверками, что используются при формировании XML; исключённые события показываются с номером договора и причиной. Скачанный XML нужно подписать и зашифровать локально CryptoPro и отправить в НБКИ самостоятельно.</p>
+          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Принятые события и события, ожидающие квитанцию, повторно не выгружаются. После отказа исправьте указанные данные: изменённое событие включится в следующий пакет, если пройдёт проверку. Готовность рассчитывается теми же проверками, что используются при формировании XML; исключённые события показываются с номером договора и причиной. Для подписи и шифрования используйте блок обмена выше. Скачивание XML само по себе не означает отправку в НБКИ.</p>
           <p className="text-muted-foreground">Задолженность формируется при платеже, наступлении срока платежа, возникновении просрочки и для обновления сведений не реже раза в 31 день. Связанные начисления и платёж включаются в пакет вместе. Ежедневных выгрузок только из-за роста процентов нет.</p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="grid gap-1 text-xs text-muted-foreground">События с (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodFrom} onChange={event => setEventPeriodFrom(event.target.value)} /></label>

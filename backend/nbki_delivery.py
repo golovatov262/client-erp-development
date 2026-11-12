@@ -221,7 +221,7 @@ def import_delivery_payloads(conn, xml_payloads, receipt_payloads, org_id):
                     or (old_time and receipt.get('receipt_time') and old_time>receipt['receipt_time'])):
                     continue
                 cur.execute('''UPDATE nbki_source_files SET receipt_status=%s,events_accepted=%s,
-                    events_rejected=%s,receipt_time=%s WHERE id=%s''',
+                    events_rejected=%s,receipt_time=%s,receipt_signature_verified=false WHERE id=%s''',
                     (receipt['status'],receipt.get('accepted'),receipt.get('rejected'),receipt.get('receipt_time'),file_id))
                 cur.execute('DELETE FROM nbki_receipt_errors WHERE source_file_id=%s AND receipt_kind=%s', (file_id,receipt['kind']))
                 for error in receipt['errors']:

@@ -509,6 +509,8 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 export const api = {
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
   nbki: {
+    exchangeStatus: () => request<NbkiExchangeStatus>("GET", {entity: "nbki", action: "exchange_status"}),
+    exchangeAction: <T = {success: boolean}>(action: string, data: Record<string, unknown> = {}) => request<T>("POST", undefined, {entity: "nbki", ...data, action}),
     outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
     changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
     readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
@@ -2188,3 +2190,15 @@ export interface AgentProfile {
 }
 
 export default api;
+
+export type NbkiExchangeCertificate = {der_base64:string; subject:string; thumbprint:string; valid_until:string};
+export type NbkiExchangeConfig = {
+  signer_thumbprint?:string; tls_thumbprint?:string; signature_mode?:string; package_suffix?:string;
+  transport?:string; upload_url?:string; receipts_url?:string; auto_receive?:boolean;
+  recipient?:NbkiExchangeCertificate; receipt_signer?:NbkiExchangeCertificate;
+};
+export type NbkiExchangeStatus = {
+  config:NbkiExchangeConfig;
+  packages:{id:number;file_name:string;reg_number:string;event_ids:number[];status:string;error?:string;encrypted_name?:string;created_at:string}[];
+  agents:{id:number;name:string;active:boolean;last_seen_at?:string;diagnostic:{error?:string;receipt_error?:string;certificates?:{thumbprint:string;subject:string;valid_until:string}[]}}[];
+};

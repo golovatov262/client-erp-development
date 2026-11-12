@@ -1,0 +1,33 @@
+CRM NBKI Windows component
+
+Requirements: Windows PowerShell 5.1, CryptoPro CSP and CryptoPro CAdES COM;
+valid certificate with private key in the current user's Windows store.
+
+1. Extract this archive into a local directory.
+2. In CRM > Administration > NBKI > Signing and exchange, create an agent key.
+3. Run Install-NbkiAgent.ps1 -CrmUrl "https://YOUR-CRM-HOST/api" as the same
+   Windows user who owns the private-key container. Paste the key when asked.
+4. The token is protected with Windows DPAPI. It is not a private signing key.
+5. The scheduled task starts at user logon and checks CRM every 60 seconds.
+   Windows must remain running and the user must remain logged on.
+6. Select your certificate from the list reported by the component in CRM.
+   Upload the CURRENT NBKI encryption and receipt-verification certificates.
+7. Configure signature format and package extension according to YOUR NBKI
+   exchange agreement. The default performs preparation only, without upload.
+8. The supplied network adapter implements HTTPS WebDAV with client certificate:
+   PUT (upload), PROPFIND Depth:1 (list receipts), GET (download receipts).
+   Enable it ONLY after confirming that NBKI exposes this protocol for your
+   connection. An HTML upload page or a different API requires another adapter.
+9. The component never disables TLS checks, changes system security settings,
+   modifies PowerShell execution policy, or transfers the private key to CRM.
+   If local policy requires signed scripts, follow your organization's process
+   for signing/approving these scripts before running the installer.
+10. A failed/uncertain HTTP upload is not retried automatically. Check NBKI first.
+    Verified receipts can resolve an uncertain delivery without re-sending.
+
+Current validation: queue/receipt integration, ZIP and DAV parsing tested.
+Actual CryptoPro signing, encryption and mutual TLS must be checked on Windows
+with the registered certificates before the first production transmission.
+
+Removal: revoke the component's key in CRM, stop and remove the scheduled task
+"CRM NBKI Exchange". Local configuration is in %LOCALAPPDATA%\CRM-NBKI.

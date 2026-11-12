@@ -107,6 +107,13 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
             'source_complete': bool(uid and occurred_at and (components_match if source_type=='loan_payment' else digest)),
             'readiness': assess_event_generation(cur, org_id, event_id),
         })
+    cur.execute("""SELECT id,event_ids FROM nbki_exchange_packages WHERE org_id=%s
+        AND status IN ('queued','processing','prepared','sending','delivery_unknown','sent')""", (org_id,))
+    reserved = {eid:pid for pid,ids in cur.fetchall() for eid in ids}
+    for row in rows:
+        if row['id'] in reserved:
+            row['readiness'] = dict(row['readiness'], can_generate_xml=False, xml_ready=False,
+                                    blockers=[f"Событие включено в пакет обмена №{reserved[row['id']]}"])
     cur.execute('SELECT i.loan_id,l.contract_no,i.reason FROM nbki_debt_scan_issues i JOIN loans l ON l.id=i.loan_id WHERE i.org_id=%s ORDER BY i.loan_id', (org_id,))
     scan_issues = [dict(loan_id=r[0],contract_no=r[1],reason=r[2]) for r in cur.fetchall()]
     return {'total': total, 'rows': rows, 'debt_scan_issues':scan_issues,
