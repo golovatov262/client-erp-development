@@ -1,7 +1,7 @@
-"""Capture changed debt only after previous-day bank statements are posted."""
+"""Capture debt changes from posted CRM operations, independent of bank import."""
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import psycopg2
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -11,45 +11,6 @@ from backend.nbki_debt_changes import review_debt_change, evidence_state, initia
 
 def signature(evidence):
     return evidence_state(evidence)
-
-
-def bank_posting_blocker(cur, org_id, now):
-    """Require a completed previous-day statement before reading financial state.
-
-    SHARE conflicts with insertion/update of bank_sync_log. The email importer
-    records its running state before posting payments; keep this lock through
-    the individual snapshot transaction to close the check/start race.
-    """
-    cur.execute('LOCK TABLE bank_sync_log IN SHARE MODE')
-    # Historical abandoned log entries are not today's import; a fresh
-    # successful run and complete statement coverage are required below.
-    midnight = now.astimezone(MSK).replace(hour=0,minute=0,second=0,microsecond=0)
-    cur.execute("SELECT EXISTS (SELECT 1 FROM bank_sync_log WHERE status='running' AND started_at AT TIME ZONE 'UTC'>=%s)", (midnight,))
-    if cur.fetchone()[0]:
-        return 'Ожидание БКИ: загрузка или разнесение банковской выписки ещё выполняется'
-    cur.execute("SELECT status,finished_at AT TIME ZONE 'UTC' FROM bank_sync_log ORDER BY id DESC LIMIT 1")
-    last = cur.fetchone()
-    today = now.astimezone(MSK).date()
-    if not last or last[0] != 'ok' or not last[1] or last[1].astimezone(MSK).date() != today:
-        return 'Ожидание БКИ: нет успешного завершения загрузки банковской выписки за сегодня'
-    yesterday = today - timedelta(days=1)
-    cur.execute("""SELECT c.id,s.id,s.status FROM bank_connections c
-        LEFT JOIN bank_statements s ON s.connection_id=c.id AND s.statement_date=%s
-        WHERE c.org_id=%s AND c.is_active ORDER BY c.id""", (yesterday,org_id))
-    statements = cur.fetchall()
-    if not statements or any(r[1] is None or r[2] != 'loaded' for r in statements):
-        return f'Ожидание БКИ: не получены выписки по всем активным счетам за {yesterday:%d.%m.%Y}'
-    cur.execute("""SELECT COUNT(*) FROM bank_transactions t
-        JOIN bank_statements s ON s.id=t.statement_id
-        JOIN bank_connections c ON c.id=s.connection_id
-        WHERE c.org_id=%s AND c.is_active AND s.statement_date=%s
-          AND t.direction='CREDIT' AND t.amount>0
-          AND (t.matched_entity='loan' OR t.matched_entity IS NULL)
-          AND (t.match_status<>'applied' OR t.payment_id IS NULL)""", (org_id,yesterday))
-    unresolved = cur.fetchone()[0]
-    if unresolved:
-        return f'Ожидание БКИ: за {yesterday:%d.%m.%Y} не разнесено поступлений по займам или не определено назначение: {unresolved}'
-    return None
 
 
 def run(conn):
@@ -73,9 +34,6 @@ def run(conn):
                 with conn.cursor() as cur:
                     cur.execute('SELECT id FROM loans WHERE id=%s FOR UPDATE',(lid,))
                     when = datetime.now(MSK).replace(microsecond=0)
-                    waiting = bank_posting_blocker(cur,org,when)
-                    if waiting:
-                        raise ValueError(waiting)
                     state = capture(cur,lid,when)
                     # New/unmatched loans are outside this existing-obligation workflow.
                     if not state.get('uid'):

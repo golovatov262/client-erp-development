@@ -1,6 +1,6 @@
 [Unit]
 Description=CRM daily NBKI debt change snapshots
-After=client-erp.service client-erp-bank-sync.service
+After=client-erp.service
 
 [Service]
 Type=oneshot

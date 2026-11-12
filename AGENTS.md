@@ -10,3 +10,10 @@
 - Frontend-only changes require rebuilding and synchronizing `dist`; they do not require restarting `client-erp.service`.
 - Backend changes require migration application where applicable, followed by a restart and health check of `client-erp.service`.
 - Before enabling a deployment from GitHub, ensure `main` contains the current production source so an older checkout cannot overwrite RU_VPS.
+
+# NBKI accounting source rule (confirmed 2026-11-12)
+
+- A payment event is created from a payment posted in CRM, including a payment manually reviewed and entered by a manager. A bank-statement row alone is not a payment event.
+- Missing, unmatched, unposted or unidentified bank-statement rows must not block NBKI event creation or XML generation. Do not require successful bank import, statement coverage or all statement rows to be matched as an NBKI prerequisite.
+- Debt amounts and event dates come from CRM accounting and frozen operation evidence. Preserve the loan transaction lock and financial/XSD checks; never infer a payment from an unposted statement row.
+- Debt-change reporting (event 2.3), payment reporting, and bank-import status are distinct concerns. Do not describe debt snapshots as new payments or as confirmed NBKI acceptance.
