@@ -110,7 +110,10 @@ def ensure_ready(config):
 
 
 def reserved(cur, org, ids):
-    from .nbki_reporting_policy import paired_ids
+    if __package__:
+        from .nbki_reporting_policy import paired_ids
+    else:
+        from nbki_reporting_policy import paired_ids
     ids = paired_ids(cur,org,[int(i) for i in ids])
     cur.execute('''SELECT id FROM nbki_exchange_packages WHERE org_id=%s
         AND event_ids && %s::bigint[] AND status=ANY(%s) LIMIT 1''', (org,ids,list(ACTIVE)))
@@ -146,8 +149,14 @@ def admin(cur, conn, org, method, body, actor):
         cur.execute('UPDATE nbki_exchange_agents SET active=false WHERE org_id=%s AND id=%s',(org,int(body['id'])))
         result = {'success':True}
     elif action == 'exchange_prepare':
-        from .nbki_event23_xml import build_event23_batch_xml
-        from .nbki_reporting_policy import paired_ids
+        if __package__:
+            from .nbki_event23_xml import build_event23_batch_xml
+        else:
+            from nbki_event23_xml import build_event23_batch_xml
+        if __package__:
+            from .nbki_reporting_policy import paired_ids
+        else:
+            from nbki_reporting_policy import paired_ids
         config = settings(cur,org);ensure_ready(config)
         ids = list(dict.fromkeys(int(i) for i in body.get('event_ids',[])))
         if not ids or len(ids)>100:
@@ -249,7 +258,10 @@ def agent(cur, conn, token, method, body):
             result={'success':True}
         elif action=='sent' and status in ('sending','sent','completed'):
             if status=='sending':
-                from .nbki_delivery import import_delivery_payloads
+                if __package__:
+                    from .nbki_delivery import import_delivery_payloads
+                else:
+                    from nbki_delivery import import_delivery_payloads
                 import_delivery_payloads(conn,[bytes(raw)],[],org)
                 cur.execute("UPDATE nbki_exchange_packages SET status='sent',error=NULL,updated_at=now() WHERE id=%s",(int(body['id']),))
             result={'success':True}
@@ -263,8 +275,14 @@ def agent(cur, conn, token, method, body):
 
 
 def accept_receipt(cur,conn,org,aid,body):
-    from .nbki_import import parse_receipt_zip
-    from .nbki_delivery import import_delivery_payloads
+    if __package__:
+        from .nbki_import import parse_receipt_zip
+    else:
+        from nbki_import import parse_receipt_zip
+    if __package__:
+        from .nbki_delivery import import_delivery_payloads
+    else:
+        from nbki_delivery import import_delivery_payloads
     raw=decode(body['content_base64'],2*1024*1024);receipt_archive(raw)
     encrypted=decode(body['encrypted_base64']);evidence=body.get('evidence') or {}
     config=settings(cur,org)
