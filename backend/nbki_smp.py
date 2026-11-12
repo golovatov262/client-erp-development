@@ -32,6 +32,25 @@ def _ceil_ruble(value: Decimal) -> int:
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
+def _matured_smp(result, debt, snapshot=False):
+    if not debt.get('matured_at') or money(debt.get('term_principal')) != ZERO:
+        result['issues'].append('Срок истёк, но полный остаток просроченной задолженности не подтверждён')
+        return result
+    overdue = money(debt['overdue_principal']) + money(debt['overdue_interest'])
+    penalty = money(debt['penalty_candidate']['remaining'])
+    # 758-П, appendix 1: after maturity SMP equals all overdue claims.
+    total = _ceil_ruble(overdue + penalty)
+    result.update(status=('candidate_from_posting_snapshot_schedule' if snapshot else 'candidate_from_crm_schedule'),
+                  basis='758-П, приложение 1: после окончания срока ВСП равен просроченной задолженности',
+                  months_uncapped=0, months_cap48=0, remaining_schedule_payments='0.00',
+                  remaining_schedule_principal='0.00', expected_term_principal='0.00',
+                  principal_difference='0.00', principal_reconciled=True,
+                  overdue_principal_interest=str(overdue), penalty_candidate=str(penalty),
+                  value_without_penalty_uncapped=total, value_without_penalty_cap48=total,
+                  value_with_penalty_uncapped=total, value_with_penalty_cap48=total)
+    return result
+
+
 def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
     result = {'status': 'unavailable', 'basis': 'Пункт 5 приложения 1 к 758-П; оставшиеся платежи графика CRM',
               'months_uncapped': None, 'months_cap48': None,
@@ -53,8 +72,7 @@ def preview_smp(cur, loan_id: int, event_date, crm_debt: dict) -> dict:
     end_date = loan[0]
     months = remaining_months(event_date, end_date)
     if months <= 0:
-        result['issues'].append('Срок обязательства истёк; нужен отдельный сценарий ВСП')
-        return result
+        return _matured_smp(result, crm_debt)
     cur.execute("""SELECT s.id,s.payment_date,s.payment_amount,s.principal_amount,
         s.interest_amount,COALESCE(s.paid_amount,0),
         COALESCE(SUM(a.amount) FILTER (WHERE a.component='interest'),0),
@@ -160,8 +178,7 @@ def preview_smp_from_posting_snapshot(evidence: dict, expected_sha256: str,
         return result
     months = remaining_months(event_date, end_date)
     if months <= 0:
-        result['issues'].append('Срок обязательства истёк; нужен отдельный сценарий ВСП')
-        return result
+        return _matured_smp(result, crm_debt, snapshot=True)
 
     eligible = []
     for row in rows:

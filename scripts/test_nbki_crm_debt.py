@@ -24,6 +24,8 @@ class Cursor:
         self.query = query
 
     def fetchone(self):
+        if 'SELECT end_date,schedule_type,status' in self.query:
+            return (date(2030, 1, 31), 'annuity', 'active')
         if 'approved_loan_schedule_replacements' in self.query:
             return (self.replaced,)
         if 'SUM(penalty_amount)' in self.query:
@@ -183,7 +185,7 @@ class DebtTest(unittest.TestCase):
                 if 'FROM loan_payment_allocations a' in self.query:
                     return (0,)
                 if 'FROM loans WHERE' in self.query:
-                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
+                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active', date(2030, 1, 31))
                 if 'MAX(payment_date)' in self.query:
                     return (date(2026, 9, 30),)
                 return (143567, Decimal('9642.77'), Decimal('0'), Decimal('0'), Decimal('0'))
@@ -207,7 +209,7 @@ class DebtTest(unittest.TestCase):
                 if 'approved_loan_schedule_replacements' in self.query:
                     return (False,)
                 if 'FROM loans WHERE' in self.query:
-                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
+                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active', date(2030, 1, 31))
                 if 'MAX(payment_date)' in self.query:
                     return (date(2026, 9, 30),)
                 if 'FROM loan_schedule s LEFT JOIN loan_payment_allocations a' in self.query:
@@ -230,7 +232,7 @@ class DebtTest(unittest.TestCase):
                 if 'approved_loan_schedule_replacements' in self.query:
                     return (False,)
                 if 'FROM loans WHERE' in self.query:
-                    return (Decimal('100000'), Decimal('12'), 'annuity', date(2025, 1, 1), 'active')
+                    return (Decimal('100000'), Decimal('12'), 'annuity', date(2025, 1, 1), 'active', date(2030, 1, 31))
                 if 'MAX(payment_date)' in self.query:
                     return (date(2026, 9, 30),)
                 if 'FROM loan_payment_allocations a' in self.query:
@@ -268,7 +270,7 @@ class DebtTest(unittest.TestCase):
                 if 'FROM loan_payment_allocations a' in self.query:
                     return (0,)
                 if 'FROM loans WHERE' in self.query:
-                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active')
+                    return (Decimal('370600'), Decimal('36'), 'annuity', date(2025, 5, 29), 'active', date(2030, 1, 31))
                 if 'MAX(payment_date)' in self.query:
                     return (date(2026, 9, 30),)
                 return (143567, Decimal('9642.77'), Decimal('0'), Decimal('0'), Decimal('0'))

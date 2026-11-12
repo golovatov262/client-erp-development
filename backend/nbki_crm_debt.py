@@ -20,6 +20,45 @@ def _money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def _maturity(loan, last_due, event_date):
+    """Require agreement of contract and schedule before classifying all debt overdue."""
+    end = loan.get('end_date')
+    if not end or not last_due or loan.get('status') in ('holiday', 'holiday_pending'):
+        return None
+    end = date.fromisoformat(str(end)[:10])
+    if loan.get('schedule_type') not in ('annuity', 'end_of_term'):
+        return None
+    return end if last_due <= end < event_date else None
+
+
+def _apply_maturity(result, loan, last_due, event_date):
+    end = _maturity(loan, last_due, event_date)
+    if not end or result.get('status') not in ('calculated_from_current_crm', 'calculated_from_posting_snapshot'):
+        return result
+    residual = _money(result['term_principal'])
+    if residual > ZERO:
+        result['rows'].append({'schedule_id': None, 'due': end.isoformat(),
+                               'overdue_principal': str(residual), 'overdue_interest': '0.00',
+                               'basis': 'Остаток основного долга CRM к окончанию договора'})
+    result['overdue_principal'] = str(_money(result['overdue_principal']) + residual)
+    result['term_principal'] = '0.00'
+    result['matured_at'] = end.isoformat()
+    if result.get('penalty_candidate'):
+        result['penalty_candidate']['due_classification'] = 'overdue_after_contract_maturity'
+        result['penalty_candidate']['due_at'] = end.isoformat()
+    return result
+
+
+def _matured_interest(result, end, snapshot=False):
+    # All unpaid scheduled interest is already included in overdue_interest.
+    # This does not accrue any new, unposted post-maturity interest.
+    result.update(status=('candidate_from_posting_snapshot_formula' if snapshot else 'candidate_from_crm_formula'),
+                  basis='Срок договора истёк: неоплаченные проценты CRM включены в просрочку',
+                  period_start=end.isoformat(), accrued_before_payment='0.00',
+                  interest_covered_in_period='0.00', remaining_interest_candidate='0.00')
+    return result
+
+
 def _effective_latest_payment(cur, loan_id: int, event_date: date, payment_id: int) -> bool:
     """A later payment exists, but is authorized and proven to never touch
     any schedule row this event's debt/interest reconstruction depends on
@@ -126,7 +165,7 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
                        'due_at': last_due.isoformat(),
                        'due_classification': ('term_until_final_scheduled_payment'
                                               if last_due > event_date else 'review_after_final_due')}})
-    return result
+    return _apply_maturity(result, loan, last_due, event_date)
 
 
 def estimate_current_interest(cur, loan_id: int, payment_id: int,
@@ -153,13 +192,17 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
     if cur.fetchone()[0]:
         result['issues'].append('После даты события утверждён новый график: текущая строка процентов не является снимком на дату платежа')
         return result
-    cur.execute("""SELECT amount,rate,schedule_type,start_date,status
+    cur.execute("""SELECT amount,rate,schedule_type,start_date,status,end_date
         FROM loans WHERE id=%s""", (loan_id,))
     loan = cur.fetchone()
     if not loan:
         result['issues'].append('Договор займа не найден в CRM')
         return result
-    original, rate, schedule_type, start_date, status = loan
+    original, rate, schedule_type, start_date, status, end_date = loan
+    cur.execute("SELECT MAX(payment_date) FROM loan_schedule WHERE loan_id=%s", (loan_id,))
+    end = _maturity(dict(end_date=end_date, schedule_type=schedule_type, status=status), cur.fetchone()[0], event_date)
+    if end:
+        return _matured_interest(result, end)
     if schedule_type != 'annuity' or rate is None or original is None or status == 'holiday':
         result['issues'].append('Для этого типа графика метод фактических дней ещё не проверен')
         return result
@@ -272,6 +315,10 @@ def estimate_posting_snapshot_interest(cur, evidence: dict, expected_sha256: str
     after = evidence.get('after') or {}
     loan = after.get('loan') or {}
     schedule = after.get('schedule') or []
+    last_due = max((date.fromisoformat(str(r['payment_date'])[:10]) for r in schedule), default=None)
+    end = _maturity(loan, last_due, event_date)
+    if end:
+        return _matured_interest(result, end, snapshot=True)
     rate_value = loan.get('rate')
     start_value = loan.get('start_date')
     if (loan.get('schedule_type') != 'annuity' or rate_value is None or
@@ -549,7 +596,7 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
                 'reconciliation_note': decision[1]}
         else:
             result['status'] = 'review'
-            result['issues'].append('Пени или дата последнего платежа не согласованы с графиком CRM')
+            result['issues'].append(f'Пени CRM: начислено по графику {assessed_penalty}, погашено по платежам {paid_penalty}; остаток или срок оплаты не подтверждён')
     else:
         result['penalty_candidate'] = {
             'assessed_crm': str(assessed_penalty),
@@ -558,4 +605,8 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
             'due_at': last_due.isoformat(),
             'due_classification': ('term_until_final_scheduled_payment'
                                    if last_due > event_date else 'review_after_final_due')}
+    cur.execute("SELECT end_date,schedule_type,status FROM loans WHERE id=%s", (loan_id,))
+    terms = cur.fetchone()
+    if terms:
+        return _apply_maturity(result, dict(zip(('end_date','schedule_type','status'), terms)), last_due, event_date)
     return result

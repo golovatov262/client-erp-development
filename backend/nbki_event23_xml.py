@@ -166,6 +166,9 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     overdue_main = Decimal(debt['overdue_principal'])
     overdue_interest = Decimal(debt['overdue_interest'])
     penalty = Decimal(debt['penalty_candidate']['remaining'])
+    overdue_other = (penalty if debt['penalty_candidate'].get('due_classification') ==
+                     'overdue_after_contract_maturity' else Decimal('0.00'))
+    term_other = penalty - overdue_other
     total = due_main + due_interest + penalty + overdue_main + overdue_interest
     _add(group, 'exist_1' if total else 'exist_0')
     if total:
@@ -178,23 +181,25 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
         # no concept of an unconfirmed grace period to report otherwise.
         _add(d, 'graceUnconfExist_0')
         _add(d, 'currency', 'RUB')
-    if due_main + due_interest + penalty:
+    if due_main + due_interest + term_other:
         d = _add(group, 'FL_26_DebtDue')
         _add(d, 'debtDueExist_1')
         _add(d, 'debtDueStartDate', loan['start_date'])
-        for key, value in (('debtDueSum', due_main + due_interest + penalty),
+        for key, value in (('debtDueSum', due_main + due_interest + term_other),
                            ('debtDueMainSum', due_main), ('debtDuePercentSum', due_interest),
-                           ('debtDueOtherSum', penalty)):
+                           ('debtDueOtherSum', term_other)):
             _add(d, key, _money(value))
     elif total:
         _add(_add(group, 'FL_26_DebtDue'), 'debtDueExist_0')
     overdue = _add(group, 'FL_27_DebtOverdue')
     overdue_days = 0
-    if overdue_main + overdue_interest:
+    if overdue_main + overdue_interest + overdue_other:
         _add(overdue, 'missFact_1')
         overdue_dates = [date.fromisoformat(row['due']) for row in debt.get('rows', [])
                          if Decimal(row.get('overdue_principal', '0')) +
                          Decimal(row.get('overdue_interest', '0')) > 0]
+        if overdue_other > 0:
+            overdue_dates.append(date.fromisoformat(debt['penalty_candidate']['due_at']))
         first_overdue = debt.get('first_overdue_date') or (min(overdue_dates).isoformat() if overdue_dates else '-')
         overdue_days = ((date.fromisoformat(payment['date']) - date.fromisoformat(first_overdue)).days
                         if first_overdue != '-' else '-')
@@ -208,10 +213,10 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
                 if not dates:
                     raise ValueError(f'Нет подтверждённой даты пропущенного платежа: {tag}')
                 missed[tag] = max(dates).isoformat()
-        for key, value in (('debtOverdueSum', overdue_main + overdue_interest),
+        for key, value in (('debtOverdueSum', overdue_main + overdue_interest + overdue_other),
                            ('debtOverdueMainSum', overdue_main),
                            ('debtOverduePercentSum', overdue_interest),
-                           ('debtOverdueOtherSum', 0), ('debtOverdueStartDate', first_overdue),
+                           ('debtOverdueOtherSum', overdue_other), ('debtOverdueStartDate', first_overdue),
                            *missed.items(), ('missDuration', overdue_days), ('repaidMissDuration', 0)):
             _add(overdue, key, _money(value) if key in {
                 'debtOverdueSum', 'debtOverdueMainSum', 'debtOverduePercentSum',
