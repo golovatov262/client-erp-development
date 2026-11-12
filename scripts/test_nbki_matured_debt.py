@@ -4,7 +4,7 @@ import json
 import unittest
 from datetime import date
 from decimal import Decimal
-from backend.nbki_crm_debt import split_posting_snapshot_debt, estimate_posting_snapshot_interest, _maturity
+from backend.nbki_crm_debt import split_posting_snapshot_debt, estimate_posting_snapshot_interest, estimate_current_interest, _maturity
 from backend.nbki_debt_preview import preview_debt
 from backend.nbki_smp import preview_smp_from_posting_snapshot
 from scripts import test_nbki_lifecycle as fixtures
@@ -42,6 +42,28 @@ class MaturedDebtTests(unittest.TestCase):
                 smp = preview_smp_from_posting_snapshot(evidence, sha, 1, 2, date(2026,11,12), debt)
                 self.assertEqual(smp['value_without_penalty_uncapped'], 66796)
                 self.assertEqual(smp['remaining_schedule_payments'], '0.00')
+
+    def test_expired_interest_still_checks_payment_dates_and_target(self):
+        class Cursor:
+            payments = [(2, date(2026, 10, 1), Decimal('100'))]
+            def execute(self, sql, args):
+                self.sql = sql
+            def fetchone(self):
+                if 'approved_loan_schedule_replacements' in self.sql:
+                    return (False,)
+                if 'FROM loans' in self.sql:
+                    return (Decimal('1000'), Decimal('12'), 'end_of_term', date(2025,1,1), 'overdue', date(2026,9,30))
+                return (date(2026,9,30),)
+            def fetchall(self):
+                return self.payments
+        cur = Cursor()
+        def check():
+            return estimate_current_interest(cur, 1, 2, date(2026,11,12), latest_payment=True)
+        self.assertEqual(check()['remaining_interest_candidate'], '0.00')
+        cur.payments = [(2, date(2024,1,1), Decimal('100'))]
+        self.assertEqual(check()['status'], 'unavailable')
+        cur.payments = []
+        self.assertEqual(check()['status'], 'unavailable')
 
     def test_maturity_does_not_hide_invalid_accounting(self):
         evidence = self.evidence()

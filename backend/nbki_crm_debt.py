@@ -202,6 +202,18 @@ def estimate_current_interest(cur, loan_id: int, payment_id: int,
     cur.execute("SELECT MAX(payment_date) FROM loan_schedule WHERE loan_id=%s", (loan_id,))
     end = _maturity(dict(end_date=end_date, schedule_type=schedule_type, status=status), cur.fetchone()[0], event_date)
     if end:
+        cur.execute("""SELECT id,payment_date,principal_part FROM loan_payments
+            WHERE loan_id=%s AND (payment_date,id)<=(%s,%s)
+            ORDER BY payment_date,id""", (loan_id, event_date, payment_id))
+        payments = cur.fetchall()
+        if require_target and not any(p[0] == payment_id for p in payments):
+            result['issues'].append('Целевой платёж отсутствует в журнале CRM')
+            return result
+        if (not start_date or original is None or rate is None or Decimal(str(rate)) < ZERO or
+                any(p[2] is None or p[1] < start_date or _money(p[2]) < ZERO for p in payments) or
+                sum((_money(p[2]) for p in payments), ZERO) > _money(original) + CENT):
+            result['issues'].append('Некорректные даты или суммы в журнале CRM после окончания срока договора')
+            return result
         return _matured_interest(result, end)
     if schedule_type != 'annuity' or rate is None or original is None or status == 'holiday':
         result['issues'].append('Для этого типа графика метод фактических дней ещё не проверен')
