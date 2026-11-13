@@ -310,6 +310,11 @@ def agent(cur, conn, token, method, body):
             result={'success':True}
         elif action=='failed' and status in ('processing','prepared','sending'):
             state='delivery_unknown' if status=='sending' else 'failed'
+            if status=='sending' and body.get('response_base64'):
+                response=decode(body['response_base64'],1024*1024)
+                cur.execute("UPDATE nbki_exchange_packages SET evidence=evidence || %s::jsonb WHERE id=%s",
+                            (Json({'upload_response_base64':base64.b64encode(response).decode(),
+                                   'upload_response_sha256':digest(response)}),int(body['id'])))
             cur.execute('UPDATE nbki_exchange_packages SET status=%s,error=%s,updated_at=now() WHERE id=%s',
                         (state,str(body.get('error','Ошибка Windows-компонента'))[:1000],int(body['id'])))
             result={'success':True}

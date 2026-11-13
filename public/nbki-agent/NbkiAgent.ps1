@@ -263,6 +263,14 @@ function Upload-Content([byte[]]$payload, [string]$fileName) {
     $multipart.Add((New-Object Net.Http.StringContent('uploadGUTDF')), 'pathnm')
     return ,$multipart
 }
+function Save-UploadResponse([int]$packageId, [byte[]]$response) {
+    Add-Type -AssemblyName System.Security
+    $directory = Join-Path (Split-Path -Parent $ConfigPath) 'upload-responses'
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $path = Join-Path $directory ("package-{0}-{1}.bin" -f $packageId,[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'))
+    $encrypted = [Security.Cryptography.ProtectedData]::Protect($response, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [IO.File]::WriteAllBytes($path, $encrypted)
+}
 function Assert-UploadSuccess([byte[]]$response, [string]$fileName) {
     $text = [Text.Encoding]::UTF8.GetString($response).Trim()
     $pattern = '\ASuccess\s+The following files were successfully uploaded\s*:\s*' + [regex]::Escape($fileName) + '\s*\z'
@@ -325,8 +333,9 @@ $cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
 New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
 try {
  do {
-    $diagnostic = @{version='2.0'; build='2.0.2'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
+    $diagnostic = @{version='2.0'; build='2.0.3'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
     $job = $null
+    $uploadResponse = $null
     try {
         $diagnostic.stage = 'Read CurrentUser My certificates'
         $diagnostic.certificates = @(Local-Certificates)
@@ -364,6 +373,8 @@ try {
                 $diagnostic.stage = 'Send to NBKI'
                 Api @{action='sending'; id=$job.id; lease=$job.lease} | Out-Null
                 $response = Nbki-Request 'POST' ([Uri]$job.config.upload_url) $encrypted $job.config $job.encrypted_name
+                $uploadResponse = $response
+                Save-UploadResponse $job.id $response
                 Assert-UploadSuccess $response $job.encrypted_name
                 Api @{action='sent'; id=$job.id; lease=$job.lease; response_base64=[Convert]::ToBase64String($response)} | Out-Null
                 Write-Host "Package $($job.id): upload confirmed by NBKI. Awaiting receipts."
@@ -383,7 +394,13 @@ try {
     } catch {
         $diagnostic.error = $diagnostic.stage + ': ' + $_.Exception.Message
         $diagnostic.error_location = $_.ScriptStackTrace
-        if ($job) { try { Api @{action='failed'; id=$job.id; lease=$job.lease; error=$_.Exception.Message} | Out-Null } catch {} }
+        if ($job) {
+            $failure = @{action='failed'; id=$job.id; lease=$job.lease; error=$diagnostic.error}
+            if ($null -ne $uploadResponse -and $uploadResponse.Length -gt 0 -and $uploadResponse.Length -le 1MB) {
+                $failure.response_base64 = [Convert]::ToBase64String($uploadResponse)
+            }
+            try { Api $failure | Out-Null } catch { Write-Warning ('Could not save delivery error in CRM: '+$_.Exception.Message) }
+        }
         Write-Warning $diagnostic.error
     }
     # Heartbeat must not claim another job; report errors on the next poll.
