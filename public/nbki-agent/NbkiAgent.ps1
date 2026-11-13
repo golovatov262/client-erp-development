@@ -237,11 +237,12 @@ function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, [string]$fi
             '--cert',('CurrentUser\MY\'+$thumb),'--request',$method)
         $body = $null
         if ($method -eq 'POST') {
-            $content = Upload-Content $payload $fileName
-            try {
-                $arguments += @('--header',('Content-Type: '+$content.Headers.ContentType.ToString()),'--data-binary','@-')
-                $body = $content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-            } finally { $content.Dispose() }
+            if ($fileName -notmatch '^[A-Za-z0-9_]+\.zip\.(p7m|enc)$') { throw 'Invalid protected filename' }
+            # Let curl generate the multipart boundary and browser-compatible part headers.
+            # @- reads the encrypted file from binary stdin; filename is validated above.
+            $arguments += @('--form',('file=@-;filename='+$fileName+';type=application/octet-stream'),
+                '--form','pathnm=uploadGUTDF')
+            $body = $payload
         }
         $arguments += $uri.AbsoluteUri
         $result = Invoke-NbkiCurl $arguments $body
@@ -254,15 +255,6 @@ function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, [string]$fi
         return ,([IO.File]::ReadAllBytes($output))
     } finally { Remove-Item -LiteralPath $directory -Recurse -Force }
 }
-function Upload-Content([byte[]]$payload, [string]$fileName) {
-    if ($fileName -notmatch '^[A-Za-z0-9_]+\.zip\.(p7m|enc)$') { throw 'Invalid protected filename' }
-    $multipart = New-Object Net.Http.MultipartFormDataContent
-    $file = New-Object Net.Http.ByteArrayContent(,$payload)
-    $file.Headers.ContentType = New-Object Net.Http.Headers.MediaTypeHeaderValue('application/octet-stream')
-    $multipart.Add($file, 'file', $fileName)
-    $multipart.Add((New-Object Net.Http.StringContent('uploadGUTDF')), 'pathnm')
-    return ,$multipart
-}
 function Save-UploadResponse([int]$packageId, [byte[]]$response) {
     Add-Type -AssemblyName System.Security
     $directory = Join-Path (Split-Path -Parent $ConfigPath) 'upload-responses'
@@ -273,6 +265,9 @@ function Save-UploadResponse([int]$packageId, [byte[]]$response) {
 }
 function Assert-UploadSuccess([byte[]]$response, [string]$fileName) {
     $text = [Text.Encoding]::UTF8.GetString($response).Trim()
+    if ($text -in @('The parameter you entered is incorrect.', 'The parameter pathnm is not specified.')) {
+        throw ('NBKI rejected upload: '+$text)
+    }
     $pattern = '\ASuccess\s+The following files were successfully uploaded\s*:\s*' + [regex]::Escape($fileName) + '\s*\z'
     if ($text -cnotmatch $pattern) { throw 'NBKI did not confirm upload of this filename. Check delivery before retrying.' }
 }
@@ -333,7 +328,7 @@ $cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
 New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
 try {
  do {
-    $diagnostic = @{version='2.0'; build='2.0.3'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
+    $diagnostic = @{version='2.0'; build='2.0.4'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
     $job = $null
     $uploadResponse = $null
     try {

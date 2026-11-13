@@ -13,14 +13,8 @@ try {Verify-Receipt $bad 'expected'} catch {$blocked=$true}
 if(-not $blocked){throw 'Path traversal not blocked'}
 
 $name='QY01GG000001_20261113_120000.zip.p7m'
-$content=Upload-Content ([byte[]](1,2,3)) $name
-try {
-    if($content.Headers.ContentType.MediaType -ne 'multipart/form-data'){throw 'Wrong content type'}
-    $body=$content.ReadAsStringAsync().GetAwaiter().GetResult()
-    if($body -notmatch 'name="?file"?' -or $body -notmatch [regex]::Escape($name) -or $body -notmatch 'name="?pathnm"?' -or $body -notmatch 'uploadGUTDF'){throw 'Wrong multipart fields'}
-} finally {$content.Dispose()}
 Assert-UploadSuccess ([Text.Encoding]::UTF8.GetBytes("Success`r`nThe following files were successfully uploaded :`r`n$name`r`n")) $name
-foreach($text in @('The parameter pathnm is not specified.', 'Success', "Success`nThe following files were successfully uploaded :`nOTHER.zip.p7m", "Error: Success`nThe following files were successfully uploaded :`n$name")) {
+foreach($text in @('The parameter you entered is incorrect.', 'The parameter pathnm is not specified.', 'Success', "Success`nThe following files were successfully uploaded :`nOTHER.zip.p7m", "Error: Success`nThe following files were successfully uploaded :`n$name")) {
     $blocked=$false
     try{Assert-UploadSuccess ([Text.Encoding]::UTF8.GetBytes($text)) $name}catch{$blocked=$true}
     if(-not $blocked){throw 'HTTP 200 error or wrong filename accepted'}
@@ -67,9 +61,9 @@ function Invoke-NbkiCurl([string[]]$arguments,[byte[]]$payload) {
     if($arguments[$certIndex+1] -ne ('CurrentUser\MY\'+('A'*40))){throw 'Wrong TLS certificate selection'}
     $method=$arguments[[Array]::IndexOf($arguments,'--request')+1]
     if($method -eq 'POST') {
-        if($arguments[[Array]::IndexOf($arguments,'--data-binary')+1] -ne '@-'){throw 'Multipart is not sent as binary stdin'}
-        $text=[Text.Encoding]::UTF8.GetString($payload)
-        if($text -notmatch 'uploadGUTDF' -or $text -notmatch 'file' -or $text -notmatch [regex]::Escape($name)){throw 'Multipart body lost'}
+        if($arguments -contains '--data-binary' -or $arguments -contains '--header'){throw 'curl multipart overridden'}
+        if($arguments -notcontains ('file=@-;filename='+$name+';type=application/octet-stream') -or $arguments -notcontains 'pathnm=uploadGUTDF'){throw 'Wrong upload form'}
+        if(($payload -join ',') -notin @('1,2,3','1')){throw 'Encrypted file changed'}
     } elseif($null -ne $payload){throw 'GET sent a request body'}
     $output=$arguments[[Array]::IndexOf($arguments,'--output')+1]
     $script:lastCurlOutput=$output
