@@ -15,6 +15,7 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
   const [config,setConfig]=useState<NbkiExchangeConfig>({});
   const [recipient,setRecipient]=useState<File|null>(null);
   const [receipt,setReceipt]=useState<File|null>(null);
+  const [mchd,setMchd]=useState<File|null>(null);
   const [error,setError]=useState(''); const [message,setMessage]=useState('');
   const [busy,setBusy]=useState(false); const [token,setToken]=useState('');
   const [editing,setEditing]=useState(false);
@@ -25,7 +26,7 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
     const status=JSON.stringify(next.packages.map(p=>[p.id,p.status]));
     if(previousStatus.current && previousStatus.current!==status)notify.current();
     previousStatus.current=status;
-    if(initial)setConfig(next.config);
+    if(initial)setConfig({signature_mode:'detached',signature_profile:'CAdES-T',package_suffix:'.zip.p7m',transport:'disabled',...next.config});
   };
   useEffect(()=>{void refresh(true).catch(e=>setError(humanizeError(e)));
     const timer=setInterval(()=>void refresh().catch(e=>setError(humanizeError(e))),15000);
@@ -39,8 +40,9 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
     const payload:Record<string,unknown>={...config};
     if(recipient)payload.recipient_certificate=await encode(recipient);
     if(receipt)payload.receipt_certificate=await encode(receipt);
+    if(mchd)payload.mchd_base64=await encode(mchd);
     const result=await api.nbki.exchangeAction<{config:NbkiExchangeConfig}>('exchange_settings',payload);
-    setConfig(result.config);setRecipient(null);setReceipt(null);setEditing(false);setMessage('Настройки сохранены');
+    setConfig(result.config);setRecipient(null);setReceipt(null);setMchd(null);setEditing(false);setMessage('Настройки сохранены');
   });
   const prepare=()=>run(async()=>{
     const result=await api.nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:eventIds});
@@ -81,32 +83,34 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
           <label>Сертификат HTTPS-аутентификации (если отличается)
             <Input value={config.tls_thumbprint||''} onChange={e=>update('tls_thumbprint',e.target.value)} placeholder="По умолчанию — сертификат подписи"/>
           </label>
-          <label>Подпись по инструкции вашего подключения
-            <select className="w-full border rounded p-2" value={config.signature_mode||''} onChange={e=>update('signature_mode',e.target.value)}>
-              <option value="">Не настроено</option><option value="detached">CAdES-BES: XML и отдельная подпись в ZIP</option><option value="attached">CAdES-BES: присоединённая подпись в ZIP</option>
-            </select>
+          <p>Подпись: отсоединённая CAdES-T со штампом времени и сертификатом TSP. XML и подпись помещаются в ZIP32, архив шифруется ГОСТ 28147-89 в DER.</p>
+          <label>Адрес TSP-сервера аккредитованного УЦ
+            <Input value={config.tsp_url||''} onChange={e=>update('tsp_url',e.target.value)} placeholder="Адрес из базы знаний НБКИ / от вашего УЦ"/>
+            <span className="text-xs text-muted-foreground">Сертификат службы должен входить в список НБКИ или быть согласован с НБКИ.</span>
+          </label>
+          <label>Зарегистрированный в НБКИ пакет МЧД (если используется)
+            <Input type="file" accept=".zip" onChange={e=>{setMchd(e.target.files?.[0]||null);setEditing(true);}}/>
+            {config.mchd_base64&&<span>Пакет МЧД загружен. <button type="button" className="underline" onClick={()=>{update('mchd_base64','');setMchd(null);}}>Удалить из настройки</button></span>}
           </label>
           <label>Расширение защищённого пакета по инструкции НБКИ
             <select className="w-full border rounded p-2" value={config.package_suffix||''} onChange={e=>update('package_suffix',e.target.value)}>
-              <option value="">Не настроено</option>{['.zip','.zip.enc','.xml.zip.enc','.xml.sig.zip.enc'].map(s=><option key={s}>{s}</option>)}
+              {['.zip.p7m','.zip.enc'].map(s=><option key={s}>{s}</option>)}
             </select>
           </label>
           <label>Канал отправки
             <select className="w-full border rounded p-2" value={config.transport||'disabled'} onChange={e=>update('transport',e.target.value)}>
-              <option value="disabled">Подготовка файла без автоматической отправки</option><option value="webdav">HTTPS WebDAV (PUT / PROPFIND / GET)</option>
+              <option value="disabled">Подготовка файла без автоматической отправки</option><option value="nbki_https">HTTPS API НБКИ</option>
             </select>
           </label>
-          <p className="text-muted-foreground">WebDAV включается только если этот протокол подтверждён инструкцией НБКИ. Обычная страница загрузки файлов в браузере не является WebDAV-каталогом.</p>
-          <label>HTTPS-каталог для отправки<Input value={config.upload_url||''} onChange={e=>update('upload_url',e.target.value)} placeholder="https://…nbki.ru/…/"/></label>
-          <label>HTTPS-каталог квитанций<Input value={config.receipts_url||''} onChange={e=>update('receipts_url',e.target.value)} placeholder="https://…nbki.ru/…/"/></label>
-          <label className="flex gap-2 items-center"><input type="checkbox" checked={!!config.auto_receive} onChange={e=>update('auto_receive',e.target.checked)}/>Автоматически получать и проверять квитанции каждую минуту</label>
+          <p className="text-muted-foreground">Отправка: icrs.nbki.ru/inout/cgi-bin/uploadvb.cgi. Получение квитанций: icrs.nbki.ru/inout/outGUTDF/. После отправки CRM ожидает квитанцию о приёме файла, затем — результат обработки событий.</p>
+          <label className="flex gap-2 items-center"><input type="checkbox" checked={!!config.auto_receive} onChange={e=>update('auto_receive',e.target.checked)}/>Получать квитанции автоматически: ticket1 раз в минуту, ticket2 раз в 5 минут после положительного ticket1</label>
         </div>
         <Button className="mt-3" disabled={busy} onClick={save}>Сохранить настройки</Button>
       </details>
       <details><summary className="cursor-pointer font-medium">Подключение Windows-ПК</summary>
         <div className="space-y-3 pt-3">
-          <p>На ПК нужны КриптоПро CSP и компонент КриптоПро ЭЦП (CAdES COM). Ключ должен быть доступен текущему пользователю Windows. Компонент работает без открытого браузера.</p>
-          <a className="underline" href="/nbki-agent.zip" download>Скачать Windows-компонент</a>
+          <p>На ПК нужны КриптоПро CSP 5.0 R3 или новее, лицензия КриптоПро TSP Client, корневые сертификаты УЦ ЦБ и компонент КриптоПро ЭЦП (CAdES COM). Ключ должен быть доступен текущему пользователю Windows. Компонент работает без открытого браузера.</p>
+          <a className="underline" href="/nbki-agent.zip" download>Скачать Windows-компонент 2.0</a>
           <p>Распакуйте архив, создайте ключ подключения ниже и запустите установку из PowerShell под пользователем — владельцем ключа:</p>
           <code className="block break-all">{`.\Install-NbkiAgent.ps1 -CrmUrl "${window.location.origin}/api"`}</code>
           <p className="text-muted-foreground">Установщик не меняет политику выполнения скриптов и настройки безопасности. Если ваша политика требует подписи скрипта, установку выполняет администратор по правилам организации.</p>
@@ -119,9 +123,9 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
           </div>)}
         </div>
       </details>
-      <Button disabled={busy||editing||!available.length||!state?.config.recipient||!state?.config.signer_thumbprint||!state?.config.signature_mode||!state?.config.package_suffix} onClick={()=>{
+      <Button disabled={busy||editing||!available.length||!state?.config.recipient||!state?.config.signer_thumbprint||!state?.config.tsp_url||state?.config.signature_profile!=='CAdES-T'||!state?.config.package_suffix} onClick={()=>{
         if(available.length!==eventIds.length){void run(async()=>{const r=await api.nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:available});setMessage(`Пакет №${r.id} поставлен в очередь`);});}else void prepare();
-      }}>{state?.config.transport==='webdav'?'Подписать, зашифровать и отправить':'Подписать и зашифровать'} · {available.length} событий</Button>
+      }}>{state?.config.transport==='nbki_https'?'Подписать, зашифровать и отправить':'Подписать и зашифровать'} · {available.length} событий</Button>
       {editing&&<p>Сохраните настройки перед подготовкой пакета.</p>}
       {state?.packages.map(p=><div key={p.id} className="border-t pt-3 space-y-1">
         <div className="font-medium break-all">№{p.id} · {p.file_name}</div><div>{labels[p.status]||p.status} · {p.event_ids.length} событий</div>

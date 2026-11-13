@@ -2,7 +2,7 @@ import base64
 import io
 import unittest
 import zipfile
-from backend.nbki_exchange import directory_url, normalize_config, thumbprint, decode, receipt_archive
+from backend.nbki_exchange import directory_url, normalize_config, thumbprint, decode, receipt_archive, receipt_urls, UPLOAD_URL, upload_success
 
 
 class ExchangeValidationTests(unittest.TestCase):
@@ -15,10 +15,13 @@ class ExchangeValidationTests(unittest.TestCase):
     def test_profile_does_not_guess_signature_or_transport(self):
         config=normalize_config({}, {})
         self.assertEqual(config['transport'],'disabled')
-        self.assertEqual(config['signature_mode'],'')
-        self.assertEqual(config['package_suffix'],'')
+        self.assertEqual(config['signature_mode'],'detached')
+        self.assertEqual(config['signature_profile'],'CAdES-T')
+        self.assertEqual(config['upload_url'],UPLOAD_URL)
+        self.assertEqual(config['package_suffix'],'.zip.p7m')
         with self.assertRaises(ValueError): normalize_config({'transport':'webdav'}, {})
-        with self.assertRaises(ValueError): normalize_config({'signature_mode':'unknown'}, {})
+        with self.assertRaises(ValueError): normalize_config({'package_suffix':'.zip'}, {})
+        with self.assertRaises(ValueError): normalize_config({'tsp_url':'file:///key'}, {})
         self.assertNotIn('recipient',normalize_config({'recipient':{'thumbprint':'fake'}},{}))
 
     def test_thumbprint_and_size_limits(self):
@@ -38,3 +41,25 @@ class ExchangeValidationTests(unittest.TestCase):
         for entries in ([('ticket.xml',b'<x/>')], [('a/ticket.xml',b'<x/>'),('a/ticket.xml.sig',b'cms')],
                         [('ticket.xml',b'x'*(2*1024*1024+1)),('ticket.xml.sig',b'cms')]):
             with self.assertRaises(ValueError):receipt_archive(self.archive(entries))
+
+    def test_receipts_use_frozen_suffix_and_two_urls_only_for_ticket1(self):
+        first=receipt_urls('ABC_20261113_120000',1,'.zip.p7m')
+        self.assertEqual(len(first),2)
+        self.assertTrue(first[0]['encrypted'])
+        self.assertFalse(first[1]['encrypted'])
+        self.assertTrue(first[1]['url'].endswith('_ticket1.zip'))
+        second=receipt_urls('ABC_20261113_120000',2,'.zip.enc')
+        self.assertEqual(len(second),1)
+        self.assertTrue(second[0]['url'].endswith('_ticket2.zip.enc'))
+        with self.assertRaises(ValueError):receipt_urls('../secret',1,'.zip.enc')
+
+    def test_mchd_validation(self):
+        with self.assertRaises(ValueError):normalize_config({'mchd_base64':base64.b64encode(b'not zip').decode()}, {})
+        value=base64.b64encode(self.archive([('mchd.xml',b'xml'),('mchd.sig',b'signature')])).decode()
+        self.assertEqual(normalize_config({'mchd_base64':value},{})['mchd_base64'],value)
+
+    def test_http_200_is_not_delivery_confirmation(self):
+        name='R.zip.p7m'
+        self.assertTrue(upload_success('Success\r\nThe following files were successfully uploaded :\r\n'+name,name))
+        for response in ('Success','The parameter pathnm is not specified.', 'Success\nThe following files were successfully uploaded :\nOTHER.zip.p7m'):
+            self.assertFalse(upload_success(response,name))

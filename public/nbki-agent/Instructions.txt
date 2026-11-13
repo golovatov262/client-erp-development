@@ -1,33 +1,40 @@
-CRM NBKI Windows component
+Windows-компонент CRM НБКИ 2.0
 
-Requirements: Windows PowerShell 5.1, CryptoPro CSP and CryptoPro CAdES COM;
-valid certificate with private key in the current user's Windows store.
+Требования: Windows, PowerShell 5.1, КриптоПро CSP 5.0 R3 или новее,
+КриптоПро ЭЦП (CAdES COM), дополнительная лицензия КриптоПро TSP Client,
+корневые сертификаты УЦ ЦБ. Закрытый ключ остаётся у текущего пользователя
+Windows. ПК должен быть включён, пользователь должен войти в Windows.
 
-1. Extract this archive into a local directory.
-2. In CRM > Administration > NBKI > Signing and exchange, create an agent key.
-3. Run Install-NbkiAgent.ps1 -CrmUrl "https://YOUR-CRM-HOST/api" as the same
-   Windows user who owns the private-key container. Paste the key when asked.
-4. The token is protected with Windows DPAPI. It is not a private signing key.
-5. The scheduled task starts at user logon and checks CRM every 60 seconds.
-   Windows must remain running and the user must remain logged on.
-6. Select your certificate from the list reported by the component in CRM.
-   Upload the CURRENT NBKI encryption and receipt-verification certificates.
-7. Configure signature format and package extension according to YOUR NBKI
-   exchange agreement. The default performs preparation only, without upload.
-8. The supplied network adapter implements HTTPS WebDAV with client certificate:
-   PUT (upload), PROPFIND Depth:1 (list receipts), GET (download receipts).
-   Enable it ONLY after confirming that NBKI exposes this protocol for your
-   connection. An HTML upload page or a different API requires another adapter.
-9. The component never disables TLS checks, changes system security settings,
-   modifies PowerShell execution policy, or transfers the private key to CRM.
-   If local policy requires signed scripts, follow your organization's process
-   for signing/approving these scripts before running the installer.
-10. A failed/uncertain HTTP upload is not retried automatically. Check NBKI first.
-    Verified receipts can resolve an uncertain delivery without re-sending.
+1. Распакуйте архив. Если установлена версия 1.0, завершите задачу CRM NBKI Exchange
+   в планировщике и выполните установку новой версии.
+2. В настройках НБКИ CRM создайте ключ подключения ПК.
+3. В PowerShell под пользователем — владельцем ключа запустите:
+   .\Install-NbkiAgent.ps1 -CrmUrl "https://АДРЕС-CRM/api"
+   Введите ключ подключения по запросу установщика. Он хранится с защитой DPAPI.
+   Политика выполнения, доверенные корни и настройки безопасности не меняются.
+4. В CRM выберите сертификат подписанта; при необходимости отдельный сертификат
+   HTTPS-аутентификации. Загрузите действующие открытые сертификаты НБКИ для
+   шифрования и проверки квитанций. Укажите адрес TSP вашего аккредитованного УЦ
+   из базы знаний НБКИ. Сертификат TSP должен быть согласован с НБКИ.
+5. При использовании зарегистрированной в НБКИ МЧД загрузите тот же ZIP-пакет
+   МЧД в настройки: он будет вложен в каждый исходящий архив.
+6. Сначала выберите подготовку без отправки. После проверки на вашем Windows-ПК
+   включите HTTPS API и автоматическое получение квитанций.
 
-Current validation: queue/receipt integration, ZIP and DAV parsing tested.
-Actual CryptoPro signing, encryption and mutual TLS must be checked on Windows
-with the registered certificates before the first production transmission.
+Формат: XML + отдельная подпись CAdES-T (DER, с сертификатом TSP), ZIP32,
+шифрование ГОСТ 28147-89 сертификатом НБКИ, DER, расширение .zip.p7m / .zip.enc.
+Сбой TSP останавливает подготовку: подпись без штампа не отправляется.
+Отправка POST multipart/form-data: поле file и pathnm=uploadGUTDF.
+HTTP 200 принимается только при ответе Success с точным именем отправленного файла.
+При неопределённом результате автоматическая повторная отправка запрещена.
 
-Removal: revoke the component's key in CRM, stop and remove the scheduled task
-"CRM NBKI Exchange". Local configuration is in %LOCALAPPDATA%\CRM-NBKI.
+Квитанции: ticket1 — не чаще раза в минуту, проверяются зашифрованный файл
+и незашифрованный ZIP отказа. HTTP 404 означает, что квитанция ещё не готова.
+ticket2 — только после проверенного положительного ticket1, не чаще раза в 5 минут.
+Подпись квитанции проверяется сертификатом НБКИ. После получения квитанции
+повторное скачивание прекращается. Локальный кэш квитанций защищён DPAPI.
+
+Проверка TLS обязательна; перенаправления запрещены. Компонент не меняет
+настройки безопасности системы. Если политика организации запрещает запуск
+скриптов без подписи, обратитесь к своему администратору для штатной установки.
+Реальная работа КриптоПро и ГОСТ TLS проверяется на Windows с вашим сертификатом.

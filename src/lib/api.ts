@@ -2195,6 +2195,7 @@ export type NbkiExchangeCertificate = {der_base64:string; subject:string; thumbp
 export type NbkiExchangeConfig = {
   signer_thumbprint?:string; tls_thumbprint?:string; signature_mode?:string; package_suffix?:string;
   transport?:string; upload_url?:string; receipts_url?:string; auto_receive?:boolean;
+  tsp_url?:string; signature_profile?:string; mchd_base64?:string; protocol_version?:number;
   recipient?:NbkiExchangeCertificate; receipt_signer?:NbkiExchangeCertificate;
 };
 export type NbkiExchangeStatus = {

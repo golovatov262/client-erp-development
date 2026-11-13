@@ -1,4 +1,4 @@
-# Windows PowerShell 5.1; CryptoPro CSP and CAdES COM must be installed.
+﻿# Windows PowerShell 5.1; CryptoPro CSP and CAdES COM must be installed.
 param([string]$ConfigPath = "$env:LOCALAPPDATA\CRM-NBKI\config.json", [switch]$Once, [switch]$LibraryOnly)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
@@ -28,23 +28,38 @@ function Import-Cert($base64) {
     if (-not $cert.IsValid().Result) { throw 'NBKI certificate chain or validity check failed' }
     return $cert
 }
-function Cms-Sign([byte[]]$raw, $certificate, [bool]$detached) {
+function Cms-Sign([byte[]]$raw, $certificate, [string]$tsp) {
+    if (-not $tsp) { throw 'Configure accredited CA timestamp service first' }
     $signer = New-Object -ComObject CAdESCOM.CPSigner
     $signer.Certificate = $certificate; $signer.CheckCertificate = $true; $signer.Options = 2
+    $signer.TSAAddress = $tsp
     $data = New-Object -ComObject CAdESCOM.CadesSignedData
     $data.ContentEncoding = 1; $data.Content = [Convert]::ToBase64String($raw)
-    $signed = $data.SignCades($signer, 1, $detached)
-    Verify-Signature $raw $signed $certificate.Thumbprint $detached
+    $signed = $data.SignCades($signer, 5, $true)
+    Verify-Signature $raw $signed $certificate.Thumbprint $true 5
+    Assert-TimestampCertificate ([Convert]::FromBase64String($signed))
     return ,([Convert]::FromBase64String($signed))
 }
-function Verify-Signature([byte[]]$raw, [string]$signature, [string]$expected, [bool]$detached) {
+function Verify-Signature([byte[]]$raw, [string]$signature, [string]$expected, [bool]$detached, [int]$profile=1) {
     $data = New-Object -ComObject CAdESCOM.CadesSignedData
     $data.ContentEncoding = 1
     if ($detached) { $data.Content = [Convert]::ToBase64String($raw) }
-    $data.VerifyCades($signature, 1, $detached)
+    $data.VerifyCades($signature, $profile, $detached)
     if ($data.Signers.Count -ne 1 -or $data.Signers.Item(1).Certificate.Thumbprint -ne $expected) { throw 'Unexpected signature certificate' }
     if (-not $data.Signers.Item(1).Certificate.IsValid().Result) { throw 'Signing certificate is not valid' }
     if (-not $detached -and (Hash ([Convert]::FromBase64String($data.Content))) -ne (Hash $raw)) { throw 'Signed content differs from XML' }
+}
+function Assert-TimestampCertificate([byte[]]$signature) {
+    # Decode only here; CAdES COM above verifies the GOST signature and timestamp.
+    Add-Type -AssemblyName System.Security
+    $cms = New-Object Security.Cryptography.Pkcs.SignedCms
+    $cms.Decode($signature)
+    if ($cms.SignerInfos.Count -ne 1) { throw 'Expected one signer' }
+    $timestamps = @($cms.SignerInfos[0].UnsignedAttributes | Where-Object { $_.Oid.Value -eq '1.2.840.113549.1.9.16.2.14' })
+    if ($timestamps.Count -ne 1 -or $timestamps[0].Values.Count -ne 1) { throw 'Missing signature timestamp' }
+    $stamp = New-Object Security.Cryptography.Pkcs.SignedCms
+    $stamp.Decode($timestamps[0].Values[0].RawData)
+    if ($stamp.SignerInfos.Count -ne 1 -or -not $stamp.SignerInfos[0].Certificate) { throw 'Timestamp must include TSA certificate' }
 }
 function Make-Zip($entries) {
     $stream = New-Object IO.MemoryStream
@@ -61,6 +76,7 @@ function Make-Zip($entries) {
 function Encrypt-Zip([byte[]]$raw, $recipient) {
     $envelope = New-Object -ComObject CAdESCOM.CPEnvelopedData
     $envelope.ContentEncoding = 1; $envelope.Content = [Convert]::ToBase64String($raw)
+    $envelope.Algorithm.Name = 25 # GOST 28147-89, NBKI instruction figure 10
     $envelope.Recipients.Add($recipient)
     return ,([Convert]::FromBase64String($envelope.Encrypt(0)))
 }
@@ -70,8 +86,8 @@ function Decrypt-Zip([byte[]]$raw) {
     $envelope.Decrypt([Convert]::ToBase64String($raw))
     return ,([Convert]::FromBase64String($envelope.Content))
 }
-function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, $extraHeaders=@{}) {
-    if ($uri.Scheme -ne 'https' -or ($uri.Host -ne 'nbki.ru' -and -not $uri.Host.EndsWith('.nbki.ru')) -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'Invalid NBKI HTTPS URL' }
+function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, [string]$fileName) {
+    if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'icrs.nbki.ru' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'Invalid NBKI HTTPS URL' }
     $handler = New-Object Net.Http.HttpClientHandler
     $handler.AllowAutoRedirect = $false
     $thumb = $config.tls_thumbprint
@@ -82,40 +98,54 @@ function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, $extraHeade
     $client.Timeout = [TimeSpan]::FromSeconds(120); $client.MaxResponseContentBufferSize = 30MB
     $request = New-Object Net.Http.HttpRequestMessage((New-Object Net.Http.HttpMethod($method)), $uri)
     try {
-        foreach ($key in $extraHeaders.Keys) { $request.Headers.TryAddWithoutValidation($key, [string]$extraHeaders[$key]) | Out-Null }
-        if ($null -ne $payload) {
-            $request.Content = New-Object Net.Http.ByteArrayContent(,$payload)
-            $mime = if ($method -eq 'PROPFIND') { 'application/xml' } else { 'application/octet-stream' }
-            $request.Content.Headers.ContentType = New-Object Net.Http.Headers.MediaTypeHeaderValue($mime)
-        }
+        if ($method -eq 'POST') { $request.Content = Upload-Content $payload $fileName }
         $response = $client.SendAsync($request).GetAwaiter().GetResult()
         try {
+            if ($method -eq 'GET' -and [int]$response.StatusCode -eq 404) { return $null }
             if (-not $response.IsSuccessStatusCode) { throw "NBKI HTTP $([int]$response.StatusCode)" }
             return ,$response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
         } finally { $response.Dispose() }
     } finally { $request.Dispose(); $client.Dispose(); $handler.Dispose() }
 }
-function Receipt-Files($config, $registrations) {
-    $base = [Uri]$config.receipts_url
-    $body = [Text.Encoding]::UTF8.GetBytes('<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>')
-    $bytes = Nbki-Request 'PROPFIND' $base $body $config @{Depth='1'}
-    $settings = New-Object Xml.XmlReaderSettings; $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit; $settings.XmlResolver = $null
-    $stream = New-Object IO.MemoryStream(,$bytes); $reader = [Xml.XmlReader]::Create($stream,$settings)
-    $doc = New-Object Xml.XmlDocument; $doc.XmlResolver = $null
-    try { $doc.Load($reader) } finally { $reader.Dispose(); $stream.Dispose() }
-    $ns = New-Object Xml.XmlNamespaceManager($doc.NameTable); $ns.AddNamespace('d','DAV:')
-    $result = @()
-    foreach ($item in $doc.SelectNodes('//d:response',$ns)) {
-        $href = $item.SelectSingleNode('d:href',$ns)
-        if (-not $href -or $item.SelectSingleNode('.//d:collection',$ns)) { continue }
-        $uri = New-Object Uri($base, $href.InnerText)
-        if ($uri.Authority -ne $base.Authority -or -not $uri.AbsolutePath.StartsWith($base.AbsolutePath) -or $uri.Query -or $uri.Fragment) { continue }
-        if ($uri.AbsolutePath -notmatch '_ticket[12]\.[^/]+$') { continue }
-        $filename = [Uri]::UnescapeDataString(($uri.AbsolutePath -split '/')[-1])
-        $reg = $filename -replace '_ticket[12]\..*$', ''
-        if ($registrations -contains $reg) { $result += $uri }
+function Upload-Content([byte[]]$payload, [string]$fileName) {
+    if ($fileName -notmatch '^[A-Za-z0-9_]+\.zip\.(p7m|enc)$') { throw 'Invalid protected filename' }
+    $multipart = New-Object Net.Http.MultipartFormDataContent
+    $file = New-Object Net.Http.ByteArrayContent(,$payload)
+    $file.Headers.ContentType = New-Object Net.Http.Headers.MediaTypeHeaderValue('application/octet-stream')
+    $multipart.Add($file, 'file', $fileName)
+    $multipart.Add((New-Object Net.Http.StringContent('uploadGUTDF')), 'pathnm')
+    return ,$multipart
+}
+function Assert-UploadSuccess([byte[]]$response, [string]$fileName) {
+    $text = [Text.Encoding]::UTF8.GetString($response).Trim()
+    $pattern = '\ASuccess\s+The following files were successfully uploaded\s*:\s*' + [regex]::Escape($fileName) + '\s*\z'
+    if ($text -cnotmatch $pattern) { throw 'NBKI did not confirm upload of this filename. Check delivery before retrying.' }
+}
+function Receive-Task($task, $config) {
+    # Cache downloaded bytes using current-user DPAPI before processing. Retry CRM
+    # acknowledgement from cache, never download the same receipt after success.
+    $path = Join-Path $cacheDirectory ("receipt-{0}-{1}.txt" -f $task.id,$task.stage)
+    if (-not (Test-Path -LiteralPath $path)) {
+        foreach ($candidate in $task.urls) {
+            $incoming = Nbki-Request 'GET' ([Uri]$candidate.url) $null $config
+            if ($null -eq $incoming) { continue }
+            $record = @{incoming=[Convert]::ToBase64String($incoming); encrypted=[bool]$candidate.encrypted}
+            $protected = ConvertFrom-SecureString (ConvertTo-SecureString ($record | ConvertTo-Json -Compress) -AsPlainText -Force)
+            $temporary = $path + '.tmp'
+            [IO.File]::WriteAllText($temporary,$protected)
+            Move-Item -LiteralPath $temporary -Destination $path -Force
+            break
+        }
     }
-    return $result
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $secure = ConvertTo-SecureString ([IO.File]::ReadAllText($path))
+    $record = (New-Object Net.NetworkCredential('', $secure)).Password | ConvertFrom-Json
+    $incoming = [Convert]::FromBase64String($record.incoming)
+    $archive = if ($record.encrypted) { Decrypt-Zip $incoming } else { $incoming }
+    Verify-Receipt $archive $config.receipt_signer.thumbprint
+    Api @{action='receipt'; content_base64=[Convert]::ToBase64String($archive); encrypted_base64=[Convert]::ToBase64String($incoming); evidence=@{
+        signature_verified=$true; signer_thumbprint=$config.receipt_signer.thumbprint; archive_sha256=(Hash $archive)}} | Out-Null
+    # Keep cache until package processing is finished; it also handles lost CRM responses.
 }
 function Verify-Receipt([byte[]]$archive, $expected) {
     if ($archive.Length -gt 2MB) { throw 'Receipt archive too large' }
@@ -143,10 +173,11 @@ if ($crm.Scheme -ne 'https') { throw 'CRM requires HTTPS' }
 $headers = @{ 'X-Nbki-Agent-Key' = $token }
 $mutex = New-Object Threading.Mutex($false, 'Local\CRM-NBKI-Agent')
 if (-not $mutex.WaitOne(0)) { throw 'Another NBKI agent is already running in this session' }
-$received = @{}
+$cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
+New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
 try {
  do {
-    $diagnostic = @{version='1.0'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
+    $diagnostic = @{version='2.0'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
     $job = $null
     try {
         $store = New-Object -ComObject CAdESCOM.Store; $store.Open(2,'My',0)
@@ -166,35 +197,31 @@ try {
             if (-not $job.encrypted_base64) {
                 $raw = [Convert]::FromBase64String($job.xml_base64)
                 if ((Hash $raw) -ne $job.sha256) { throw 'XML checksum mismatch' }
-                $detached = $job.config.signature_mode -eq 'detached'
-                $signature = Cms-Sign $raw $cert $detached
+                if ($job.config.protocol_version -ne 2 -or $job.config.signature_profile -ne 'CAdES-T') { throw 'Unsupported package profile' }
+                $signature = Cms-Sign $raw $cert $job.config.tsp_url
                 $entries = @{}; $entries[$job.file_name+'.sig'] = $signature
-                if ($detached) { $entries[$job.file_name] = $raw }
+                $entries[$job.file_name] = $raw
+                if ($job.config.mchd_base64) { $entries['mchd.zip'] = [Convert]::FromBase64String($job.config.mchd_base64) }
                 $archive = Make-Zip $entries
                 $encrypted = Encrypt-Zip $archive $recipient
                 $prepared = Api @{action='prepared'; id=$job.id; lease=$job.lease; content_base64=[Convert]::ToBase64String($encrypted); evidence=@{
-                    signature_verified=$true; signer_thumbprint=$cert.Thumbprint; recipient_thumbprint=$recipient.Thumbprint; xml_sha256=(Hash $raw); archive_sha256=(Hash $archive)}}
+                    signature_verified=$true; signature_profile='CAdES-T'; timestamp_certificate_included=$true; signer_thumbprint=$cert.Thumbprint; recipient_thumbprint=$recipient.Thumbprint; xml_sha256=(Hash $raw); archive_sha256=(Hash $archive)}}
                 $job.encrypted_name = $prepared.file_name
             } else { $encrypted = [Convert]::FromBase64String($job.encrypted_base64) }
-            if ($job.config.transport -eq 'webdav') {
+            if ($job.config.transport -eq 'nbki_https') {
                 Api @{action='sending'; id=$job.id; lease=$job.lease} | Out-Null
-                $url = New-Object Uri([Uri]$job.config.upload_url, [Uri]::EscapeDataString($job.encrypted_name))
-                Nbki-Request 'PUT' $url $encrypted $job.config @{'If-None-Match'='*'} | Out-Null
-                Api @{action='sent'; id=$job.id; lease=$job.lease} | Out-Null
+                $response = Nbki-Request 'POST' ([Uri]$job.config.upload_url) $encrypted $job.config $job.encrypted_name
+                Assert-UploadSuccess $response $job.encrypted_name
+                Api @{action='sent'; id=$job.id; lease=$job.lease; response_base64=[Convert]::ToBase64String($response)} | Out-Null
             }
         }
-        if ($poll.config.auto_receive -and $poll.config.transport -eq 'webdav') {
+        $job = $null
+        if ($poll.config.auto_receive -and $poll.config.transport -eq 'nbki_https') {
             if (-not $poll.config.receipt_signer) { throw 'Configure NBKI receipt signing certificate first' }
-            foreach ($url in (Receipt-Files $poll.config $poll.receipt_reg_numbers)) {
+            foreach ($packageId in $poll.receipt_package_ids) {
                 try {
-                    $incoming = Nbki-Request 'GET' $url $null $poll.config
-                    $hash = Hash $incoming
-                    if ($received.ContainsKey($hash)) { continue }
-                    $archive = Decrypt-Zip $incoming
-                    Verify-Receipt $archive $poll.config.receipt_signer.thumbprint
-                    Api @{action='receipt'; content_base64=[Convert]::ToBase64String($archive); encrypted_base64=[Convert]::ToBase64String($incoming); evidence=@{
-                        signature_verified=$true; signer_thumbprint=$poll.config.receipt_signer.thumbprint; archive_sha256=(Hash $archive)}} | Out-Null
-                    $received[$hash]=$true
+                    $claim = Api @{action='receipt_poll'; id=$packageId}
+                    if ($claim.task) { Receive-Task $claim.task $poll.config }
                 } catch { $diagnostic.receipt_error = $_.Exception.Message }
             }
         }

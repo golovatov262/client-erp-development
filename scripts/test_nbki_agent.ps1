@@ -11,10 +11,21 @@ $bad=Make-Zip @{'../ticket.xml'=$raw; '../ticket.xml.sig'=[byte[]](1,2,3)}
 $blocked=$false
 try {Verify-Receipt $bad 'expected'} catch {$blocked=$true}
 if(-not $blocked){throw 'Path traversal not blocked'}
-# Mock transport, preserve the real URI filtering and DAV parsing.
-function Nbki-Request {
-    return ,([Text.Encoding]::UTF8.GetBytes('<d:multistatus xmlns:d="DAV:"><d:response><d:href>/receipts/R_ticket2.zip</d:href></d:response><d:response><d:href>https://evil.org/receipts/R_ticket2.zip</d:href></d:response><d:response><d:href>/receipts/OTHER_ticket2.zip</d:href></d:response></d:multistatus>'))
+
+$name='QY01GG000001_20261113_120000.zip.p7m'
+$content=Upload-Content ([byte[]](1,2,3)) $name
+try {
+    if($content.Headers.ContentType.MediaType -ne 'multipart/form-data'){throw 'Wrong content type'}
+    $body=$content.ReadAsStringAsync().GetAwaiter().GetResult()
+    if($body -notmatch 'name="?file"?' -or $body -notmatch [regex]::Escape($name) -or $body -notmatch 'name="?pathnm"?' -or $body -notmatch 'uploadGUTDF'){throw 'Wrong multipart fields'}
+} finally {$content.Dispose()}
+Assert-UploadSuccess ([Text.Encoding]::UTF8.GetBytes("Success`r`nThe following files were successfully uploaded :`r`n$name`r`n")) $name
+foreach($text in @('The parameter pathnm is not specified.', 'Success', "Success`nThe following files were successfully uploaded :`nOTHER.zip.p7m", "Error: Success`nThe following files were successfully uploaded :`n$name")) {
+    $blocked=$false
+    try{Assert-UploadSuccess ([Text.Encoding]::UTF8.GetBytes($text)) $name}catch{$blocked=$true}
+    if(-not $blocked){throw 'HTTP 200 error or wrong filename accepted'}
 }
-$files=@(Receipt-Files @{receipts_url='https://files.nbki.ru/receipts/'} @('R'))
-if($files.Count -ne 1 -or $files[0].Host -ne 'files.nbki.ru'){throw 'Unrelated files or external URLs included'}
-Write-Host 'ZIP32 packing, receipt structure, traversal prevention, DAV same-origin and package filtering: OK. CryptoPro COM and live TLS require Windows testing.'
+$blocked=$false
+try{Assert-TimestampCertificate ([byte[]](1,2,3))}catch{$blocked=$true}
+if(-not $blocked){throw 'Invalid timestamp accepted'}
+Write-Host 'PASS: ZIP32, receipt structure, traversal prevention, multipart fields, HTTP 200 errors and filename matching. Live GOST crypto/TLS requires Windows.'

@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives import serialization
 from psycopg2.extras import Json, RealDictCursor
 
 MAX_FILE = 25 * 1024 * 1024
+UPLOAD_URL = 'https://icrs.nbki.ru/inout/cgi-bin/uploadvb.cgi'
+RECEIPTS_URL = 'https://icrs.nbki.ru/inout/outGUTDF/'
 ACTIVE = ('queued', 'processing', 'prepared', 'sending', 'delivery_unknown', 'sent')
 
 
@@ -69,29 +71,42 @@ def normalize_config(body, previous):
     config = dict(previous)
     for key in ('signer_thumbprint', 'tls_thumbprint'):
         config[key] = thumbprint(body.get(key, config.get(key)))
-    for key in ('upload_url', 'receipts_url'):
-        config[key] = directory_url(body.get(key, config.get(key, '')))
-    mode = body.get('signature_mode', config.get('signature_mode', ''))
-    if mode not in ('', 'attached', 'detached'):
-        raise ValueError('Неверный формат подписи')
-    config['signature_mode'] = mode
+    config.update(upload_url=UPLOAD_URL, receipts_url=RECEIPTS_URL,
+                  signature_mode='detached', signature_profile='CAdES-T', protocol_version=2)
     transport = body.get('transport', config.get('transport', 'disabled'))
-    if transport not in ('disabled', 'webdav'):
-        raise ValueError('Этот протокол обмена пока не поддержан')
+    if transport not in ('disabled', 'nbki_https'):
+        raise ValueError('Используйте HTTPS API НБКИ; старый Windows-компонент необходимо обновить')
     config['transport'] = transport
     auto_receive = body.get('auto_receive', config.get('auto_receive', False))
     if not isinstance(auto_receive, bool):raise ValueError('Неверный признак автоматического получения')
     config['auto_receive'] = auto_receive
-    suffix = body.get('package_suffix', config.get('package_suffix', ''))
-    if suffix not in ('', '.zip', '.zip.enc', '.xml.zip.enc', '.xml.sig.zip.enc'):
-        raise ValueError('Выберите расширение из инструкции вашего канала обмена')
+    suffix = body.get('package_suffix', config.get('package_suffix', '.zip.p7m'))
+    if suffix not in ('.zip.enc', '.zip.p7m'):
+        raise ValueError('Допустимы расширения .zip.p7m и .zip.enc')
     config['package_suffix'] = suffix
+    tsp = str(body.get('tsp_url', config.get('tsp_url', ''))).strip()
+    if tsp:
+        u = urlsplit(tsp)
+        if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.fragment:
+            raise ValueError('Укажите адрес службы TSP вашего аккредитованного УЦ без пароля')
+    config['tsp_url'] = tsp
+    if 'mchd_base64' in body:
+        if body['mchd_base64']:
+            mchd = decode(body['mchd_base64'], 2*1024*1024)
+            if not zipfile.is_zipfile(io.BytesIO(mchd)):raise ValueError('МЧД: ожидается ZIP-архив')
+            with zipfile.ZipFile(io.BytesIO(mchd)) as z:
+                names = z.namelist()
+                if not names or len(names)>10 or any('/' in n or '\\' in n or not n.lower().endswith(('.xml','.sig')) for n in names):
+                    raise ValueError('МЧД: ожидается зарегистрированный ZIP с XML и SIG')
+                if sum(i.file_size for i in z.infolist())>2*1024*1024:
+                    raise ValueError('МЧД превышает допустимый размер')
+                if z.testzip():raise ValueError('Повреждённый ZIP МЧД')
+            config['mchd_base64'] = body['mchd_base64']
+        else:config.pop('mchd_base64',None)
     if body.get('recipient_certificate'):
         config['recipient'] = certificate(body['recipient_certificate'])
     if body.get('receipt_certificate'):
         config['receipt_signer'] = certificate(body['receipt_certificate'])
-    if transport != 'disabled' and not (config['upload_url'] and config['receipts_url']):
-        raise ValueError('Для обмена нужны адреса исходящего и входящего каталогов')
     return config
 
 
@@ -105,8 +120,10 @@ def ensure_ready(config):
     if not config.get('recipient') or not config.get('signer_thumbprint'):
         raise ValueError('Загрузите сертификат НБКИ и выберите сертификат подписанта')
     certificate(config['recipient']['der_base64'])
-    if not config.get('signature_mode') or not config.get('package_suffix'):
-        raise ValueError('Укажите подтверждённые формат подписи и расширение пакета')
+    if config.get('protocol_version')!=2 or config.get('signature_profile')!='CAdES-T' or not config.get('tsp_url'):
+        raise ValueError('Сохраните настройки CAdES-T и укажите адрес TSP из списка НБКИ')
+    if config.get('auto_receive') and not config.get('receipt_signer'):
+        raise ValueError('Для получения квитанций загрузите сертификат проверки подписи НБКИ')
 
 
 def reserved(cur, org, ids):
@@ -219,23 +236,42 @@ def agent(cur, conn, token, method, body):
         return {'success':True}
     if action=='poll':
         diagnostic=body.get('diagnostic') or {}
+        if diagnostic.get('version')!='2.0':raise ValueError('Обновите Windows-компонент НБКИ до версии 2.0')
         if len(json.dumps(diagnostic))>20000:raise ValueError('Слишком большой отчёт диагностики')
         cur.execute('UPDATE nbki_exchange_agents SET diagnostic=%s WHERE id=%s',(Json(diagnostic),aid))
         cur.execute("UPDATE nbki_exchange_packages SET status='delivery_unknown',error='Связь прервалась во время отправки. Автоматический повтор запрещён.' WHERE org_id=%s AND status='sending' AND lease_until<now()",(org,))
         cur.execute("UPDATE nbki_exchange_packages SET status='queued',lease_token=NULL WHERE org_id=%s AND status='processing' AND lease_until<now()",(org,))
-        cur.execute("""SELECT id FROM nbki_exchange_packages WHERE org_id=%s AND (status='queued' OR (status='prepared' AND lease_until<now() AND config->>'transport'='webdav'))
+        cur.execute("""SELECT id FROM nbki_exchange_packages WHERE org_id=%s AND config->>'protocol_version'='2' AND (status='queued' OR (status='prepared' AND lease_until<now() AND config->>'transport'='nbki_https'))
             ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1""",(org,))
         nextrow=cur.fetchone();job=None
         if nextrow:
             lease=secrets.token_urlsafe(24)
-            cur.execute("""UPDATE nbki_exchange_packages SET status='processing',agent_id=%s,lease_token=%s,
+            cur.execute("""UPDATE nbki_exchange_packages SET status=CASE WHEN encrypted_payload IS NULL THEN 'processing' ELSE 'prepared' END,agent_id=%s,lease_token=%s,
                 lease_until=now()+interval '10 minutes',updated_at=now() WHERE id=%s
                 RETURNING id,file_name,xml_payload,xml_sha256,config,encrypted_payload,encrypted_name""",(aid,lease,nextrow[0]))
             pid,name,raw,sha,config,encrypted,encname=cur.fetchone()
             job=dict(id=pid,file_name=name,xml_base64=base64.b64encode(bytes(raw)).decode(),sha256=sha,config=config,lease=lease,
                      encrypted_base64=base64.b64encode(bytes(encrypted)).decode() if encrypted else None,encrypted_name=encname)
-        cur.execute("SELECT reg_number FROM nbki_exchange_packages WHERE org_id=%s AND status IN ('sending','sent','delivery_unknown')", (org,))
-        result={'job':job,'config':settings(cur,org),'receipt_reg_numbers':[r[0] for r in cur.fetchall()]}
+        cur.execute("SELECT id FROM nbki_exchange_packages WHERE org_id=%s AND status IN ('sent','delivery_unknown') AND (receipt_next_poll_at IS NULL OR receipt_next_poll_at<=now())", (org,))
+        pending=[r[0] for r in cur.fetchall()]
+        result={'job':job,'config':settings(cur,org),'receipt_package_ids':pending}
+    elif action=='receipt_poll':
+        config=settings(cur,org)
+        if not config.get('auto_receive') or config.get('transport')!='nbki_https' or not config.get('receipt_signer'):
+            raise ValueError('Автоматическое получение квитанций не настроено')
+        cur.execute("""SELECT reg_number,config,receipt_stage FROM nbki_exchange_packages
+            WHERE id=%s AND org_id=%s AND status IN ('sent','delivery_unknown')
+            AND (receipt_next_poll_at IS NULL OR receipt_next_poll_at<=now()) FOR UPDATE""",(int(body['id']),org))
+        row=cur.fetchone()
+        if not row:result={'task':None}
+        else:
+            reg,frozen,stage=row
+            suffix=frozen.get('package_suffix')
+            if suffix not in ('.zip.enc','.zip.p7m'):raise ValueError('Неизвестное расширение исходного файла')
+            delay=60 if stage==1 else 300
+            cur.execute("UPDATE nbki_exchange_packages SET receipt_next_poll_at=now()+(%s * interval '1 second') WHERE id=%s",(delay,int(body['id'])))
+            result={'task':{'id':int(body['id']),'stage':stage,'reg_number':reg,
+                           'urls':receipt_urls(reg,stage,suffix)}}
     elif action=='receipt':
         result=accept_receipt(cur,conn,org,aid,body)
     else:
@@ -246,18 +282,25 @@ def agent(cur, conn, token, method, body):
         status,lease,config,name,raw=row
         if action=='prepared' and status=='processing':
             encrypted=decode(body['content_base64']);evidence=body.get('evidence') or {}
-            if evidence.get('xml_sha256')!=digest(bytes(raw)) or evidence.get('signer_thumbprint')!=config['signer_thumbprint'] or evidence.get('recipient_thumbprint')!=config['recipient']['thumbprint'] or evidence.get('signature_verified') is not True:
+            if evidence.get('xml_sha256')!=digest(bytes(raw)) or evidence.get('signer_thumbprint')!=config['signer_thumbprint'] or evidence.get('recipient_thumbprint')!=config['recipient']['thumbprint'] or evidence.get('signature_verified') is not True or evidence.get('signature_profile')!='CAdES-T' or evidence.get('timestamp_certificate_included') is not True:
                 raise ValueError('Криптографический отчёт не соответствует заданию')
             encname=name.rsplit('.',1)[0]+config['package_suffix']
             cur.execute("UPDATE nbki_exchange_packages SET status='prepared',encrypted_payload=%s,encrypted_sha256=%s,encrypted_name=%s,evidence=%s,updated_at=now() WHERE id=%s",
                         (encrypted,digest(encrypted),encname,Json(evidence),int(body['id'])))
             result={'file_name':encname}
         elif action=='sending' and status=='prepared':
-            if config.get('transport')!='webdav':raise ValueError('Протокол отправки не настроен')
-            cur.execute("UPDATE nbki_exchange_packages SET status='sending',lease_until=now()+interval '10 minutes',updated_at=now() WHERE id=%s",(int(body['id']),))
+            if config.get('transport')!='nbki_https':raise ValueError('Протокол отправки не настроен')
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('nbki-daily-upload-limit'))")
+            cur.execute("SELECT count(*) FROM nbki_exchange_packages WHERE upload_started_at >= (date_trunc('day', now() AT TIME ZONE 'Europe/Moscow') AT TIME ZONE 'Europe/Moscow')")
+            if cur.fetchone()[0]>=200:raise ValueError('Достигнут лимит НБКИ: 200 файлов в день')
+            cur.execute("UPDATE nbki_exchange_packages SET status='sending',upload_started_at=now(),lease_until=now()+interval '10 minutes',updated_at=now() WHERE id=%s",(int(body['id']),))
             result={'success':True}
         elif action=='sent' and status in ('sending','sent','completed'):
             if status=='sending':
+                response=decode(body.get('response_base64',''),65536).decode('utf-8')
+                if not upload_success(response,name.rsplit('.',1)[0]+config['package_suffix']):
+                    raise ValueError('НБКИ не подтвердило загрузку именно этого файла')
+                cur.execute("UPDATE nbki_exchange_packages SET evidence=evidence || %s::jsonb WHERE id=%s",(Json({'upload_response':response}),int(body['id'])))
                 if __package__:
                     from .nbki_delivery import import_delivery_payloads
                 else:
@@ -290,20 +333,38 @@ def accept_receipt(cur,conn,org,aid,body):
     if not trusted or evidence.get('signer_thumbprint')!=trusted or evidence.get('signature_verified') is not True or evidence.get('archive_sha256')!=digest(raw):
         raise ValueError('Нет подтверждения проверки подписи настроенным сертификатом НБКИ')
     receipt=parse_receipt_zip(raw)
-    cur.execute('SELECT id,xml_payload,status FROM nbki_exchange_packages WHERE org_id=%s AND reg_number=%s FOR UPDATE',(org,receipt['reg_number']))
+    cur.execute('SELECT id,xml_payload,status,receipt_stage FROM nbki_exchange_packages WHERE org_id=%s AND reg_number=%s FOR UPDATE',(org,receipt['reg_number']))
     job=cur.fetchone()
     if not job or job[2] not in ('sending','delivery_unknown','sent','completed'):raise ValueError('Квитанция не соответствует отправленному пакету CRM')
     evidence = dict(evidence, receipt_kind=receipt['kind'], receipt_status=receipt['status'])
     sha=digest(raw)
     cur.execute('SELECT id FROM nbki_exchange_receipts WHERE package_id=%s AND sha256=%s',(job[0],sha))
     if cur.fetchone():return {'success':True,'duplicate':True}
+    if receipt['kind']==2 and job[3]!=2:
+        raise ValueError('Сначала требуется положительный проверенный ticket1')
+    if receipt['kind']==1 and job[3]!=1:
+        raise ValueError('ticket1 уже обработан')
     result=import_delivery_payloads(conn,[bytes(job[1])],[raw],org)
     cur.execute('INSERT INTO nbki_exchange_receipts(org_id,package_id,sha256,payload,encrypted_payload,agent_id,evidence) VALUES (%s,%s,%s,%s,%s,%s,%s)',
                 (org,job[0],sha,raw,encrypted,aid,Json(evidence)))
-    cur.execute("UPDATE nbki_exchange_packages SET status=%s,error=NULL,updated_at=now() WHERE id=%s",
-                ('completed' if receipt['kind']==2 or receipt['status']=='rejected' else 'sent',job[0]))
+    complete = receipt['kind']==2 or receipt['status']=='rejected'
+    cur.execute("UPDATE nbki_exchange_packages SET status=%s,receipt_stage=%s,receipt_next_poll_at=NULL,error=NULL,updated_at=now() WHERE id=%s",
+                ('completed' if complete else 'sent',3 if complete else 2,job[0]))
     cur.execute('SELECT receipt_status,receipt_time,events_accepted,events_rejected FROM nbki_source_files WHERE org_id=%s AND reg_number=%s', (org,receipt['reg_number']))
     applied = cur.fetchone()
     if applied == (receipt['status'], receipt.get('receipt_time'), receipt.get('accepted'), receipt.get('rejected')):
         cur.execute('UPDATE nbki_source_files SET receipt_signature_verified=true WHERE org_id=%s AND reg_number=%s', (org,receipt['reg_number']))
     return {'success':True,**result}
+
+
+def receipt_urls(reg, stage, suffix):
+    if not re.fullmatch(r'[A-Za-z0-9_]+',reg) or stage not in (1,2) or suffix not in ('.zip.enc','.zip.p7m'):
+        raise ValueError('Некорректные реквизиты квитанции')
+    base=RECEIPTS_URL+reg+'_ticket'+str(stage)
+    urls=[{'url':base+suffix,'encrypted':True}]
+    if stage==1:urls.append({'url':base+'.zip','encrypted':False})
+    return urls
+
+
+def upload_success(response, filename):
+    return re.fullmatch(r'Success\s+The following files were successfully uploaded\s*:\s*'+re.escape(filename)+r'\s*', response.strip()) is not None
