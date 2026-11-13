@@ -1,9 +1,50 @@
 ﻿# Windows PowerShell 5.1; CryptoPro CSP and CAdES COM must be installed.
-param([string]$ConfigPath = "$env:LOCALAPPDATA\CRM-NBKI\config.json", [switch]$Once, [switch]$LibraryOnly)
+param([string]$ConfigPath = "$env:LOCALAPPDATA\CRM-NBKI\config.json", [switch]$Once, [switch]$LibraryOnly, [switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+# Keep raw COM objects inside managed code. Windows PowerShell's dynamic COM
+# binder can throw in GetTypeAttrForTypeInfo before the actual COM method runs.
+if (-not ('Nbki.ComDispatch' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+using System.Reflection;
+using System.Runtime.InteropServices;
+namespace Nbki {
+    public sealed class ComDispatch {
+        private readonly object target;
+        public ComDispatch(object value) {
+            if (value == null) throw new ArgumentNullException("value");
+            target = value;
+        }
+        public static ComDispatch Create(string progId) {
+            return new ComDispatch(Activator.CreateInstance(Type.GetTypeFromProgID(progId, true)));
+        }
+        private static object Unwrap(object value) {
+            ComDispatch proxy = value as ComDispatch;
+            return proxy == null ? value : proxy.target;
+        }
+        private object Invoke(string name, BindingFlags flags, object[] values) {
+            object[] arguments = new object[values.Length];
+            for (int i = 0; i < values.Length; i++) arguments[i] = Unwrap(values[i]);
+            try {
+                object result = target.GetType().InvokeMember(name,
+                    flags | BindingFlags.Public | BindingFlags.Instance | BindingFlags.OptionalParamBinding,
+                    null, target, arguments);
+                return result != null && Marshal.IsComObject(result) ? new ComDispatch(result) : result;
+            } catch (TargetInvocationException ex) {
+                throw new InvalidOperationException("CAdESCOM." + name + ": " + ex.InnerException.Message, ex.InnerException);
+            }
+        }
+        public object Call(string name, object[] arguments) { return Invoke(name, BindingFlags.InvokeMethod, arguments); }
+        public object Get(string name) { return Invoke(name, BindingFlags.GetProperty, new object[0]); }
+        public object Get(string name, object[] arguments) { return Invoke(name, BindingFlags.GetProperty, arguments); }
+        public void Set(string name, object value) { Invoke(name, BindingFlags.SetProperty, new object[] {value}); }
+    }
+}
+'@
+}
 function Api($body) {
     $body.entity = 'nbki_agent'
     Invoke-RestMethod -Uri $crm -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 15 -Compress))) -TimeoutSec 120 -MaximumRedirection 0
@@ -13,41 +54,62 @@ function Hash([byte[]]$bytes) {
     try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
 }
 function Find-Cert($thumb) {
-    $store = New-Object -ComObject CAdESCOM.Store
-    $store.Open(2, 'My', 0)
-    $found = $store.Certificates.Find(0, $thumb)
-    if ($found.Count -ne 1) { throw "Certificate not found: $thumb" }
-    $cert = $found.Item(1)
-    if (-not $cert.HasPrivateKey()) { throw 'Private key unavailable in this Windows account' }
-    if (-not $cert.IsValid().Result) { throw 'Certificate chain or validity check failed' }
-    return $cert
+    $store = [Nbki.ComDispatch]::Create('CAdESCOM.Store')
+    $store.Call('Open', @(2, 'My', 0)) | Out-Null
+    try {
+        $found = $store.Get('Certificates').Call('Find', @(0, $thumb, $false))
+        if ($found.Get('Count') -ne 1) { throw "Certificate not found: $thumb" }
+        $cert = $found.Get('Item', @(1))
+        if (-not $cert.Call('HasPrivateKey', @())) { throw 'Private key unavailable in this Windows account' }
+        if (-not $cert.Call('IsValid', @()).Get('Result')) { throw 'Certificate chain or validity check failed' }
+        return $cert
+    } finally { $store.Call('Close', @()) | Out-Null }
 }
 function Import-Cert($base64) {
-    $cert = New-Object -ComObject CAdESCOM.Certificate
-    $cert.Import($base64)
-    if (-not $cert.IsValid().Result) { throw 'NBKI certificate chain or validity check failed' }
+    $cert = [Nbki.ComDispatch]::Create('CAdESCOM.Certificate')
+    $cert.Call('Import', @($base64)) | Out-Null
+    if (-not $cert.Call('IsValid', @()).Get('Result')) { throw 'NBKI certificate chain or validity check failed' }
     return $cert
 }
 function Cms-Sign([byte[]]$raw, $certificate, [string]$tsp) {
     if (-not $tsp) { throw 'Configure accredited CA timestamp service first' }
-    $signer = New-Object -ComObject CAdESCOM.CPSigner
-    $signer.Certificate = $certificate; $signer.CheckCertificate = $true; $signer.Options = 2
-    $signer.TSAAddress = $tsp
-    $data = New-Object -ComObject CAdESCOM.CadesSignedData
-    $data.ContentEncoding = 1; $data.Content = [Convert]::ToBase64String($raw)
-    $signed = $data.SignCades($signer, 5, $true)
-    Verify-Signature $raw $signed $certificate.Thumbprint $true 5
+    $signer = [Nbki.ComDispatch]::Create('CAdESCOM.CPSigner')
+    $signer.Set('Certificate', $certificate)
+    $signer.Set('CheckCertificate', $true)
+    $signer.Set('Options', 2)
+    $signer.Set('TSAAddress', $tsp)
+    $data = [Nbki.ComDispatch]::Create('CAdESCOM.CadesSignedData')
+    $data.Set('ContentEncoding', 1)
+    $data.Set('Content', [Convert]::ToBase64String($raw))
+    $signed = $data.Call('SignCades', @($signer, 5, $true, 0))
+    Verify-Signature $raw $signed ($certificate.Get('Thumbprint')) $true 5
     Assert-TimestampCertificate ([Convert]::FromBase64String($signed))
     return ,([Convert]::FromBase64String($signed))
 }
 function Verify-Signature([byte[]]$raw, [string]$signature, [string]$expected, [bool]$detached, [int]$profile=1) {
-    $data = New-Object -ComObject CAdESCOM.CadesSignedData
-    $data.ContentEncoding = 1
-    if ($detached) { $data.Content = [Convert]::ToBase64String($raw) }
-    $data.VerifyCades($signature, $profile, $detached)
-    if ($data.Signers.Count -ne 1 -or $data.Signers.Item(1).Certificate.Thumbprint -ne $expected) { throw 'Unexpected signature certificate' }
-    if (-not $data.Signers.Item(1).Certificate.IsValid().Result) { throw 'Signing certificate is not valid' }
-    if (-not $detached -and (Hash ([Convert]::FromBase64String($data.Content))) -ne (Hash $raw)) { throw 'Signed content differs from XML' }
+    $data = [Nbki.ComDispatch]::Create('CAdESCOM.CadesSignedData')
+    $data.Set('ContentEncoding', 1)
+    if ($detached) { $data.Set('Content', [Convert]::ToBase64String($raw)) }
+    $data.Call('VerifyCades', @($signature, $profile, $detached)) | Out-Null
+    $signers = $data.Get('Signers')
+    if ($signers.Get('Count') -ne 1) { throw 'Expected one signature certificate' }
+    $cert = $signers.Get('Item', @(1)).Get('Certificate')
+    if ($cert.Get('Thumbprint') -ne $expected) { throw 'Unexpected signature certificate' }
+    if (-not $cert.Call('IsValid', @()).Get('Result')) { throw 'Signing certificate is not valid' }
+    if (-not $detached -and (Hash ([Convert]::FromBase64String($data.Get('Content')))) -ne (Hash $raw)) { throw 'Signed content differs from XML' }
+}
+function Local-Certificates {
+    $store = [Nbki.ComDispatch]::Create('CAdESCOM.Store')
+    $store.Call('Open', @(2, 'My', 0)) | Out-Null
+    try {
+        $certificates = $store.Get('Certificates')
+        for ($i=1; $i -le $certificates.Get('Count'); $i++) {
+            $cert = $certificates.Get('Item', @($i))
+            if ($cert.Call('HasPrivateKey', @()) -and $cert.Get('ValidToDate') -gt (Get-Date)) {
+                @{thumbprint=$cert.Get('Thumbprint'); subject=$cert.Get('SubjectName'); valid_until=[string]$cert.Get('ValidToDate')}
+            }
+        }
+    } finally { $store.Call('Close', @()) | Out-Null }
 }
 function Assert-TimestampCertificate([byte[]]$signature) {
     # Decode only here; CAdES COM above verifies the GOST signature and timestamp.
@@ -74,17 +136,18 @@ function Make-Zip($entries) {
     try { return ,$stream.ToArray() } finally { $stream.Dispose() }
 }
 function Encrypt-Zip([byte[]]$raw, $recipient) {
-    $envelope = New-Object -ComObject CAdESCOM.CPEnvelopedData
-    $envelope.ContentEncoding = 1; $envelope.Content = [Convert]::ToBase64String($raw)
-    $envelope.Algorithm.Name = 25 # GOST 28147-89, NBKI instruction figure 10
-    $envelope.Recipients.Add($recipient)
-    return ,([Convert]::FromBase64String($envelope.Encrypt(0)))
+    $envelope = [Nbki.ComDispatch]::Create('CAdESCOM.CPEnvelopedData')
+    $envelope.Set('ContentEncoding', 1)
+    $envelope.Set('Content', [Convert]::ToBase64String($raw))
+    $envelope.Get('Algorithm').Set('Name', 25) # GOST 28147-89
+    $envelope.Get('Recipients').Call('Add', @($recipient)) | Out-Null
+    return ,([Convert]::FromBase64String($envelope.Call('Encrypt', @(0))))
 }
 function Decrypt-Zip([byte[]]$raw) {
-    $envelope = New-Object -ComObject CAdESCOM.CPEnvelopedData
-    $envelope.ContentEncoding = 1
-    $envelope.Decrypt([Convert]::ToBase64String($raw))
-    return ,([Convert]::FromBase64String($envelope.Content))
+    $envelope = [Nbki.ComDispatch]::Create('CAdESCOM.CPEnvelopedData')
+    $envelope.Set('ContentEncoding', 1)
+    $envelope.Call('Decrypt', @([Convert]::ToBase64String($raw))) | Out-Null
+    return ,([Convert]::FromBase64String($envelope.Get('Content')))
 }
 function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, [string]$fileName) {
     if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'icrs.nbki.ru' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'Invalid NBKI HTTPS URL' }
@@ -177,38 +240,41 @@ $cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
 New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
 try {
  do {
-    $diagnostic = @{version='2.0'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
+    $diagnostic = @{version='2.0'; build='2.0.1'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
     $job = $null
     try {
-        $store = New-Object -ComObject CAdESCOM.Store; $store.Open(2,'My',0)
-        $certs = @()
-        for ($i=1; $i -le $store.Certificates.Count; $i++) {
-            $cert=$store.Certificates.Item($i)
-            if ($cert.HasPrivateKey() -and $cert.ValidToDate -gt (Get-Date)) {
-                $certs += @{thumbprint=$cert.Thumbprint; subject=$cert.SubjectName; valid_until=[string]$cert.ValidToDate}
-            }
+        $diagnostic.stage = 'Read CurrentUser My certificates'
+        $diagnostic.certificates = @(Local-Certificates)
+        if ($CheckOnly) {
+            Api @{action='heartbeat'; diagnostic=$diagnostic} | Out-Null
+            Write-Host "CHECK OK: certificate store and CRM connection. Certificates: $($diagnostic.certificates.Count). No files sent."
+            break
         }
-        $diagnostic.certificates = $certs; $store.Close()
+        $diagnostic.stage = 'Poll CRM queue'
         $poll = Api @{action='poll'; diagnostic=$diagnostic}; $job=$poll.job
         if ($job) {
+            $diagnostic.stage = 'Prepare package'
             $cert = Find-Cert $job.config.signer_thumbprint
             $recipient = Import-Cert $job.config.recipient.der_base64
-            if ($recipient.Thumbprint -ne $job.config.recipient.thumbprint) { throw 'Recipient certificate mismatch' }
+            if ($recipient.Get('Thumbprint') -ne $job.config.recipient.thumbprint) { throw 'Recipient certificate mismatch' }
             if (-not $job.encrypted_base64) {
                 $raw = [Convert]::FromBase64String($job.xml_base64)
                 if ((Hash $raw) -ne $job.sha256) { throw 'XML checksum mismatch' }
                 if ($job.config.protocol_version -ne 2 -or $job.config.signature_profile -ne 'CAdES-T') { throw 'Unsupported package profile' }
+                $diagnostic.stage = 'Sign XML with CAdES-T'
                 $signature = Cms-Sign $raw $cert $job.config.tsp_url
                 $entries = @{}; $entries[$job.file_name+'.sig'] = $signature
                 $entries[$job.file_name] = $raw
                 if ($job.config.mchd_base64) { $entries['mchd.zip'] = [Convert]::FromBase64String($job.config.mchd_base64) }
                 $archive = Make-Zip $entries
+                $diagnostic.stage = 'Encrypt ZIP'
                 $encrypted = Encrypt-Zip $archive $recipient
                 $prepared = Api @{action='prepared'; id=$job.id; lease=$job.lease; content_base64=[Convert]::ToBase64String($encrypted); evidence=@{
-                    signature_verified=$true; signature_profile='CAdES-T'; timestamp_certificate_included=$true; signer_thumbprint=$cert.Thumbprint; recipient_thumbprint=$recipient.Thumbprint; xml_sha256=(Hash $raw); archive_sha256=(Hash $archive)}}
+                    signature_verified=$true; signature_profile='CAdES-T'; timestamp_certificate_included=$true; signer_thumbprint=$cert.Get('Thumbprint'); recipient_thumbprint=$recipient.Get('Thumbprint'); xml_sha256=(Hash $raw); archive_sha256=(Hash $archive)}}
                 $job.encrypted_name = $prepared.file_name
             } else { $encrypted = [Convert]::FromBase64String($job.encrypted_base64) }
             if ($job.config.transport -eq 'nbki_https') {
+                $diagnostic.stage = 'Send to NBKI'
                 Api @{action='sending'; id=$job.id; lease=$job.lease} | Out-Null
                 $response = Nbki-Request 'POST' ([Uri]$job.config.upload_url) $encrypted $job.config $job.encrypted_name
                 Assert-UploadSuccess $response $job.encrypted_name
@@ -226,12 +292,13 @@ try {
             }
         }
     } catch {
-        $diagnostic.error = $_.Exception.Message
+        $diagnostic.error = $diagnostic.stage + ': ' + $_.Exception.Message
+        $diagnostic.error_location = $_.ScriptStackTrace
         if ($job) { try { Api @{action='failed'; id=$job.id; lease=$job.lease; error=$_.Exception.Message} | Out-Null } catch {} }
         Write-Warning $diagnostic.error
     }
     # Heartbeat must not claim another job; report errors on the next poll.
     try { Api @{action='heartbeat'; diagnostic=$diagnostic} | Out-Null } catch {}
-    if (-not $Once) { Start-Sleep -Seconds 60 }
- } while (-not $Once)
+    if (-not $Once -and -not $CheckOnly) { Start-Sleep -Seconds 60 }
+ } while (-not $Once -and -not $CheckOnly)
 } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }

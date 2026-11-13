@@ -29,3 +29,28 @@ $blocked=$false
 try{Assert-TimestampCertificate ([byte[]](1,2,3))}catch{$blocked=$true}
 if(-not $blocked){throw 'Invalid timestamp accepted'}
 Write-Host 'PASS: ZIP32, receipt structure, traversal prevention, multipart fields, HTTP 200 errors and filename matching. Live GOST crypto/TLS requires Windows.'
+
+# Exercise the same CLR reflection bridge on managed doubles on Linux; real COM
+# activation and GOST operations still require the user's Windows installation.
+Add-Type -TypeDefinition @'
+public sealed class NbkiBridgeFixture {
+    public string Content { get; set; }
+    public object Certificate { get; set; }
+    public int Count { get { return 2; } }
+    public string this[int index] { get { return "item" + index; } }
+    public string Combine(string text, int profile, bool detached) { return text + profile + detached; }
+    public void Fail() { throw new System.InvalidOperationException("fixture failure"); }
+}
+'@
+$fixture=New-Object NbkiBridgeFixture
+$bridge=New-Object Nbki.ComDispatch($fixture)
+$bridge.Set('Content','xml')
+if($bridge.Get('Content') -ne 'xml' -or $bridge.Get('Count') -ne 2){throw 'Bridge property access failed'}
+if($bridge.Get('Item',@(1)) -ne 'item1'){throw 'Indexed COM property arguments lost'}
+if($bridge.Call('Combine',@('profile',5,$true)) -ne 'profile5True'){throw 'Bridge method argument types lost'}
+$bridge.Set('Certificate',$bridge)
+if(-not [object]::ReferenceEquals($fixture.Certificate,$fixture)){throw 'Wrapped COM argument not unwrapped'}
+$blocked=$false
+try{$bridge.Call('Fail',@())}catch{$blocked=$_.Exception.Message -match 'fixture failure'}
+if(-not $blocked){throw 'Bridge suppressed original error'}
+Write-Host 'PASS: managed invocation bridge get/set/indexed property/method/object arguments/error propagation.'
