@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import NbkiExchangePanel from "./NbkiExchangePanel";
+import NbkiExchangePanel, { NbkiView } from "./NbkiExchangePanel";
 import api, { NbkiCrmEvents, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +42,7 @@ const defaultEventPeriod = () => {
 };
 
 const AdminNbkiTab = () => {
+  const [view, setView] = useState<NbkiView>("operations");
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [error, setError] = useState("");
   const [batchResult, setBatchResult] = useState("");
@@ -59,6 +60,7 @@ const AdminNbkiTab = () => {
   const [importResult, setImportResult] = useState<NbkiImportResult | null>(null);
 
   const refresh = async () => {
+    setError("");
     try {
       const [nextSummary, events] = await Promise.all([
         api.nbki.summary(),
@@ -148,43 +150,53 @@ const AdminNbkiTab = () => {
     finally { setConfirmingReceipt(false); }
   };
 
+  const periodPending = eventPeriodLoading || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to;
+  const readyCount = crmEvents?.rows.filter(e=>e.readiness.can_generate_xml).length ?? 0;
+  const blockedCount = crmEvents?.rows.filter(e=>!e.readiness.can_generate_xml).length ?? 0;
   return (
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">НБКИ · Эксперт Финанс</h2>
-          <p className="text-sm text-muted-foreground">Формирование файлов ГУТДФ для НБКИ по данным CRM</p>
+          <p className="text-sm text-muted-foreground">Подготовка событий, отправка и контроль принятия НБКИ</p>
         </div>
         <Button variant="outline" onClick={() => void refresh()}>Обновить</Button>
       </div>
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
-      <NbkiExchangePanel eventIds={(crmEvents?.rows||[]).filter(e=>e.readiness.can_generate_xml).map(e=>e.id)} onChange={()=>void refresh()} />
+      <nav aria-label="Разделы НБКИ" className="flex flex-wrap gap-1 border-b pb-3">
+        {([['operations','Текущая работа'],['history','История'],['settings','Настройки']] as const).map(([key,label])=><Button key={key} variant={view===key?'default':'ghost'} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</Button>)}
+      </nav>
+      <div hidden={view!=='operations'} className="space-y-4">
+      <p className="text-sm text-muted-foreground">Проверьте события → отправьте готовые → дождитесь результата. Принятые события уходят из очереди; отклонённые требуют исправления перед повторной отправкой.</p>
       <Card>
-        <CardHeader><CardTitle className="text-base">Исходящие события из CRM · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">1. Проверить события · {crmEvents?.total ?? "…"}</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p className="text-muted-foreground">Очередь берётся из CRM: включённые договоры со статусом «активный», «просроченный» или «кредитные каникулы». Принятые события и события, ожидающие квитанцию, повторно не выгружаются. После отказа исправьте указанные данные: изменённое событие включится в следующий пакет, если пройдёт проверку. Готовность рассчитывается теми же проверками, что используются при формировании XML; исключённые события показываются с номером договора и причиной. Для подписи и шифрования используйте блок обмена выше. Скачивание XML само по себе не означает отправку в НБКИ.</p>
-          <p className="text-muted-foreground">Задолженность формируется при платеже, наступлении срока платежа, возникновении просрочки и для обновления сведений не реже раза в 31 день. Связанные начисления и платёж включаются в пакет вместе. Ежедневных выгрузок только из-за роста процентов нет.</p>
+          <div className="flex flex-wrap gap-2"><Badge variant="secondary">Можно сформировать: {crmEvents?readyCount:'…'}</Badge><Badge variant="outline">Требуют исправления: {crmEvents?blockedCount:'…'}</Badge></div>
+          <p className="text-muted-foreground">Количество — это события CRM, а не файлы и не только платежи. Один пакет может содержать несколько событий. Принятые и уже отправленные события повторно не включаются.</p>
+          <details><summary className="cursor-pointer text-muted-foreground">Какие события попадают в очередь</summary><p className="mt-2 text-muted-foreground">Платежи, изменения условий и обеспечения, закрытие обязательств. Задолженность передаётся при платеже, наступлении срока платежа, возникновении просрочки и не реже раза в 31 день. Связанные начисления и платёж включаются вместе; ежедневных выгрузок только из-за роста процентов нет.</p></details>
           <div className="flex flex-wrap items-end gap-2">
             <label className="grid gap-1 text-xs text-muted-foreground">События с (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodFrom} onChange={event => setEventPeriodFrom(event.target.value)} /></label>
             <label className="grid gap-1 text-xs text-muted-foreground">по (МСК)<input className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" type="date" value={eventPeriodTo} onChange={event => setEventPeriodTo(event.target.value)} /></label>
             <Button variant="outline" onClick={() => void loadEventPeriod()} disabled={eventPeriodLoading || !eventPeriodFrom || !eventPeriodTo || eventPeriodFrom > eventPeriodTo}>
               {eventPeriodLoading ? "Загружаю события…" : "Показать период"}
             </Button>
-            <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.readiness.can_generate_xml) || buildingEventId !== null || buildingEventBatch || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to}>
-              {buildingEventBatch ? "Формирую пакет XML…" : "Выгрузить новые и исправленные события"}
-            </Button>
+
           </div>
           <p className="text-xs text-muted-foreground">Период: {loadedEventPeriod.from} — {loadedEventPeriod.to}; непринятых событий: {crmEvents?.total ?? "…"}. Незавершённые события до начала периода также показаны.</p>
           {crmEvents?.exported_through && <p className="text-xs text-muted-foreground">Последняя дата событий в отправленных файлах: {crmEvents.exported_through}. Новый период начинается со следующего дня.</p>}
+          <details className="py-2"><summary className="cursor-pointer text-muted-foreground">Дополнительно: скачать XML для ручной отправки</summary><p className="my-2 text-xs text-muted-foreground">Для обычной работы используйте «Отправить в НБКИ» ниже. Скачивание XML не отправляет файл и не подтверждает его приём.</p>            <Button variant="outline" onClick={() => void downloadEvent23Batch()} disabled={!crmEvents?.rows.some(event => event.readiness.can_generate_xml) || buildingEventId !== null || buildingEventBatch || eventPeriodFrom !== loadedEventPeriod.from || eventPeriodTo !== loadedEventPeriod.to}>
+              {buildingEventBatch ? "Формирую пакет XML…" : "Скачать XML готовых событий"}
+            </Button>
+          </details>
           {batchResult && <p role="status" className="whitespace-pre-wrap text-sm">{batchResult}</p>}
           <div className="max-h-96 overflow-y-auto">
             {!!crmEvents?.debt_scan_issues?.length && <div className="rounded-md border p-3 text-sm"><div className="font-medium">Требуют проверки данные задолженности</div>{crmEvents.debt_scan_issues.map(issue => <div key={issue.loan_id}>{issue.contract_no}: {issue.reason}</div>)}</div>}
             {crmEvents?.rows.map(event => <div key={event.id} className="border-b py-2">
               <Badge variant="outline" className="mr-2">{event.source_type.match(/FL_Event_([0-9_]+)/)?.[1]?.replace(/_/g, ".") || "2.3"} · {event.source_type.startsWith("guarantor_") ? "Поручитель" : "Заёмщик"}</Badge>
               {event.earlier_period && <Badge variant="outline" className="mr-2">Предыдущий период</Badge>}<span className="font-medium">{event.contract_no}</span> · {event.source_type === "loan_payment" ? `платёж #${event.source_id}` : ({close: "Закрытие обязательств", terms_change: "Изменение условий", debt_change: "Изменение задолженности", collateral_change: "Изменение обеспечения", guarantor_change: "Изменение поручительства", guarantor_debt_change: "Задолженность поручителя"} as Record<string, string>)[event.event_kind] || event.event_kind}{event.source_type === "loan_payment" && <> · {event.payment_date || "дата неизвестна"} · {event.payment.amount ?? "—"} ₽</>}
-              <div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.source_type === "loan_payment" ? (event.components_match ? "части платежа сходятся" : "проверить части платежа") : "операция CRM"}</div>
+              <details className="mt-1"><summary className="cursor-pointer text-xs text-muted-foreground">Реквизиты и учётные данные</summary><div className="text-xs text-muted-foreground">УИД {event.uid || "не сопоставлен"} · время {event.event_occurred_at ? new Date(event.event_occurred_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) + " МСК" : "не установлено"} · снимок {event.has_posting_snapshot ? "сохранён" : "для старого платежа отсутствует"} · {event.source_type === "loan_payment" ? (event.components_match ? "части платежа сходятся" : "проверить части платежа") : "операция CRM"}</div></details>
               <div className="mt-1 text-xs">
                 <Badge variant={event.status === "accepted" ? "default" : "secondary"}>{({ accepted: "Принято НБКИ", exported: "Ожидает ticket2", rejected: "Отклонено НБКИ", new: "Новое" } as Record<string, string>)[event.status] || event.status}</Badge>
                 {event.delivery.file && <span className="ml-2">Файл {event.delivery.file}</span>}
@@ -198,19 +210,31 @@ const AdminNbkiTab = () => {
                 {event.readiness.can_generate_xml && !event.readiness.ready_to_send && " · требуется проверка перед отправкой"}
                 {event.readiness.blockers.map(reason => <div key={reason} className="text-destructive">{reason}</div>)}
               </div>
-              <Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.readiness.can_generate_xml || buildingEventId !== null || buildingEventBatch}>
-                {buildingEventId === event.id ? "Формирую XML…" : event.status === "rejected" ? "Повторно выгрузить событие" : "Сформировать XML"}
-              </Button>
+              <details className="mt-2"><summary className="cursor-pointer text-xs text-muted-foreground">Скачать XML этого события</summary><Button className="mt-2" size="sm" variant="outline" onClick={() => void downloadEvent23(event.id)} disabled={!event.readiness.can_generate_xml || buildingEventId !== null || buildingEventBatch}>
+                {buildingEventId === event.id ? "Формирую XML…" : "Скачать XML без отправки"}
+              </Button></details>
             </div>)}
             {crmEvents && !crmEvents.total && <p className="text-muted-foreground">Непринятых событий за выбранный период и более ранние даты нет.</p>}
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Отправленные файлы и квитанции</CardTitle></CardHeader>
+      </div>
+      <NbkiExchangePanel view={view} periodPending={periodPending} onSettings={()=>setView('settings')} eventIds={(crmEvents?.rows||[]).filter(e=>e.readiness.can_generate_xml).map(e=>e.id)} onChange={()=>void refresh()} />
+      {view==='operations'&&!!summary?.files.length&&<section className="rounded-lg border p-4 space-y-3" aria-label="Последние результаты">
+        <div className="flex flex-wrap justify-between items-center gap-2"><h3 className="font-semibold text-sm">Последние результаты обработки</h3><Button variant="ghost" size="sm" onClick={()=>setView('history')}>Вся история</Button></div>
+        {summary.files.slice(0,3).map(file=><div key={file.reg_number} className="text-sm border-t pt-2">
+          <div className="break-all text-xs text-muted-foreground">{file.reg_number}</div>
+          <div className="mt-1">{receiptLabel[file.receipt_status]||file.receipt_status}{['accepted','partial','rejected'].includes(file.receipt_status)&&` · принято ${file.events_accepted}, отклонено ${file.events_rejected}`}</div>
+          {file.errors.length>0&&<button className="text-destructive underline text-xs" onClick={()=>setView('history')}>Посмотреть ошибки в истории</button>}
+        </div>)}
+      </section>}
+      <div hidden={view!=='history'} className="space-y-5">
+      <details className="rounded-lg border p-4"><summary className="cursor-pointer text-sm font-medium">Ручная загрузка XML и квитанций</summary>
+      <Card className="mt-3 border-0 shadow-none">
+        <CardHeader><CardTitle className="text-base">Файлы, отправленные вне CRM</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">После отправки в НБКИ загрузите отправленный XML. Когда получите ticket1 или ticket2, загрузите квитанцию отдельно — CRM найдёт файл по регистрационному номеру. Можно загрузить XML и квитанции вместе. Ticket1 подтверждает получение; ticket2 отмечает принятые и отклонённые события.</p>
+          <p className="text-sm text-muted-foreground">Используйте только для отправки через личный кабинет НБКИ или переноса старых файлов. При автоматическом обмене XML и квитанции сохраняются сами. Загрузите отправленный XML и полученные ticket1 / ticket2 вместе или по отдельности — CRM сопоставит их по регистрационному номеру.</p>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm">Отправленный XML
               <input className="block w-full rounded-md border p-2 text-sm" key={`xml-${uploadVersion}`} type="file" accept=".xml,text/xml,application/xml" multiple onChange={event => setXmlFiles(Array.from(event.target.files || []))} />
@@ -227,10 +251,11 @@ const AdminNbkiTab = () => {
         </CardContent>
       </Card>
 
+      </details>
       <Card>
-        <CardHeader><CardTitle className="text-base">Исходные выгрузки и квитанции</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Результаты обработки файлов</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          {!summary?.files.length && <p className="text-sm text-muted-foreground">Файлы пока не импортированы.</p>}
+          {!summary?.files.length && <p className="text-sm text-muted-foreground">История пока пуста. Здесь появятся отправленные файлы и результаты их обработки.</p>}
           {summary?.files.map(file => (
             <div key={file.reg_number} className="border-b py-2 last:border-b-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -257,6 +282,7 @@ const AdminNbkiTab = () => {
           ))}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 };

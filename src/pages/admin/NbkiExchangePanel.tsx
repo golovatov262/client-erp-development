@@ -10,7 +10,8 @@ const encode = async (file:File) => {
   let text=''; for(let i=0;i<bytes.length;i++) text+=String.fromCharCode(bytes[i]);
   return btoa(text);
 };
-export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[];onChange:()=>void}) {
+export type NbkiView = 'operations' | 'history' | 'settings';
+export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,onSettings}:{eventIds:number[];onChange:()=>void;view:NbkiView;periodPending:boolean;onSettings:()=>void}) {
   const [state,setState]=useState<NbkiExchangeStatus|null>(null);
   const [config,setConfig]=useState<NbkiExchangeConfig>({});
   const [recipient,setRecipient]=useState<File|null>(null);
@@ -60,13 +61,18 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
   const reserved=new Set(state?.packages.filter(p=>!['completed','failed','cancelled'].includes(p.status)).flatMap(p=>p.event_ids)||[]);
   const available=eventIds.filter(id=>!reserved.has(id));
   const update=(key:keyof NbkiExchangeConfig,value:string|boolean)=>{setConfig(c=>({...c,[key]:value}));setEditing(true);};
+  const activePackages=state?.packages.filter(p=>!['completed','cancelled'].includes(p.status))||[];
+  const shownPackages=view==='history' ? state?.packages||[] : activePackages;
+  const configured=!!(state?.config.recipient && state.config.signer_thumbprint && state.config.tsp_url && state.config.signature_profile==='CAdES-T' && state.config.package_suffix);
+  const lastSeen=state?.agents.filter(a=>a.active&&a.last_seen_at).map(a=>a.last_seen_at!).sort().at(-1);
   return <Card>
-    <CardHeader><CardTitle className="text-base">Подписание, шифрование и обмен с НБКИ</CardTitle></CardHeader>
+    <CardHeader><CardTitle className="text-base">{view==='settings'?'Настройки обмена':view==='history'?'Пакеты и попытки отправки':'2. Отправить готовые события'}</CardTitle></CardHeader>
     <CardContent className="space-y-4 text-sm">
-      <p>XML подписывается на вашем Windows-ПК, помещается в ZIP и шифруется сертификатом НБКИ. Закрытый ключ остаётся в реестре Windows. Для фонового обмена ПК должен быть включён, а пользователь — вошедшим в Windows.</p>
+      <p hidden={view!=='settings'}>XML подписывается на вашем Windows-ПК, помещается в ZIP и шифруется сертификатом НБКИ. Закрытый ключ остаётся в реестре Windows. Для фонового обмена ПК должен быть включён, а пользователь — вошедшим в Windows.</p>
       {error&&<div role="alert" className="text-destructive whitespace-pre-wrap">{error}</div>}
       {message&&<div role="status">{message}</div>}
-      <details><summary className="cursor-pointer font-medium">Настройки сертификатов и канала обмена</summary>
+      <div hidden={view!=='settings'} className="space-y-5">
+      <details open><summary className="cursor-pointer font-medium">Сертификаты и канал обмена</summary>
         <div className="grid gap-4 md:grid-cols-2 pt-4">
           <label className="space-y-1">Сертификат НБКИ для шифрования (.cer)
             <Input type="file" accept=".cer,.crt,.pem" onChange={e=>{setRecipient(e.target.files?.[0]||null);setEditing(true);}}/>
@@ -123,16 +129,34 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
           </div>)}
         </div>
       </details>
-      <Button disabled={busy||editing||!available.length||!state?.config.recipient||!state?.config.signer_thumbprint||!state?.config.tsp_url||state?.config.signature_profile!=='CAdES-T'||!state?.config.package_suffix} onClick={()=>{
+      </div>
+      {view==='operations'&&<div className="space-y-3">
+      <p className="text-muted-foreground">Кнопка создаст пакет из готовых событий выбранного периода. Windows-компонент подпишет и зашифрует файл{state?.config.transport==='nbki_https'?' и отправит его в НБКИ.':'. Автоматическая отправка отключена в настройках.'}</p>
+      <p className="text-xs text-muted-foreground">ПК с ключом должен быть включён, компонент — запущен. Последняя связь: {lastSeen?new Date(lastSeen).toLocaleString('ru-RU'):'ещё не было'}.</p>
+      {!state&&!error&&<p role="status">Проверяем состояние обмена…</p>}
+      {state&&!configured&&<p>Обмен ещё не настроен. <button className="underline" onClick={onSettings}>Открыть настройки</button></p>}
+      <Button disabled={periodPending||busy||editing||!available.length||!state?.config.recipient||!state?.config.signer_thumbprint||!state?.config.tsp_url||state?.config.signature_profile!=='CAdES-T'||!state?.config.package_suffix} onClick={()=>{
         if(available.length!==eventIds.length){void run(async()=>{const r=await api.nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:available});setMessage(`Пакет №${r.id} поставлен в очередь`);});}else void prepare();
-      }}>{state?.config.transport==='nbki_https'?'Подписать, зашифровать и отправить':'Подписать и зашифровать'} · {available.length} событий</Button>
+      }}>{state?.config.transport==='nbki_https'?'Отправить в НБКИ':'Подготовить защищённый файл'} · событий: {available.length}</Button>
       {editing&&<p>Сохраните настройки перед подготовкой пакета.</p>}
-      {state?.packages.map(p=><div key={p.id} className="border-t pt-3 space-y-1">
+      {periodPending&&<p className="text-amber-700">Сначала нажмите «Показать период», чтобы отправить события за выбранные даты.</p>}
+      {state&&configured&&!available.length&&<p className="text-muted-foreground">Нет готовых событий для нового пакета. Проверьте причины в списке выше или дождитесь новых событий.</p>}
+      <div className="border-t pt-4"><h3 className="font-semibold">3. Дождаться результата НБКИ</h3>
+      <p className="mt-1 text-muted-foreground">ticket1 подтверждает получение файла, ticket2 — принятие или отклонение событий. Отправка файла ещё не означает принятие событий.</p>
+      <p className="mt-1 text-muted-foreground">{state?.config.auto_receive?'Квитанции получает Windows-компонент. Загружать их вручную не нужно.':'Автоматическое получение квитанций выключено. Его можно включить в настройках; ручная загрузка доступна в истории.'}</p>
+      {state&&!activePackages.length&&<p className="mt-3">Пакетов в работе нет. Результаты завершённых отправок — ниже и в истории.</p>}</div>
+      </div>}
+      {view==='history'&&<p className="text-muted-foreground">Здесь сохранены исходные XML, защищённые файлы и статусы всех попыток. Итог принятия событий смотрите в результатах обработки ниже.</p>}
+      {view!=='settings'&&<details key={view} open={view==='operations'}>
+      <summary hidden={view!=='history'} className="cursor-pointer font-medium">Показать попытки отправки · {shownPackages.length}</summary>
+      {shownPackages.map(p=><div key={p.id} className="border-t pt-3 space-y-1">
         <div className="font-medium break-all">№{p.id} · {p.file_name}</div><div>{labels[p.status]||p.status} · {p.event_ids.length} событий</div>
-        {p.error&&<p className="text-destructive">{p.error}</p>}
-        <div className="flex gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id,true)}>Исходный XML</Button>{p.encrypted_name&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id)}>Скачать защищённый файл</Button>}
+        {p.error&&<p className="text-destructive break-words">{p.error}</p>}
+        {p.status==='delivery_unknown'&&<p className="text-amber-700">Не отправляйте повторно до сверки с НБКИ: файл мог быть получен.</p>}
+        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id,true)}>Исходный XML</Button>{p.encrypted_name&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id)}>Скачать защищённый файл</Button>}
         {['queued','prepared','failed'].includes(p.status)&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>run(async()=>{await api.nbki.exchangeAction('exchange_cancel',{id:p.id});})}>Отменить пакет</Button>}</div>
       </div>)}
+      </details>}
     </CardContent>
   </Card>;
 }
