@@ -45,6 +45,65 @@ namespace Nbki {
 }
 '@
 }
+if (-not ('Nbki.CurlClient' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+namespace Nbki {
+    public sealed class CurlResult {
+        public int ExitCode;
+        public string Output;
+        public string Error;
+    }
+    public static class CurlClient {
+        // ProcessStartInfo.Arguments uses Windows argv quoting, never a shell.
+        public static string Quote(string value) {
+            var result = new System.Text.StringBuilder("\"");
+            int slashes = 0;
+            foreach (char ch in value) {
+                if (ch == '\\') { slashes++; continue; }
+                if (ch == '"') { result.Append('\\', slashes * 2 + 1); result.Append(ch); }
+                else { result.Append('\\', slashes); result.Append(ch); }
+                slashes = 0;
+            }
+            result.Append('\\', slashes * 2); result.Append('"');
+            return result.ToString();
+        }
+        public static CurlResult Run(string executable, string[] arguments, byte[] payload) {
+            var quoted = new string[arguments.Length];
+            for (int i = 0; i < arguments.Length; i++) quoted[i] = Quote(arguments[i]);
+            var info = new System.Diagnostics.ProcessStartInfo(executable, string.Join(" ", quoted));
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError = true;
+            info.RedirectStandardInput = payload != null;
+            using (var process = new System.Diagnostics.Process()) {
+                process.StartInfo = info;
+                process.Start();
+                var output = process.StandardOutput.ReadToEndAsync();
+                var error = process.StandardError.ReadToEndAsync();
+                try {
+                    if (payload != null) {
+                        try { process.StandardInput.BaseStream.Write(payload, 0, payload.Length); }
+                        catch (System.IO.IOException) { /* curl may exit early on TLS failure */ }
+                        finally { process.StandardInput.Close(); }
+                    }
+                    if (!process.WaitForExit(150000)) {
+                        process.Kill();
+                        throw new TimeoutException("NBKI curl timed out; delivery may be uncertain");
+                    }
+                    return new CurlResult { ExitCode = process.ExitCode,
+                        Output = output.GetAwaiter().GetResult(), Error = error.GetAwaiter().GetResult() };
+                } finally {
+                    if (!process.HasExited) { process.Kill(); process.WaitForExit(); }
+                }
+            }
+        }
+    }
+
+}
+'@
+}
 function Api($body) {
     $body.entity = 'nbki_agent'
     Invoke-RestMethod -Uri $crm -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 15 -Compress))) -TimeoutSec 120 -MaximumRedirection 0
@@ -149,26 +208,51 @@ function Decrypt-Zip([byte[]]$raw) {
     $envelope.Call('Decrypt', @([Convert]::ToBase64String($raw))) | Out-Null
     return ,([Convert]::FromBase64String($envelope.Get('Content')))
 }
+function Get-NbkiCurl {
+    if ($script:nbkiCurlPath) { return $script:nbkiCurlPath }
+    $path = Join-Path ([Environment]::GetFolderPath('System')) 'curl.exe'
+    if (-not (Test-Path -LiteralPath $path)) { throw 'Windows system curl.exe not found' }
+    $version = [Nbki.CurlClient]::Run($path, @('-q','--version'), $null)
+    if ($version.ExitCode -ne 0 -or $version.Output -notmatch '\bSchannel\b') { throw 'NBKI requires Windows curl with Schannel' }
+    $script:nbkiCurlPath = $path
+    return $path
+}
+function Invoke-NbkiCurl([string[]]$arguments, [byte[]]$payload) {
+    return [Nbki.CurlClient]::Run((Get-NbkiCurl), $arguments, $payload)
+}
 function Nbki-Request($method, [Uri]$uri, [byte[]]$payload, $config, [string]$fileName) {
     if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'icrs.nbki.ru' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'Invalid NBKI HTTPS URL' }
-    $handler = New-Object Net.Http.HttpClientHandler
-    $handler.AllowAutoRedirect = $false
+    if ($method -notin @('GET','POST')) { throw 'Invalid NBKI HTTP method' }
     $thumb = $config.tls_thumbprint
     if (-not $thumb) { $thumb = $config.signer_thumbprint }
-    $tls = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumb"
-    $handler.ClientCertificates.Add($tls) | Out-Null
-    $client = New-Object Net.Http.HttpClient($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(120); $client.MaxResponseContentBufferSize = 30MB
-    $request = New-Object Net.Http.HttpRequestMessage((New-Object Net.Http.HttpMethod($method)), $uri)
+    if ($thumb -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Invalid TLS certificate thumbprint' }
+    $directory = Join-Path ([IO.Path]::GetTempPath()) ('crm-nbki-'+[Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $output = Join-Path $directory 'response.bin'
     try {
-        if ($method -eq 'POST') { $request.Content = Upload-Content $payload $fileName }
-        $response = $client.SendAsync($request).GetAwaiter().GetResult()
-        try {
-            if ($method -eq 'GET' -and [int]$response.StatusCode -eq 404) { return $null }
-            if (-not $response.IsSuccessStatusCode) { throw "NBKI HTTP $([int]$response.StatusCode)" }
-            return ,$response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        } finally { $response.Dispose() }
-    } finally { $request.Dispose(); $client.Dispose(); $handler.Dispose() }
+        # -q must be first: ignore .curlrc, including retries, redirects or insecure options.
+        # No --insecure, no --ssl-no-revoke, no redirects and no automatic upload retries.
+        $arguments = @('-q','--silent','--show-error','--proto','=https','--connect-timeout','15',
+            '--max-time','120','--max-filesize','31457280','--output',$output,'--write-out','%{http_code}',
+            '--cert',('CurrentUser\MY\'+$thumb),'--request',$method)
+        $body = $null
+        if ($method -eq 'POST') {
+            $content = Upload-Content $payload $fileName
+            try {
+                $arguments += @('--header',('Content-Type: '+$content.Headers.ContentType.ToString()),'--data-binary','@-')
+                $body = $content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+            } finally { $content.Dispose() }
+        }
+        $arguments += $uri.AbsoluteUri
+        $result = Invoke-NbkiCurl $arguments $body
+        if ($result.ExitCode -ne 0) { throw "NBKI curl error $($result.ExitCode): $($result.Error.Trim())" }
+        $status = $result.Output.Trim()
+        if ($status -notmatch '^\d{3}$') { throw 'NBKI curl returned invalid HTTP status' }
+        if ($method -eq 'GET' -and $status -eq '404') { return $null }
+        if ([int]$status -lt 200 -or [int]$status -ge 300) { throw "NBKI HTTP $status" }
+        if ((Get-Item -LiteralPath $output).Length -gt 30MB) { throw 'NBKI response too large' }
+        return ,([IO.File]::ReadAllBytes($output))
+    } finally { Remove-Item -LiteralPath $directory -Recurse -Force }
 }
 function Upload-Content([byte[]]$payload, [string]$fileName) {
     if ($fileName -notmatch '^[A-Za-z0-9_]+\.zip\.(p7m|enc)$') { throw 'Invalid protected filename' }
@@ -200,7 +284,7 @@ function Receive-Task($task, $config) {
             break
         }
     }
-    if (-not (Test-Path -LiteralPath $path)) { return }
+    if (-not (Test-Path -LiteralPath $path)) { Write-Host "Package $($task.id): ticket$($task.stage) not ready (HTTP 404)."; return }
     $secure = ConvertTo-SecureString ([IO.File]::ReadAllText($path))
     $record = (New-Object Net.NetworkCredential('', $secure)).Password | ConvertFrom-Json
     $incoming = [Convert]::FromBase64String($record.incoming)
@@ -208,6 +292,7 @@ function Receive-Task($task, $config) {
     Verify-Receipt $archive $config.receipt_signer.thumbprint
     Api @{action='receipt'; content_base64=[Convert]::ToBase64String($archive); encrypted_base64=[Convert]::ToBase64String($incoming); evidence=@{
         signature_verified=$true; signer_thumbprint=$config.receipt_signer.thumbprint; archive_sha256=(Hash $archive)}} | Out-Null
+    Write-Host "Package $($task.id): ticket$($task.stage) verified and saved in CRM."
     # Keep cache until package processing is finished; it also handles lost CRM responses.
 }
 function Verify-Receipt([byte[]]$archive, $expected) {
@@ -240,11 +325,13 @@ $cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
 New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null
 try {
  do {
-    $diagnostic = @{version='2.0'; build='2.0.1'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
+    $diagnostic = @{version='2.0'; build='2.0.2'; computer=$env:COMPUTERNAME; account=$env:USERNAME}
     $job = $null
     try {
         $diagnostic.stage = 'Read CurrentUser My certificates'
         $diagnostic.certificates = @(Local-Certificates)
+        $diagnostic.stage = 'Check Windows curl transport'
+        Get-NbkiCurl | Out-Null
         if ($CheckOnly) {
             Api @{action='heartbeat'; diagnostic=$diagnostic} | Out-Null
             Write-Host "CHECK OK: certificate store and CRM connection. Certificates: $($diagnostic.certificates.Count). No files sent."
@@ -279,8 +366,10 @@ try {
                 $response = Nbki-Request 'POST' ([Uri]$job.config.upload_url) $encrypted $job.config $job.encrypted_name
                 Assert-UploadSuccess $response $job.encrypted_name
                 Api @{action='sent'; id=$job.id; lease=$job.lease; response_base64=[Convert]::ToBase64String($response)} | Out-Null
+                Write-Host "Package $($job.id): upload confirmed by NBKI. Awaiting receipts."
             }
         }
+        if (-not $job) { Write-Host 'No packages to send. Uncertain deliveries are not retried automatically.' }
         $job = $null
         if ($poll.config.auto_receive -and $poll.config.transport -eq 'nbki_https') {
             if (-not $poll.config.receipt_signer) { throw 'Configure NBKI receipt signing certificate first' }
@@ -288,7 +377,7 @@ try {
                 try {
                     $claim = Api @{action='receipt_poll'; id=$packageId}
                     if ($claim.task) { Receive-Task $claim.task $poll.config }
-                } catch { $diagnostic.receipt_error = $_.Exception.Message }
+                } catch { $diagnostic.receipt_error = $_.Exception.Message; Write-Warning $diagnostic.receipt_error }
             }
         }
     } catch {

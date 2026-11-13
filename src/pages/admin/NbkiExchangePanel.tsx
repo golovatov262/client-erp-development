@@ -110,7 +110,7 @@ export default function NbkiExchangePanel({eventIds,onChange}:{eventIds:number[]
       <details><summary className="cursor-pointer font-medium">Подключение Windows-ПК</summary>
         <div className="space-y-3 pt-3">
           <p>На ПК нужны КриптоПро CSP 5.0 R3 или новее, лицензия КриптоПро TSP Client, корневые сертификаты УЦ ЦБ и компонент КриптоПро ЭЦП (CAdES COM). Ключ должен быть доступен текущему пользователю Windows. Компонент работает без открытого браузера.</p>
-          <a className="underline" href="/nbki-agent.zip?v=2.0.1" download>Скачать Windows-компонент 2.0.1</a>
+          <a className="underline" href="/nbki-agent.zip?v=2.0.2" download>Скачать Windows-компонент 2.0.2</a>
           <p>Распакуйте архив, создайте ключ подключения ниже и запустите установку из PowerShell под пользователем — владельцем ключа:</p>
           <code className="block break-all">{`.\Install-NbkiAgent.ps1 -CrmUrl "${window.location.origin}/api"`}</code>
           <p className="text-muted-foreground">Установщик не меняет политику выполнения скриптов и настройки безопасности. Если ваша политика требует подписи скрипта, установку выполняет администратор по правилам организации.</p>
