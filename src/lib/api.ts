@@ -507,6 +507,11 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 }
 
 export const api = {
+  okb: {
+    status: () => request<OkbStatus>('GET', {entity:'okb',action:'status'}),
+    events: (from:string,to:string) => request<OkbEvents>('GET',{entity:'okb',action:'events',from,to}),
+    action: <T = {success:boolean}>(action:string,data:Record<string,unknown>={}) => request<T>('POST',undefined,{entity:'okb',action,...data}),
+  },
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
   nbki: {
     exchangeStatus: () => request<NbkiExchangeStatus>("GET", {entity: "nbki", action: "exchange_status"}),
@@ -2203,3 +2208,15 @@ export type NbkiExchangeStatus = {
   packages:{id:number;file_name:string;reg_number:string;event_ids:number[];status:string;error?:string;encrypted_name?:string;created_at:string}[];
   agents:{id:number;name:string;active:boolean;last_seen_at?:string;diagnostic:{error?:string;receipt_error?:string;certificates?:{thumbprint:string;subject:string;valid_until:string}[]}}[];
 };
+
+export type OkbConfig = {
+ sin?:string;group?:string;username?:string;signer_thumbprint?:string;tls_thumbprint?:string;tsp_url?:string;
+ enabled?:boolean;auto_receive?:boolean;certificate_registered?:boolean;
+ recipient?:{subject:string;thumbprint:string;valid_until:string};receipt_signer?:{subject:string;thumbprint:string;valid_until:string};
+};
+export type OkbStatus = {
+ config:OkbConfig;
+ agents:{id:number;active:boolean;last_seen_at?:string;diagnostic:{error?:string;receipt_error?:string}}[];
+ packages:{id:number;file_name:string;status:string;error?:string;events_count:number;accepted:number;rejected:number;receipt_stage:number;created_at:string;receipts?:{kind:number;status:string;warnings?:Record<string,string>[];errors:{error_message?:string;field_name?:string;order_num?:number}[]}[]}[];
+};
+export type OkbEvents = {from:string;to:string;has_more:boolean;rows:{id:number;contract_no:string;event_name:string;event_kind:string;event_at:string|null;ready:boolean;error?:string;delivery:{status:string}}[]};

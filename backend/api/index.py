@@ -8849,7 +8849,7 @@ def handle_sber_test(params, body):
     return results
 
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki', 'bki_fields'}
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations', 'member_checks', 'podft', 'member_orgs', 'api_keys', 'integration_secrets', 'loan_applications', 'saving_applications', 'agents', 'agent_leads', 'agent_rewards', 'loan_collateral', 'nbki', 'okb', 'bki_fields'}
 
 def hash_api_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
@@ -10294,7 +10294,23 @@ def handler(event, context):
         elif entity in ('push', 'notifications'):
             staff = get_staff_session(params, ev_headers, cur)
 
-        if entity == 'nbki_agent':
+        if entity in ('okb','okb_agent'):
+            try:
+                try:
+                    from okb_exchange import admin as okb_admin, agent as okb_agent
+                except ImportError:
+                    from backend.okb_exchange import admin as okb_admin, agent as okb_agent
+                if entity == 'okb_agent':
+                    result = okb_agent(cur,conn,ev_headers.get('x-okb-agent-key') or ev_headers.get('X-Okb-Agent-Key'),method,body)
+                elif staff.get('role') != 'admin':
+                    result = {'_status':403,'error':'Раздел ОКБ доступен только администратору'}
+                else:
+                    result = okb_admin(cur,conn,resolve_source_org_id(cur),method,dict(params,**body),staff.get('user_id'))
+            except PermissionError as exc:
+                conn.rollback(); result = {'_status':401,'error':str(exc)}
+            except (ValueError,TypeError,KeyError,binascii.Error) as exc:
+                conn.rollback(); result = {'_status':400,'error':str(exc)[:1000]}
+        elif entity == 'nbki_agent':
             try:
                 from nbki_exchange import agent
             except ImportError:

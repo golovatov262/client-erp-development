@@ -216,7 +216,7 @@ def parse_source_xml(raw: bytes) -> dict:
             "collateral_events": collateral_events}
 
 
-def parse_receipt_zip(payload: bytes | Path) -> dict:
+def parse_receipt_zip(payload: bytes | Path, *, source_id=SOURCE_ID) -> dict:
     raw = payload.read_bytes() if isinstance(payload, Path) else payload
     if len(raw) > 2 * 1024 * 1024:
         raise ValueError("Квитанция слишком большая")
@@ -236,7 +236,7 @@ def parse_receipt_zip(payload: bytes | Path) -> dict:
     except ET.ParseError as exc:
         raise ValueError('Повреждён XML квитанции') from exc
     source_node = root if root.tag == 'NotificationOfReceipt' else root.find('DocInfo')
-    if _text(source_node, 'sourceId') not in (None, SOURCE_ID):
+    if _text(source_node, 'sourceId') not in (None, source_id):
         raise ValueError('Квитанция другого источника')
     if root.tag == "NotificationOfReceipt":
         reg_number = _text(root, "outgoingDocNumber")

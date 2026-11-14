@@ -283,21 +283,25 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     return event
 
 
-def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True) -> dict:
+def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True, bureau="nbki") -> dict:
     """Build a one-event file from CRM facts and validate it against XSD 5.1."""
     if _include_related and cur is not None:
         if __package__:
             from .nbki_reporting_policy import paired_ids
         else:
             from nbki_reporting_policy import paired_ids
-        related=paired_ids(cur,org_id,[event_id])
+        related=paired_ids(cur,org_id,[event_id],bureau=bureau)
         if related and related!=[event_id]:
-            return build_event23_batch_xml(cur,org_id,related)
+            return build_event23_batch_xml(cur,org_id,related,bureau=bureau)
 
     if __package__:
         from .nbki_delivery import check_delivery
     else:
         from nbki_delivery import check_delivery
+    if bureau == 'okb':
+        if __package__: from .okb_delivery import check_delivery
+        else: from okb_delivery import check_delivery
+    elif bureau != 'nbki': raise ValueError('Неизвестное бюро')
     check_delivery(cur, org_id, event_id)
     cur.execute('SELECT event_payload,evidence_sha256 FROM nbki_crm_events WHERE id=%s AND org_id=%s', (event_id,org_id))
     lifecycle = cur.fetchone()
@@ -306,7 +310,7 @@ def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True)
             from .nbki_lifecycle import build_lifecycle_xml
         else:
             from nbki_lifecycle import build_lifecycle_xml
-        return build_lifecycle_xml(cur,org_id,event_id,lifecycle)
+        return build_lifecycle_xml(cur,org_id,event_id,lifecycle,bureau=bureau)
     facts = payment_event_facts(cur, org_id, event_id)
     payment_id = facts['payment_id']
     # The event facts identify the loan through the event table; keep this query CRM-only.
@@ -378,7 +382,7 @@ def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True)
             'psk_status': (facts['loan'].get('psk') or {}).get('status')}
 
 
-def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
+def build_event23_batch_xml(cur, org_id: int, event_ids: list[int], *, bureau="nbki") -> dict:
     """Build one XSD-validated document from individually eligible CRM events.
 
     Events that cannot be generated are reported and excluded; the caller gets
@@ -393,7 +397,7 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
             from .nbki_reporting_policy import paired_ids
         else:
             from nbki_reporting_policy import paired_ids
-        ids=paired_ids(cur,org_id,ids)
+        ids=paired_ids(cur,org_id,ids,bureau=bureau)
 
     nodes_by_id = {}
     first_root = None
@@ -402,7 +406,8 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
     excluded = []
     for event_id in ids:
         try:
-            result = build_event23_xml(cur, org_id, event_id, _include_related=False)
+            result = (build_event23_xml(cur, org_id, event_id, _include_related=False, bureau=bureau)
+                      if bureau != "nbki" else build_event23_xml(cur, org_id, event_id, _include_related=False))
             root = ET.fromstring(base64.b64decode(result['content_base64']))
             subject_node = root.find('./Data/Subject_FL')
             event_node = subject_node.find('./Events/*') if subject_node is not None else None
@@ -462,6 +467,8 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int]) -> dict:
             events_node.append(event)
     first_root.set('subjectsCount', str(len(grouped)))
     first_root.set('groupBlocksCount', str(total_events))
+    for item in exported:
+        item['order_num'] = int(nodes_by_id[item['event_id']][1].get('orderNum'))
     raw = format_document_bytes(first_root)
     validation = _validate_xsd(raw)
     return {'file_name': f"{first_root.get('regNumberDoc')}.xml",

@@ -327,7 +327,7 @@ def obligation_event(payload):
     return ev
 
 
-def build_lifecycle_xml(cur, org_id, event_id, row):
+def build_lifecycle_xml(cur, org_id, event_id, row, *, bureau="nbki"):
     if __package__:
         from .nbki_xml_builder import document_xml
         from .nbki_event23_xml import _validate_xsd, generation_readiness
@@ -336,6 +336,10 @@ def build_lifecycle_xml(cur, org_id, event_id, row):
         from nbki_xml_builder import document_xml
         from nbki_event23_xml import _validate_xsd, generation_readiness
         from nbki_delivery import check_delivery
+    if bureau == 'okb':
+        if __package__: from .okb_delivery import check_delivery
+        else: from okb_delivery import check_delivery
+    elif bureau != 'nbki': raise ValueError('Неизвестное бюро')
     payload, digest = row
     if checksum(payload) != digest.strip():
         raise ValueError('Контрольная сумма снимка операции не совпала')

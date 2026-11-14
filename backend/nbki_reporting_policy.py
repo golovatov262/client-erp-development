@@ -178,13 +178,17 @@ def reporting_pairs(cur,org,ids):
     return cur.fetchall()
 
 
-def paired_ids(cur,org,ids):
+def paired_ids(cur,org,ids,*,bureau="nbki"):
     pairs=reporting_pairs(cur,org,ids)
     if not pairs:return ids
     if __package__:
         from .nbki_delivery import delivery_state
     else:
         from nbki_delivery import delivery_state
+    if bureau == 'okb':
+        if __package__: from .okb_delivery import delivery_state
+        else: from okb_delivery import delivery_state
+    elif bureau != 'nbki': raise ValueError('Неизвестное бюро')
     related={i for pair in pairs for i in pair};result=[]
     for before,after in pairs:
         for eid in (before,after):
