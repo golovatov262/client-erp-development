@@ -269,14 +269,15 @@ def collateral_event(s, reason=None, provision_payment=None):
     return ev
 
 
-def obligation_event(payload):
+def obligation_event(payload, *, bureau="nbki"):
     if __package__:
         from .nbki_event23_xml import _event
     else:
         from nbki_event23_xml import _event
     s, facts, evidence = payload['snapshot'], payload['facts'], payload['debt_evidence']
     ev = _event(ScheduleCursor(s,payload.get('include_due_today',False)), facts, evidence['accounting'], evidence['debt'],
-                evidence['preview'], evidence['interest'], evidence['smp'])
+                evidence['preview'], evidence['interest'], evidence['smp'],
+                bureau='nbki' if payload.get('guarantor') else bureau)
     payment = ev.find('./FL_25_26_27_28_Group/FL_28_Payment/date')
     if facts['payment']['last_payment_date'] == '-':
         ev.find('./FL_25_26_27_28_Group/FL_28_Payment').remove(payment)
@@ -361,7 +362,7 @@ def build_lifecycle_xml(cur, org_id, event_id, row, *, bureau="nbki"):
     s = payload['snapshot']
     facts = copy.deepcopy(payload['facts'])
     event = (collateral_event(s, payload.get('collateral_reason_code'), payload.get('provision_payment'))
-             if payload['event_name'] == 'FL_Event_2_4' else obligation_event(payload))
+             if payload['event_name'] == 'FL_Event_2_4' else obligation_event(payload,bureau=bureau))
     if payload.get('guarantor'):
         g = payload['guarantor']
 

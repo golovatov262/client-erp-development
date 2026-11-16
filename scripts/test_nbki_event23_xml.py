@@ -12,6 +12,26 @@ class Cursor:
 
 
 class Event23XmlTests(unittest.TestCase):
+    def test_okb_requires_cost_despite_false_nbki_archive_flag(self):
+        facts = self._base_facts(report_blocks={'include_total_cost': False},
+            psk={'status': 'cross_checked', 'percent': '35.952',
+                 'amount': '35416.11', 'calculated_on': '2026-06-11'})
+        args = (Cursor(), facts, {}, self._base_debt(), {},
+                {'remaining_interest_candidate': '10'}, {})
+        self.assertIsNone(_event(*args).find('FL_22_TotalCost'))
+        cost = _event(*args, bureau='okb').find('FL_22_TotalCost')
+        self.assertEqual(cost.findtext('minPercentCost'), '35.952')
+        self.assertEqual(cost.findtext('maxPercentCashless'), '35.952')
+        self.assertEqual(cost.findtext('minCost'), '35416.11')
+        facts['loan']['psk'] = None
+        with self.assertRaisesRegex(ValueError, 'ФЛ_22'):
+            _event(*args, bureau='okb')
+        facts['loan']['start_date'] = '2014-06-30'
+        self.assertIsNone(_event(*args, bureau='okb').find('FL_22_TotalCost'))
+        facts['loan']['start_date'] = '2014-07-01'
+        with self.assertRaisesRegex(ValueError, 'ФЛ_22'):
+            _event(*args, bureau='okb')
+
     def test_overdue_start_date_is_not_formatted_as_money(self):
         facts = {
             'loan_id': 1,

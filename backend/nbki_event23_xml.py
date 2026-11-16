@@ -83,7 +83,7 @@ def _loan_terms(cur, facts):
     return terms, cur.fetchone()
 
 
-def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
+def _event(cur, facts, accounting, debt, debt_preview, interest, smp, *, bureau="nbki"):
     loan, payment, terms = facts['loan'], facts['payment'], facts['loan']['terms']
     event_at = datetime.fromisoformat(facts['event_occurred_at'])
     event = ET.Element('FL_Event_2_3', {
@@ -147,9 +147,13 @@ def _event(cur, facts, accounting, debt, debt_preview, interest, smp):
     # mixed) rather than a blanket rule; see nbki_seed_report_block_flags.py.
     report_blocks = loan.get('report_blocks')
     psk = loan.get('psk')
-    if report_blocks and report_blocks.get('include_total_cost'):
+    # OKB business control: consumerExist_1 and openDate >= 2014-07-01.
+    # The serializer above emits consumerExist_1; NBKI archive flags cannot
+    # waive OKB's mandatory cost block (EFK receipts v5.0, section 6).
+    required_cost = bureau == 'okb' and date.fromisoformat(loan['start_date']) >= date(2014, 7, 1)
+    if required_cost or (report_blocks and report_blocks.get('include_total_cost')):
         if not psk or psk.get('status') != 'cross_checked':
-            raise ValueError('Исторический признак требует блок ФЛ_22, но ПСК не прошла сверку CRM')
+            raise ValueError('Обязательный блок ФЛ_22: ПСК отсутствует или не прошла сверку CRM')
         cost = _add(event, 'FL_22_TotalCost')
         for key, value in (('minPercentCost', psk['percent']), ('minCost', psk['amount']),
                            ('calcDate', psk['calculated_on']), ('maxPercentCost', psk['percent']),
@@ -366,7 +370,7 @@ def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True,
         raise ValueError('У события CRM отсутствуют дата и время наступления')
     if not facts['loan'].get('terms'):
         raise ValueError('Для события не найдены действовавшие коды сделки CRM')
-    ev = _event(cur, facts, accounting, crm_debt, debt_preview, interest, smp)
+    ev = _event(cur, facts, accounting, crm_debt, debt_preview, interest, smp, bureau=bureau)
     created = datetime.now(timezone.utc)
     reg_number = f"{facts['source']['source_id']}_{created.astimezone(MSK).strftime('%Y%m%d_%H%M%S')}"
     raw, digest = document_xml(facts['source'], [(facts['subject'], [ev])], reg_number, created)

@@ -65,3 +65,19 @@ files and stops the scheduled task; resume only after the connection check.
 Backend accepts protocol-compatible versions 1.0 and 1.1. NBKI is unchanged.
 Vendor binary source including submodules and licenses is distributed alongside it.
 Live Windows validation of the new bridge and authenticated CFB is still required.
+
+## Mandatory FL_22 and rejected-event retry (2026-11-16)
+
+OKB receipt guidance v5.0 requires FL_22 for consumerExist_1 and openDate >=
+2014-07-01. Its payment/debt/lifecycle serializer must not inherit a false
+include_total_cost flag from NBKI historical files. Use verified CRM PSK; missing
+or unverified PSK blocks generation. Guarantor events remain non-consumer.
+NBKI serialization is unchanged. Existing packages and snapshots remain immutable.
+
+Package 1/order 21 (CRM event 30, contract 100-000000311062026) was rejected for
+missing FL_22. Verified CRM values: 35.952 percent, 35416.11 RUB, 2026-06-11.
+Read-only production-data verification: corrected single-event XML passes XSD;
+all 22 accepted events are refused by the delivery gate. Queue for 2026-10-30
+contains exactly event 30 ready for retry. Operator selects that date range and
+prepares a new package through the ordinary send action; no status resets or
+receipt deletion. The corrected XML passes the changed-rejected-event gate.
