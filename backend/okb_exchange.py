@@ -160,7 +160,7 @@ def agent(cur,conn,token,method,body):
         cur.execute('UPDATE okb_agents SET diagnostic=%s WHERE id=%s',(Json(diagnostic),aid))
         config=settings(cur,org);result={'config':config,'job':None,'pending':[],'acks':[]}
         if action=='poll':
-            if diagnostic.get('version')!='1.0':raise ValueError('Обновите компонент ОКБ')
+            if diagnostic.get('version') not in ('1.0','1.1'):raise ValueError('Обновите компонент ОКБ')
             cur.execute("UPDATE okb_packages SET status='delivery_unknown',error='Связь прервалась при отправке. Сверьте получение в ОКБ.' WHERE org_id=%s AND status='sending' AND lease_until<now()",(org,))
             if config.get('enabled'):
                 cur.execute("""SELECT id FROM okb_packages WHERE org_id=%s AND (status='queued' OR (status='processing' AND lease_until<now())) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1""",(org,));job=cur.fetchone()

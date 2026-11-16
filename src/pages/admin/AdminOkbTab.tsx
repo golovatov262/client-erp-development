@@ -65,7 +65,7 @@ export default function AdminOkbTab(){
    </CardContent></Card>
    <Card><CardHeader><CardTitle className="text-base">Windows-компонент ОКБ</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">
     <p>Отдельный компонент использует установленный КриптоПро CSP и CAdES COM. Компонент НБКИ продолжает работать независимо.</p>
-    <a href="/okb-agent.zip?v=1.0" download className="underline">Скачать компонент ОКБ 1.0 и сертификаты</a>
+    <a href="/okb-agent.zip?v=1.1" download className="underline">Скачать компонент ОКБ 1.1 и сертификаты</a>
     <p>Распакуйте архив. Создайте ключ подключения и запустите установщик под владельцем сертификата:</p><code className="block break-all">{`.\\Install-OkbAgent.ps1 -CrmUrl "${window.location.origin}/api"`}</code>
     <Button variant="outline" disabled={busy} onClick={()=>void run(async()=>{const r=await api.okb.action<{token:string}>('agent_create');setToken(r.token);})}>Создать ключ подключения ОКБ</Button>
     {token&&<div><Input readOnly value={token} aria-label="Ключ подключения ОКБ"/><p>Показывается один раз. Вставьте в установщик.</p><Button variant="ghost" onClick={()=>setToken('')}>Скрыть ключ</Button></div>}

@@ -44,3 +44,24 @@ https://docs.cryptopro.ru/cades/plugin/plugin-methods
 Проверки: scripts/test_okb_exchange.py, scripts/test_okb_agent.ps1; интеграция на реальных
 снимках CRM в откатываемой транзакции без внешней отправки; регрессия scripts/test_nbki*.
 Живую GOST/CAdES/TSP совместимость и ответы сервера подтверждает только Windows запуск.
+
+## Windows transport 1.1 (2026-11-16)
+
+CFB renegotiation fails with Windows curl/Schannel (SEC_E_DECRYPT_FAILURE) on the
+reported Windows 10 19045 / CSP 5.0.13003 workstation; csptest -cpsspi succeeds.
+The 1.1 agent uses unmodified CryptoPro stunnel-msspi 5.78-msspi-0.84, pinned
+SHA256, with a short-lived loopback listener. It verifies listener ownership
+before transmitting credentials. Fixed destination/SNI/checkHost cfb.bki-okb.com,
+verifyChain=yes, normal revocation verification. curl handles HTTP framing only,
+proxy disabled; no external plaintext connection, TLS bypass, or transport retry.
+Tunnel configuration contains no password. Process and temporary files are cleaned
+on both success and failure. A separately started agent killed forcibly can leave
+a child process; do not kill a running upload, retain delivery_unknown handling.
+
+-CheckConnection uses heartbeat and authenticated GET listing only (no poll/claim,
+upload, receipt save, mark-downloaded). Failure exits nonzero. -CheckOnly remains
+a local/CRM check. Update-OkbAgent.ps1 preserves credentials/receipts, backs up
+files and stops the scheduled task; resume only after the connection check.
+Backend accepts protocol-compatible versions 1.0 and 1.1. NBKI is unchanged.
+Vendor binary source including submodules and licenses is distributed alongside it.
+Live Windows validation of the new bridge and authenticated CFB is still required.

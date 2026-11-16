@@ -20,15 +20,24 @@ class CfbWireTest(unittest.TestCase):
   try:
    with tempfile.TemporaryDirectory() as tmp:
     wrapper=Path(tmp)/'curl-fixture'
-    wrapper.write_text('#!/usr/bin/python3\nimport sys,subprocess\ns=sys.stdin.buffer.read().decode()\nassert sys.argv[1:]==["-q","--config","-"]\ns="\\n".join(l for l in s.splitlines() if not l.startswith("cert =") and not l.startswith("proto ="))\ns=s.replace("https://cfb.bki-okb.com/cfb","http://127.0.0.1:'+str(server.server_port)+'")\nr=subprocess.run('+repr([curl,'-q','--config','-'])+',input=s.encode());sys.exit(r.returncode)\n');wrapper.chmod(0o700)
+    wrapper.write_text('#!/usr/bin/python3\nimport sys,subprocess\ns=sys.stdin.buffer.read().decode()\nassert sys.argv[1:]==["-q","--config","-"]\nassert \'proxy = ""\' in s and \'noproxy = "*"\' in s\nassert \'header = "Host: cfb.bki-okb.com"\' in s\nr=subprocess.run('+repr([curl,'-q','--config','-'])+',input=s.encode());sys.exit(r.returncode)\n');wrapper.chmod(0o700)
     script=Path(tmp)/'test.ps1';script.write_text(f'''
 $ErrorActionPreference='Stop'
 . {quote(Path(__file__).resolve().parents[1]/'public/okb-agent/OkbAgent.ps1')} -LibraryOnly
 function Get-NbkiCurl {{ return {quote(wrapper)} }}
+function Start-OkbTunnel($directory,$thumb) {{ return @{{Port={server.server_port}}} }}
+$script:stopped=0
+function Stop-OkbTunnel($tunnel) {{ $script:stopped++ }}
 $cfbPassword='test"password\\only'
 $config=@{{base_url='https://cfb.bki-okb.com/cfb';sin='00123';group='group';username='user';signer_thumbprint=('A'*40)}}
 $r=Cfb-Request 'POST' '/file/inbox/bureaufile' $config ([byte[]](0,255,128,1)) 'CHP_00123_EFK_05-10_20261114120000123.zip.pem.pem'
 if ($r.Status -ne 200) {{throw 'Wrong status'}}
+if ($script:stopped -ne 1) {{throw 'Bridge not cleaned up'}}
+# Transport failure is never retried and still closes the bridge.
+function Get-NbkiCurl {{ return '/does/not/exist' }}
+$failed=$false
+try {{ Cfb-Request 'GET' '/file/outbox/list' $config | Out-Null }} catch {{ $failed=$true }}
+if (-not $failed -or $script:stopped -ne 2) {{throw 'Failure cleanup missing'}}
 ''')
     r=subprocess.run([pwsh,'-NoProfile','-File',str(script)],capture_output=True,text=True,timeout=30);self.assertEqual(r.returncode,0,r.stdout+r.stderr)
   finally:server.shutdown();server.server_close();thread.join()

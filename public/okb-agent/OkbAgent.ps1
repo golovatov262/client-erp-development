@@ -1,7 +1,8 @@
 ﻿# Windows PowerShell 5.1. Credentials are DPAPI-protected for the current user.
-param([string]$ConfigPath="$env:LOCALAPPDATA\CRM-OKB\config.json",[switch]$Once,[switch]$CheckOnly,[switch]$LibraryOnly)
+param([string]$ConfigPath="$env:LOCALAPPDATA\CRM-OKB\config.json",[switch]$Once,[switch]$CheckOnly,[switch]$CheckConnection,[switch]$LibraryOnly)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CryptoSupport.ps1')
+. (Join-Path $PSScriptRoot 'OkbTransport.ps1')
 function Okb-Api($body) {
     $body.entity='okb_agent'
     Invoke-RestMethod -Uri $crm -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 20 -Compress))) -TimeoutSec 120 -MaximumRedirection 0
@@ -17,11 +18,13 @@ function Cfb-Request([string]$method,[string]$path,$config,[byte[]]$payload=$nul
     if ($thumb -notmatch '^[A-Fa-f0-9]{40}$') {throw 'Invalid TLS certificate thumbprint'}
     $dir=Join-Path ([IO.Path]::GetTempPath()) ('crm-okb-'+[Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($dir)|Out-Null
+    $tunnel=$null
     try {
+        $tunnel=Start-OkbTunnel $dir $thumb
         $output=Join-Path $dir 'response.bin'
-        $lines=@('silent','show-error','proto = "=https"','connect-timeout = 15','max-time = 120','max-filesize = 31457280',
-            ('output = '+(Curl-Value $output)),'write-out = "%{http_code}"',('cert = '+(Curl-Value ('CurrentUser\MY\'+$thumb))),
-            ('request = '+(Curl-Value $method)),('url = '+(Curl-Value ($config.base_url+$path))))
+        $lines=@('silent','show-error','proto = "=http"','proxy = ""','noproxy = "*"','header = "Host: cfb.bki-okb.com"','connect-timeout = 15','max-time = 120','max-filesize = 31457280',
+            ('output = '+(Curl-Value $output)),'write-out = "%{http_code}"',
+            ('request = '+(Curl-Value $method)),('url = '+(Curl-Value ('http://127.0.0.1:'+$tunnel.Port+'/cfb'+$path))))
         $auth=@{'X-Auth-Subscriber'=$config.sin;'X-Auth-Group'=$config.group;'X-Auth-Username'=$config.username;'X-Auth-Password'=$cfbPassword}
         foreach($key in $auth.Keys) {
             if (-not $auth[$key]) {throw ('Missing CFB credential: '+$key)}
@@ -43,11 +46,27 @@ function Cfb-Request([string]$method,[string]$path,$config,[byte[]]$payload=$nul
         if ($result.ExitCode -ne 0) {throw ('CFB transport error '+$result.ExitCode+'; check delivery before retrying')}
         if ($result.Output.Trim() -notmatch '^\d{3}$') {throw 'Invalid CFB HTTP response'}
         return @{Status=[int]$result.Output.Trim();Bytes=[IO.File]::ReadAllBytes($output)}
-    } finally {Remove-Item -LiteralPath $dir -Recurse -Force}
+    } catch {
+        $log=Join-Path $dir 'tls.log'
+        if (Test-Path -LiteralPath $log) {
+            # stunnel debug=4 logs TLS errors, never HTTP headers or payloads.
+            $detail=(Get-Content -LiteralPath $log -Tail 5 -ErrorAction SilentlyContinue) -join ' | '
+            if ($detail.Length -gt 1500) {$detail=$detail.Substring(0,1500)}
+            throw ($_.Exception.Message+'; CryptoPro TLS: '+$detail)
+        }
+        throw
+    } finally {
+        try {Stop-OkbTunnel $tunnel} finally {Remove-Item -LiteralPath $dir -Recurse -Force}
+    }
 }
 function Cfb-Json($response) {
     if ($response.Status -ne 200) {throw ('CFB HTTP '+$response.Status+'; response saved when uploading')}
     return ([Text.Encoding]::UTF8.GetString($response.Bytes)|ConvertFrom-Json)
+}
+function Test-OkbConnection($diagnostic) {
+    $probe=Okb-Api @{action='heartbeat';diagnostic=$diagnostic}
+    $listing=Cfb-Json (Cfb-Request 'GET' '/file/outbox/list?kind=bureaufile&count=1&page=1' $probe.config)
+    if ($null -eq $listing.totalCount -or $null -eq $listing.page) {throw 'Unexpected CFB listing response'}
 }
 function Sign-Okb([byte[]]$zip,$certificate,[string]$tsp) {
     if (-not $tsp) {throw 'Missing TSP URL'}
@@ -140,10 +159,15 @@ $mutex=New-Object Threading.Mutex($false,'Local\CRM-OKB-Agent')
 if (-not $mutex.WaitOne(0)) {throw 'OKB component already running'}
 try {
  do {
-    $job=$null;$upload=$null;$diagnostic=@{version='1.0';computer=$env:COMPUTERNAME}
+    $job=$null;$upload=$null;$diagnostic=@{version='1.1';transport='cryptopro-msspi';computer=$env:COMPUTERNAME}
     try {
-        $diagnostic.certificates=@(Local-Certificates);Get-NbkiCurl|Out-Null
+        $diagnostic.certificates=@(Local-Certificates);Get-NbkiCurl|Out-Null;Get-OkbTunnelExecutable|Out-Null
         if ($CheckOnly) {Okb-Api @{action='heartbeat';diagnostic=$diagnostic}|Out-Null;Write-Host 'CHECK OK: certificate store and CRM. No files sent.';break}
+        if ($CheckConnection) {
+            Test-OkbConnection $diagnostic
+            Write-Host 'CFB CONNECTION OK: authenticated listing received through CryptoPro TLS. No files sent or acknowledged.'
+            break
+        }
         $poll=Okb-Api @{action='poll';diagnostic=$diagnostic};$job=$poll.job
         if ($job) {
             $raw=[Convert]::FromBase64String($job.xml_base64)
@@ -169,6 +193,7 @@ try {
             if ($upload -and $upload.Bytes.Length -le 1MB -and $upload.Bytes.Length -gt 0) {$failure.response_base64=[Convert]::ToBase64String($upload.Bytes)}
             try {Okb-Api $failure|Out-Null} catch {Write-Warning 'Could not save upload result in CRM; do not retry manually'}
         }
+        if ($CheckConnection -or $CheckOnly) {throw}
         Write-Warning $diagnostic.error
     }
     try {Okb-Api @{action='heartbeat';diagnostic=$diagnostic}|Out-Null} catch {Write-Warning 'CRM heartbeat failed'}

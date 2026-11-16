@@ -9,6 +9,8 @@ $cfbPassword=Read-Host 'CFB password from OKB (stored locally with DPAPI)' -AsSe
 @{protectedCfbPassword=($cfbPassword|ConvertFrom-SecureString);crmUrl=$CrmUrl; protectedToken=($token | ConvertFrom-SecureString)} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory 'config.json') -Encoding UTF8
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'OkbAgent.ps1') -Destination $directory -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'CryptoSupport.ps1') -Destination $directory -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'OkbTransport.ps1') -Destination $directory -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'transport') -Destination $directory -Recurse -Force
 $script=Join-Path $directory 'OkbAgent.ps1'
 # No execution-policy or system security changes. The task runs as the current
 # interactive user because their registry contains the private-key container.
