@@ -111,6 +111,15 @@ class LifecycleTests(unittest.TestCase):
         changed=copy.deepcopy(a); changed['reason_code']='99'
         self.assertNotEqual(checksum(a),checksum(changed))
 
+    def test_disabled_loan_cannot_export_frozen_lifecycle_event(self):
+        from unittest.mock import Mock
+        from backend.nbki_lifecycle import build_lifecycle_xml
+        for bureau in ('nbki','okb'):
+            cur=Mock(fetchone=Mock(return_value=(False,)))
+            with self.assertRaisesRegex(ValueError,'отключен'):
+                build_lifecycle_xml(cur,3,1,(None,None),bureau=bureau)
+            self.assertEqual(cur.execute.call_args.args[1],(1,3))
+
     def test_complete_guarantor_closure_validates_and_has_own_title(self):
         from backend.nbki_lifecycle import build_lifecycle_xml
         p=self.payload()

@@ -329,6 +329,14 @@ def obligation_event(payload, *, bureau="nbki"):
 
 
 def build_lifecycle_xml(cur, org_id, event_id, row, *, bureau="nbki"):
+    # The immutable snapshot must not override today's reporting exclusion.
+    if cur is not None:
+        cur.execute('''SELECT l.bki_enabled FROM nbki_crm_events e
+            JOIN loans l ON l.id=e.loan_id AND l.org_id=e.org_id
+            WHERE e.id=%s AND e.org_id=%s''', (event_id,org_id))
+        participation = cur.fetchone()
+        if not participation or participation[0] is not True:
+            raise ValueError('Договор отключен от выгрузок БКИ в карточке CRM')
     if __package__:
         from .nbki_xml_builder import document_xml
         from .nbki_event23_xml import _validate_xsd, generation_readiness

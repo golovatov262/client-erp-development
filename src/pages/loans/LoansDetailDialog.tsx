@@ -281,8 +281,8 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
           {(isAdmin || isManager) && <TabsContent value="nbki" className="space-y-3">
             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-              <div><div className="text-sm font-medium">Участвует в выгрузках БКИ</div><div className="text-xs text-muted-foreground">При Off договор исключается из очередей, проверок готовности и формирования новых файлов.</div></div>
-              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-muted-foreground">{bkiEnabled ? "On" : "Off"}</span><Switch checked={bkiEnabled} disabled={bkiToggleSaving} onCheckedChange={toggleBkiParticipation} aria-label="Участие договора в выгрузках БКИ" /></div>
+              <div><div className="text-sm font-medium">Участвует в выгрузках БКИ</div><div className="text-xs text-muted-foreground">При выключении договор исключается из очередей, проверок готовности и формирования новых файлов.</div></div>
+              <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-muted-foreground">{bkiEnabled ? "Включено" : "Выключено"}</span><Switch checked={bkiEnabled} disabled={bkiToggleSaving} onCheckedChange={toggleBkiParticipation} aria-label="Участие договора в выгрузках БКИ" /></div>
             </div>
             <p className="text-sm text-muted-foreground">Персональные сведения заёмщика подставляются из карточки пайщика, условия и события — из договора, платежей и графика CRM. Исторические сведения источников показываются отдельно; приём файла подтверждается квитанцией конкретного бюро.</p>
             <NbkiContractFields loanId={detail.id} />
