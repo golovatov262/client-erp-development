@@ -201,6 +201,12 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         from .nbki_reporting_policy import prepare_payment_accrual,record_payment_accrual
     else:
         from nbki_reporting_policy import prepare_payment_accrual,record_payment_accrual
+    cur.execute('SELECT clock_timestamp()')
+    recorded_at = cur.fetchone()[0]
+    time_basis = 'operator_entered' if event_occurred_at else None
+    if source == 'bank':
+        event_occurred_at = recorded_at
+        time_basis = 'crm_posted'
     accrual_before = prepare_payment_accrual(cur,loan_id,payment_date,event_occurred_at)
     nbki_state_before = capture_loan_state(cur, loan_id)
 
@@ -214,10 +220,10 @@ def post_loan_payment(cur, loan_id, amount, payment_date, description='', source
         (loan_id,payment_date,amount,principal_part,interest_part,penalty_part,payment_type,
          description,source,source_ref,engine_version,nbki_recorded_at,
          nbki_event_occurred_at,nbki_event_time_basis)
-        VALUES (%s,%s,%s,0,0,0,'regular',%s,%s,%s,'v2',clock_timestamp(),%s,%s)
+        VALUES (%s,%s,%s,0,0,0,'regular',%s,%s,%s,'v2',%s,%s,%s)
         RETURNING id""",
         (loan_id, payment_date, amount, description or '', source, source_ref,
-         event_occurred_at, 'operator_entered' if event_occurred_at else None))
+         recorded_at, event_occurred_at, time_basis))
     payment_id = cur.fetchone()[0]
     remaining = amount
     totals = {'interest': Decimal('0'), 'principal': Decimal('0'), 'penalty': Decimal('0'), 'early_principal': Decimal('0')}

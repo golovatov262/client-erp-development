@@ -19,6 +19,17 @@ def individual(event_id):
 
 
 class BatchTests(unittest.TestCase):
+    def test_blocked_pair_identifies_payment_without_internal_numbers(self):
+        from datetime import date
+        from unittest.mock import Mock
+        from backend.nbki_event23_xml import blocked_event_labels
+        cur = Mock()
+        cur.fetchall.return_value = [(611, '100-000038921102024', date(2026,11,13), 54000),
+                                    (612, '100-000038921102024', date(2026,11,13), 54000)]
+        labels = blocked_event_labels(cur, 2, [611,612])
+        self.assertEqual(labels[611], labels[612])
+        self.assertEqual(labels[611], 'Договор 100-000038921102024 · платёж от 13.11.2026 · 54 000,00 ₽')
+
     def test_global_order_after_grouping_sorting_and_exclusion(self):
         with patch('backend.nbki_event23_xml.build_event23_xml', side_effect=lambda c,o,e,**kw: individual(e)), \
              patch('backend.nbki_event23_xml._validate_xsd', return_value={

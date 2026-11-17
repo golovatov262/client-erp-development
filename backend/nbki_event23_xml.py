@@ -386,6 +386,24 @@ def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True,
             'psk_status': (facts['loan'].get('psk') or {}).get('status')}
 
 
+def blocked_event_labels(cur, org_id, ids):
+    """Resolve both a payment and its accrual companion to an operator-facing label."""
+    if cur is None or not ids:
+        return {}
+    cur.execute('''SELECT e.id,l.contract_no,p.payment_date,p.amount
+        FROM nbki_crm_events e JOIN loans l ON l.id=e.loan_id
+        LEFT JOIN nbki_debt_reporting_triggers t ON t.event_id=e.id
+        LEFT JOIN nbki_crm_events following ON following.id=t.following_event_id
+        LEFT JOIN loan_payments p ON p.loan_id=e.loan_id AND p.id=CASE
+            WHEN e.source_type='loan_payment' THEN e.source_id
+            WHEN following.source_type='loan_payment' THEN following.source_id END
+        WHERE e.org_id=%s AND e.id=ANY(%s)''', (org_id, ids))
+    return {eid: (f'Договор {contract} · платёж от {day.strftime("%d.%m.%Y")} · '
+                  f"{format(Decimal(amount), ',.2f').replace(',', ' ').replace('.', ',')} ₽"
+                  if day is not None and amount is not None else f'Договор {contract}')
+            for eid, contract, day, amount in cur.fetchall()}
+
+
 def build_event23_batch_xml(cur, org_id: int, event_ids: list[int], *, bureau="nbki") -> dict:
     """Build one XSD-validated document from individually eligible CRM events.
 
@@ -453,7 +471,8 @@ def build_event23_batch_xml(cur, org_id: int, event_ids: list[int], *, bureau="n
         grouped={uid:g for uid,g in grouped.items() if g['events']}
 
     if not exported or first_root is None:
-        reasons = '; '.join(f"{item['event_id']}: {item['reason']}" for item in excluded[:5])
+        labels = blocked_event_labels(cur, org_id, [item['event_id'] for item in excluded[:5]])
+        reasons = '; '.join(f"{labels.get(item['event_id'], 'Событие')}: {item['reason']}" for item in excluded[:5])
         raise ValueError('Нет готовых CRM-событий для XML' + (': ' + reasons if reasons else ''))
 
     data = first_root.find('./Data')

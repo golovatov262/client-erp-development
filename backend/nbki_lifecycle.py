@@ -90,7 +90,7 @@ def facts_from_snapshot(s):
         raise ValueError('Не установлен подтверждённый УИД займа')
     if not all(fields.get(k) for k in ('deal_code', 'kind_code', 'purpose_code')):
         raise ValueError('Не заполнены коды сделки, вида займа и цели в карточке БКИ')
-    when = datetime.fromisoformat(s['occurred_at']).astimezone(MSK).date().isoformat()
+    when = s.get('accounting_date') or datetime.fromisoformat(s['occurred_at']).astimezone(MSK).date().isoformat()
     payments = s['payments']
     event_at = datetime.fromisoformat(s['occurred_at'])
     if date.fromisoformat(l['start_date']) > event_at.astimezone(MSK).date():
@@ -156,7 +156,7 @@ def debt_evidence(cur, s, principal):
         from nbki_crm_debt import split_latest_crm_debt, estimate_current_interest
         from nbki_debt_preview import preview_debt
         from nbki_smp import preview_smp
-    day = datetime.fromisoformat(s['occurred_at']).astimezone(MSK).date()
+    day = date.fromisoformat(s['accounting_date']) if s.get('accounting_date') else datetime.fromisoformat(s['occurred_at']).astimezone(MSK).date()
     loan_id = s['loan']['id']
     # Upper bound includes all actual payments of this day; no synthetic payment is stored.
     cutoff = 9223372036854775807

@@ -64,6 +64,24 @@ class ReportingPolicyTests(unittest.TestCase):
 
 
 class PairIntegrityTests(unittest.TestCase):
+    def test_late_bank_posting_preserves_accounting_day(self):
+        from backend.nbki_reporting_policy import prepare_payment_accrual
+        from backend.nbki_lifecycle import facts_from_snapshot
+        from datetime import timezone
+        posted = datetime(2026, 11, 17, 5, 30, tzinfo=timezone.utc)
+        snapshot = dict(loan=dict(id=1, org_id=2, contract_no='TEST', start_date='2026-01-01', amount='100', balance='100'),
+                        subject={}, organization={}, settings={}, uid='test',
+                        fields=dict(deal_code='1', kind_code='1', purpose_code='1'),
+                        payments=[], psk=None, report_blocks={}, occurred_at=posted.isoformat())
+        cur = Mock(fetchone=Mock(return_value=(True, 2)))
+        with patch('backend.nbki_lifecycle.capture', return_value=snapshot), \
+             patch('backend.nbki_lifecycle.debt_evidence', return_value={}), \
+             patch('backend.nbki_reporting_policy.payload_from_state', side_effect=lambda s, f, *args: (s, f)):
+            saved, facts = prepare_payment_accrual(cur, 1, date(2026, 11, 13), posted)
+        self.assertEqual(saved['accounting_date'], '2026-11-13')
+        self.assertEqual(facts['payment']['date'], '2026-11-13')
+        self.assertEqual(facts['event_occurred_at'], posted.isoformat())
+
     def test_invalid_accrual_never_leaks_payment_only_batch(self):
         from backend.nbki_event23_xml import build_event23_batch_xml
         from scripts.test_nbki_event23_batch import individual
@@ -74,7 +92,7 @@ class PairIntegrityTests(unittest.TestCase):
              patch('backend.nbki_reporting_policy.reporting_pairs',return_value=[(2,1)]), \
              patch('backend.nbki_event23_xml.build_event23_xml',side_effect=build):
             with self.assertRaisesRegex(ValueError,'Нет готовых'):
-                build_event23_batch_xml(Mock(),2,[1])
+                build_event23_batch_xml(Mock(fetchall=Mock(return_value=[])),2,[1])
 
     def test_missed_due_date_never_fabricated_from_today(self):
         s={'schedule':[{'payment_date':'2026-11-11','status':'pending','payment_amount':'100'}]}

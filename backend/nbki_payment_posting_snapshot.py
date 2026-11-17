@@ -58,7 +58,8 @@ def record_payment_event(cur, payment_id: int, loan_id: int,
     """Queue the CRM operation atomically with its payment and frozen evidence.
 
     No imported 1C file or assumed receipt participates in this decision.
-    Unknown bank-event time remains NULL until established from the bank record.
+    Automatic bank postings use their actual CRM posting timestamp (crm_posted).
+    Missing manual occurrence times remain NULL until confirmed by the operator.
     """
     cur.execute("SELECT org_id,bki_enabled FROM loans WHERE id=%s", (loan_id,))
     row = cur.fetchone()

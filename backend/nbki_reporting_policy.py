@@ -117,6 +117,8 @@ def prepare_payment_accrual(cur,loan_id,payment_day,event_at):
     facts={};evidence=None;blockers=[]
     try:
         snapshot=capture(cur,loan_id,calculation_at)
+        # Posting timestamp and accounting date are distinct for late bank imports.
+        snapshot['accounting_date']=payment_day.isoformat()
         facts,principal=facts_from_snapshot(snapshot)
         evidence=debt_evidence(cur,snapshot,principal)
     except (ValueError,TypeError) as exc:blockers.append(str(exc))

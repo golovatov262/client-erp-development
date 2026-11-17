@@ -17,6 +17,7 @@
 - Missing, unmatched, unposted or unidentified bank-statement rows must not block NBKI event creation or XML generation. Do not require successful bank import, statement coverage or all statement rows to be matched as an NBKI prerequisite.
 - Debt amounts and event dates come from CRM accounting and frozen operation evidence. Preserve the loan transaction lock and financial/XSD checks; never infer a payment from an unposted statement row.
 - Debt-change reporting (event 2.3), payment reporting, and bank-import status are distinct concerns. Do not describe debt snapshots as new payments or as confirmed NBKI acceptance.
+- New automatic bank payments use the full actual CRM posting timestamp as the event time (`crm_posted`), not a clock time combined with the statement date. Preserve the payment/accounting date separately, including in pre-payment accrual evidence. Do not silently backfill historical missing times. Operator-facing blockers identify the contract, payment date and amount.
 
 # NBKI reporting frequency (confirmed 2026-11-12)
 

@@ -104,6 +104,21 @@ assert r2['interest_part'] == 10.0 and r2['principal_part'] == 10.0, r2
 cur.execute("SELECT nbki_event_occurred_at,nbki_recorded_at IS NOT NULL FROM loan_payments WHERE id=%s", (r2['payment_id'],))
 assert cur.fetchone() == (None, True)
 
+# Backdated bank payment: actual posting instant, never date + invented clock.
+loan = make_loan(cur, 'BANK-TIME')
+cur.execute("UPDATE loans SET bki_enabled=true WHERE id=%s", (loan,))
+r = post_loan_payment(cur, loan, 30, date(2026, 10, 7), source='bank', source_ref='bank-time-test')
+cur.execute("""SELECT payment_date,nbki_event_occurred_at,nbki_recorded_at,nbki_event_time_basis
+    FROM loan_payments WHERE id=%s""", (r['payment_id'],))
+day, at, recorded, basis = cur.fetchone()
+assert day == date(2026, 10, 7) and at == recorded and basis == 'crm_posted'
+cur.execute("SELECT event_occurred_at FROM nbki_crm_events WHERE source_type='loan_payment' AND source_id=%s", (r['payment_id'],))
+assert cur.fetchone()[0] == at
+again = post_loan_payment(cur, loan, 30, date(2026, 10, 7), source='bank', source_ref='bank-time-test')
+assert again['duplicate'] and again['payment_id'] == r['payment_id']
+cur.execute("SELECT nbki_event_occurred_at FROM loan_payments WHERE id=%s", (r['payment_id'],))
+assert cur.fetchone()[0] == at
+
 # Досрочное погашение с сохранением срока уменьшает платёж и сохраняет строки/даты.
 loan = make_loan(cur, 'EARLY-PAYMENT')
 cur.execute("SELECT array_agg(payment_date ORDER BY payment_no),count(*) FROM loan_schedule WHERE loan_id=%s", (loan,))
