@@ -36,7 +36,8 @@ class ReceiptReplacementTests(unittest.TestCase):
         cur.fetchone.side_effect = [(17, 'hash'), (17,)]
         with patch('backend.nbki_import.parse_source_xml', return_value=source), \
              patch('backend.nbki_import.parse_receipt_zip', return_value=receipt), \
-             patch('backend.nbki_import.resolve_source_org_id', return_value=1):
+             patch('backend.nbki_import.resolve_source_org_id', return_value=1), \
+             patch('backend.nbki_import.source_profile', return_value=dict(source_id='QY01GG000001',source_inn='4307012081')):
             import_payloads(conn, [b'xml'], [b'receipt'] if kind else [])
         deletes = [call.args for call in cur.execute.call_args_list
                    if 'DELETE FROM nbki_receipt_errors' in call.args[0]]

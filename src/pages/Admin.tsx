@@ -144,7 +144,8 @@ const Admin = () => {
           <TabsTrigger value="notifications">Уведомления</TabsTrigger>
           <TabsTrigger value="api_keys">API-ключи</TabsTrigger>
           <TabsTrigger value="integrations">Интеграции</TabsTrigger>
-          <TabsTrigger value="nbki">НБКИ</TabsTrigger>
+          <TabsTrigger value="nbki">НБКИ · Эксперт Финанс</TabsTrigger>
+          <TabsTrigger value="nbki_fin_formula">НБКИ · ФИН ФОРМУЛА</TabsTrigger>
           <TabsTrigger value="okb">ОКБ</TabsTrigger>
         </TabsList>
 
@@ -189,6 +190,7 @@ const Admin = () => {
         </TabsContent>
         <TabsContent value="integrations"><AdminIntegrations /></TabsContent>
         <TabsContent value="nbki"><AdminNbkiTab /></TabsContent>
+        <TabsContent value="nbki_fin_formula"><AdminNbkiTab orgId={3} orgName="ФИН ФОРМУЛА" /></TabsContent>
         <TabsContent value="okb"><AdminOkbTab /></TabsContent>
       </Tabs>
 

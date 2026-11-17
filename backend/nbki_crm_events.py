@@ -29,6 +29,10 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         FROM nbki_file_events fe JOIN nbki_source_files f ON f.id=fe.source_file_id
         WHERE f.org_id=%s AND f.archived_at IS NULL AND fe.crm_event_id IS NOT NULL""", (org_id,))
     exported_through = cur.fetchone()[0]
+    cur.execute("SELECT MAX(confirmed_period_end) FROM nbki_source_files WHERE org_id=%s AND archived_at IS NULL AND acceptance_basis IS NOT NULL", (org_id,))
+    confirmed_through = cur.fetchone()[0]
+    if confirmed_through and (not exported_through or confirmed_through > exported_through):
+        exported_through = confirmed_through
     today = datetime.now(ZoneInfo('Europe/Moscow')).date()
     suggested_start = exported_through + timedelta(days=1) if exported_through else today - timedelta(days=90)
     if not date_from and not date_to:

@@ -123,19 +123,19 @@ class Deal:
                 self.subject_inn, self.birth_date, self.deal_date, self.original_amount)
 
 
-def parse_source_xml(raw: bytes) -> dict:
+def parse_source_xml(raw: bytes, *, source_id=SOURCE_ID, source_inn=SOURCE_INN) -> dict:
     if len(raw) > 25 * 1024 * 1024 or b"<!DOCTYPE" in raw.upper():
         raise ValueError("XML слишком большой или содержит DTD")
     root = ET.fromstring(raw)
     if root.tag != "Document":
         raise ValueError("Ожидается документ GUTDF")
     attrs = root.attrib
-    if attrs.get("sourceID") != SOURCE_ID or attrs.get("inn") != SOURCE_INN:
+    if attrs.get("sourceID") != source_id or attrs.get("inn") != source_inn:
         raise ValueError("Документ относится к другому источнику")
     if attrs.get("schemaVersion") != SCHEMA_VERSION:
         raise ValueError("Неподдерживаемая версия схемы")
     reg_number = attrs.get("regNumberDoc", "")
-    if not re.fullmatch(r"QY01GG000001_\d{8}_\d{6}", reg_number):
+    if not re.fullmatch(re.escape(source_id) + r"_\d{8}_\d{6}", reg_number):
         raise ValueError("Неверный регистрационный номер документа")
 
     deals: dict[str, Deal] = {}
@@ -206,7 +206,8 @@ def parse_source_xml(raw: bytes) -> dict:
         raise ValueError("Порядковые номера событий в файле повторяются")
     by_number = defaultdict(set)
     for deal in deals.values():
-        by_number[deal.contract_no].add(deal.uid)
+        if deal.role == 'borrower':
+            by_number[deal.contract_no].add(deal.uid)
     if any(len(uids) > 1 for uids in by_number.values()):
         raise ValueError("В файле один номер договора связан с несколькими УИД")
     return {"reg_number": reg_number, "document_time": _datetime(attrs.get("dateTimeDoc")),
@@ -373,8 +374,20 @@ def _sync_collateral_events(cur, org_id: int, file_id: int, source: dict,
     return counts
 
 
-def resolve_source_org_id(cur) -> int:
+def source_profile(cur, org_id):
+    cur.execute('SELECT s.source_id,o.inn FROM nbki_source_settings s JOIN organizations o ON o.id=s.org_id WHERE s.org_id=%s', (org_id,))
+    row = cur.fetchone()
+    if not row:
+        raise ValueError('Не настроен источник НБКИ для выбранной организации')
+    return dict(source_id=row[0], source_inn=row[1])
+
+
+def resolve_source_org_id(cur, org_id=None) -> int:
     """Resolve the source to its sole organization with loans if INN is duplicated."""
+    if org_id is not None:
+        org_id = int(org_id)
+        source_profile(cur, org_id)
+        return org_id
     cur.execute("""SELECT o.id, COUNT(l.id) AS loan_count
                    FROM organizations o LEFT JOIN loans l ON l.org_id=o.id
                    WHERE o.inn=%s GROUP BY o.id""", (SOURCE_INN,))
@@ -387,12 +400,15 @@ def resolve_source_org_id(cur) -> int:
     raise ValueError("Нельзя однозначно определить организацию источника по ИНН и договорам")
 
 
-def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[bytes]) -> dict:
-    files = sorted((parse_source_xml(raw) for raw in xml_payloads),
+def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[bytes], *, org_id=None) -> dict:
+    with conn.cursor() as cur:
+        org_id = resolve_source_org_id(cur, org_id) if org_id is not None else resolve_source_org_id(cur)
+        profile = source_profile(cur, org_id)
+    files = sorted((parse_source_xml(raw, **profile) for raw in xml_payloads),
                    key=lambda item: item["document_time"])
     receipts = {}
     for receipt_payload in receipt_payloads:
-        item = parse_receipt_zip(receipt_payload)
+        item = parse_receipt_zip(receipt_payload, source_id=profile["source_id"])
         if item["reg_number"] not in {source["reg_number"] for source in files}:
             raise ValueError("Квитанция относится к другому XML")
         previous = receipts.get(item["reg_number"])
@@ -405,15 +421,15 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
             old = seen_uid.get(uid)
             if old and old.identity() != deal.identity():
                 raise ValueError("Разные реквизиты сделки с одним УИД между файлами")
-            if deal.contract_no in seen_number and seen_number[deal.contract_no] != uid:
+            if deal.role == 'borrower' and deal.contract_no in seen_number and seen_number[deal.contract_no] != uid:
                 raise ValueError("Один номер договора связан с разными УИД между файлами")
             seen_uid[uid] = deal
-            seen_number[deal.contract_no] = uid
+            if deal.role == 'borrower':
+                seen_number[deal.contract_no] = uid
 
     statuses: dict[str, str] = {}
     collateral_totals: Counter = Counter()
     with conn.cursor() as cur:
-        org_id = resolve_source_org_id(cur)
         for source in files:
             reg = source["reg_number"]
             receipt = receipts.get(reg)
@@ -437,7 +453,7 @@ def import_payloads(conn, xml_payloads: list[bytes], receipt_payloads: list[byte
                     events_accepted=COALESCE(EXCLUDED.events_accepted, nbki_source_files.events_accepted),
                     events_rejected=COALESCE(EXCLUDED.events_rejected, nbki_source_files.events_rejected),
                     receipt_time=COALESCE(EXCLUDED.receipt_time, nbki_source_files.receipt_time)
-                RETURNING id""", (org_id, SOURCE_ID, reg, source["schema_version"],
+                RETURNING id""", (org_id, profile["source_id"], reg, source["schema_version"],
                     source["document_time"], source["xml_sha256"], source["xml_gzip"], source["subjects_count"],
                     source["events_count"], receipt["status"] if receipt else "unknown",
                     receipt.get("accepted") if receipt else None,

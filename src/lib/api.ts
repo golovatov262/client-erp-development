@@ -27,6 +27,7 @@ export type NbkiFile = {
   events_accepted: number | null;
   events_rejected: number | null;
   receipt_signature_verified: boolean;
+    acceptance_basis?: string | null;
   errors: NbkiReceiptError[];
 };
 
@@ -151,6 +152,7 @@ export type NbkiInspection = {
     document_time: string | null;
     receipt_status: string;
     receipt_signature_verified: boolean;
+    acceptance_basis?: string | null;
     event_name: string;
     event_time: string | null;
     values: Record<string, string | null>;
@@ -506,6 +508,40 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
   return data;
 }
 
+export const createNbkiApi = (orgId?: number) => ({
+    exchangeStatus: () => request<NbkiExchangeStatus>("GET", {entity: "nbki", org_id: orgId, action: "exchange_status"}),
+    exchangeAction: <T = {success: boolean}>(action: string, data: Record<string, unknown> = {}) => request<T>("POST", undefined, {entity: "nbki", org_id: orgId, ...data, action}),
+    outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", org_id: orgId, action: "outbox" }),
+    changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", org_id: orgId, action: "change_candidates" }),
+    readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", org_id: orgId, action: "readiness_report" }),
+    reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", org_id: orgId, action: "reconciliation_report" }),
+    paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", org_id: orgId, action: "payment_candidates" }),
+    crmEvents: (dateFrom?: string, dateTo?: string) => request<NbkiCrmEvents>("GET", {
+      entity: "nbki", org_id: orgId, action: "crm_events", date_from: dateFrom, date_to: dateTo,
+    }),
+    collateralReadiness: () => request<NbkiCollateralReadiness>("GET", { entity: "nbki", org_id: orgId, action: "collateral_readiness" }),
+    event23Xml: (eventId: number) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string }>("POST", undefined, { entity: "nbki", org_id: orgId, action: "event23_xml", event_id: eventId }),
+    event23BatchXml: (eventIds: number[]) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string; events: { event_id: number; contract_no: string; uid: string }[]; excluded: { event_id: number; reason: string }[] }>("POST", undefined, { entity: "nbki", org_id: orgId, action: "event23_batch_xml", event_ids: eventIds }),
+    sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", org_id: orgId, action: "sync_1c_facts" }),
+    inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", org_id: orgId, action: "inspect_loan", loan_id: loanId }),
+    createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
+      entity: "nbki", org_id: orgId, action: "create_draft", loan_id: loanId,
+    }),
+    createAllDrafts: () => request<{ total: number; created: number; unchanged: number; with_crm_issues: number; change_candidates: number; submittable: number }>("POST", undefined, {
+      entity: "nbki", org_id: orgId, action: "create_drafts_all",
+    }),
+    summary: () => request<NbkiSummary>("GET", { entity: "nbki", org_id: orgId, action: "summary" }),
+    deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", org_id: orgId, action: "deals", status, offset }),
+    eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", org_id: orgId, action: "event_deals", status, offset }),
+    exportRegistry: (status: "review" | "not_in_crm" | "missing_uid" | "readiness" | "reconciliation") => request<{ file_name: string; content_base64: string }>("GET", { entity: "nbki", org_id: orgId, action: "export_registry", status }),
+    importEvents: (mxlGzipBase64: string, fileName: string) => request<NbkiEventImportResult>("POST", undefined, {
+      entity: "nbki", org_id: orgId, action: "import_events", mxl_gzip_base64: mxlGzipBase64, file_name: fileName,
+    }),
+    importHistorical: (xml: string[], receipts: string[]) => request<NbkiImportResult>("POST", undefined, {
+      entity: "nbki", org_id: orgId, action: "import", xml_gzip_base64: xml, receipt_zip_base64: receipts,
+    }),
+  });
+
 export const api = {
   okb: {
     status: () => request<OkbStatus>('GET', {entity:'okb',action:'status'}),
@@ -513,39 +549,7 @@ export const api = {
     action: <T = {success:boolean}>(action:string,data:Record<string,unknown>={}) => request<T>('POST',undefined,{entity:'okb',action,...data}),
   },
   dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
-  nbki: {
-    exchangeStatus: () => request<NbkiExchangeStatus>("GET", {entity: "nbki", action: "exchange_status"}),
-    exchangeAction: <T = {success: boolean}>(action: string, data: Record<string, unknown> = {}) => request<T>("POST", undefined, {entity: "nbki", ...data, action}),
-    outbox: () => request<{ rows: NbkiDraft[] }>("GET", { entity: "nbki", action: "outbox" }),
-    changeCandidates: () => request<{ total: number; rows: NbkiChangeCandidate[] }>("GET", { entity: "nbki", action: "change_candidates" }),
-    readinessReport: () => request<NbkiReadinessReport>("GET", { entity: "nbki", action: "readiness_report" }),
-    reconciliationReport: () => request<NbkiReconciliationReport>("GET", { entity: "nbki", action: "reconciliation_report" }),
-    paymentCandidates: () => request<NbkiPaymentCandidates>("GET", { entity: "nbki", action: "payment_candidates" }),
-    crmEvents: (dateFrom?: string, dateTo?: string) => request<NbkiCrmEvents>("GET", {
-      entity: "nbki", action: "crm_events", date_from: dateFrom, date_to: dateTo,
-    }),
-    collateralReadiness: () => request<NbkiCollateralReadiness>("GET", { entity: "nbki", action: "collateral_readiness" }),
-    event23Xml: (eventId: number) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string }>("POST", undefined, { entity: "nbki", action: "event23_xml", event_id: eventId }),
-    event23BatchXml: (eventIds: number[]) => request<{ file_name: string; content_base64: string; sha256: string; xsd_valid: boolean; business_status: string; events: { event_id: number; contract_no: string; uid: string }[]; excluded: { event_id: number; reason: string }[] }>("POST", undefined, { entity: "nbki", action: "event23_batch_xml", event_ids: eventIds }),
-    sync1CFacts: () => request<Nbki1CFactsSync>("POST", undefined, { entity: "nbki", action: "sync_1c_facts" }),
-    inspectLoan: (loanId: number) => request<NbkiInspection>("GET", { entity: "nbki", action: "inspect_loan", loan_id: loanId }),
-    createDraft: (loanId: number) => request<{ id: number; contract_no: string; checks: NbkiDraft["checks"] }>("POST", undefined, {
-      entity: "nbki", action: "create_draft", loan_id: loanId,
-    }),
-    createAllDrafts: () => request<{ total: number; created: number; unchanged: number; with_crm_issues: number; change_candidates: number; submittable: number }>("POST", undefined, {
-      entity: "nbki", action: "create_drafts_all",
-    }),
-    summary: () => request<NbkiSummary>("GET", { entity: "nbki", action: "summary" }),
-    deals: (status: string, offset = 0) => request<NbkiDealsPage>("GET", { entity: "nbki", action: "deals", status, offset }),
-    eventDeals: (status: string, offset = 0) => request<NbkiEventDealsPage>("GET", { entity: "nbki", action: "event_deals", status, offset }),
-    exportRegistry: (status: "review" | "not_in_crm" | "missing_uid" | "readiness" | "reconciliation") => request<{ file_name: string; content_base64: string }>("GET", { entity: "nbki", action: "export_registry", status }),
-    importEvents: (mxlGzipBase64: string, fileName: string) => request<NbkiEventImportResult>("POST", undefined, {
-      entity: "nbki", action: "import_events", mxl_gzip_base64: mxlGzipBase64, file_name: fileName,
-    }),
-    importHistorical: (xml: string[], receipts: string[]) => request<NbkiImportResult>("POST", undefined, {
-      entity: "nbki", action: "import", xml_gzip_base64: xml, receipt_zip_base64: receipts,
-    }),
-  },
+  nbki: createNbkiApi(),
   integrationSecrets: {
     list: () => request<IntegrationSecretStatus[]>("GET", { entity: "integration_secrets" }),
     save: (values: Record<string,string>) => request<{success:boolean;changed:string[]}>("PUT", { entity: "integration_secrets" }, { entity: "integration_secrets", values }),

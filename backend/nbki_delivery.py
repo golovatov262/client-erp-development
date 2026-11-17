@@ -162,20 +162,20 @@ def check_delivery(cur, org_id, event_id, raw=None):
 def import_delivery_payloads(conn, xml_payloads, receipt_payloads, org_id):
     """Register sent files and apply receipts without mutating historical loan facts."""
     if __package__:
-        from .nbki_import import parse_source_xml, parse_receipt_zip, resolve_source_org_id
+        from .nbki_import import parse_source_xml, parse_receipt_zip, source_profile
     else:
-        from nbki_import import parse_source_xml, parse_receipt_zip, resolve_source_org_id
+        from nbki_import import parse_source_xml, parse_receipt_zip, source_profile
+    with conn.cursor() as cur:
+        profile = source_profile(cur, org_id)
     sources = {}
     for raw in xml_payloads:
-        source = parse_source_xml(raw)
+        source = parse_source_xml(raw, **profile)
         previous = sources.get(source['reg_number'])
         if previous and previous['xml_sha256'] != source['xml_sha256']:
             raise ValueError('Один номер файла относится к разным XML')
         sources[source['reg_number']] = source
-    receipts = [(raw,parse_receipt_zip(raw)) for raw in receipt_payloads]
+    receipts = [(raw,parse_receipt_zip(raw, source_id=profile["source_id"])) for raw in receipt_payloads]
     with conn.cursor() as cur:
-        if resolve_source_org_id(cur) != org_id:
-            raise ValueError('Источник файла не соответствует организации пользователя')
         for _, receipt in receipts:
             reg = receipt['reg_number']
             if reg not in sources:
@@ -183,7 +183,7 @@ def import_delivery_payloads(conn, xml_payloads, receipt_payloads, org_id):
                 row = cur.fetchone()
                 if not row:
                     raise ValueError('Сначала загрузите отправленный XML для этой квитанции')
-                sources[reg] = parse_source_xml(gzip.decompress(bytes(row[0])))
+                sources[reg] = parse_source_xml(gzip.decompress(bytes(row[0])), **profile)
         file_ids = []
         for reg, source in sources.items():
             cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('nbki-import:'+reg,))
@@ -193,9 +193,9 @@ def import_delivery_payloads(conn, xml_payloads, receipt_payloads, org_id):
                 raise ValueError('Регистрационный номер уже используется для другого XML')
             cur.execute('''INSERT INTO nbki_source_files
                 (org_id,source_id,reg_number,schema_version,document_time,xml_sha256,xml_gzip,subjects_count,events_count)
-                VALUES (%s,'QY01GG000001',%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(reg_number) DO UPDATE SET archived_at=NULL RETURNING id''',
-                (org_id,reg,source['schema_version'],source['document_time'],source['xml_sha256'],
+                (org_id,profile['source_id'],reg,source['schema_version'],source['document_time'],source['xml_sha256'],
                  source['xml_gzip'],source['subjects_count'],source['events_count']))
             file_id=cur.fetchone()[0];file_ids.append(file_id)
             for event in source['events']:
@@ -215,13 +215,15 @@ def import_delivery_payloads(conn, xml_payloads, receipt_payloads, org_id):
                 cur.execute('''INSERT INTO nbki_receipt_uploads(source_file_id,sha256,receipt_kind,payload)
                     VALUES (%s,%s,%s,%s) ON CONFLICT(source_file_id,sha256) DO NOTHING''',
                     (file_id,hashlib.sha256(raw).hexdigest(),receipt['kind'],raw))
-                cur.execute('SELECT events_accepted,receipt_time,receipt_status FROM nbki_source_files WHERE id=%s', (file_id,))
-                old_accepted, old_time, old_status=cur.fetchone()
-                if old_accepted is not None and (receipt['kind']==1 or old_status=='accepted'
+                cur.execute('SELECT events_accepted,receipt_time,receipt_status,acceptance_basis FROM nbki_source_files WHERE id=%s', (file_id,))
+                old_accepted, old_time, old_status, operator_basis=cur.fetchone()
+                if operator_basis and receipt['kind']==1:
+                    continue
+                if old_accepted is not None and not operator_basis and (receipt['kind']==1 or old_status=='accepted'
                     or (old_time and receipt.get('receipt_time') and old_time>receipt['receipt_time'])):
                     continue
                 cur.execute('''UPDATE nbki_source_files SET receipt_status=%s,events_accepted=%s,
-                    events_rejected=%s,receipt_time=%s,receipt_signature_verified=false WHERE id=%s''',
+                    events_rejected=%s,receipt_time=%s,receipt_signature_verified=false,acceptance_basis=NULL WHERE id=%s''',
                     (receipt['status'],receipt.get('accepted'),receipt.get('rejected'),receipt.get('receipt_time'),file_id))
                 cur.execute('DELETE FROM nbki_receipt_errors WHERE source_file_id=%s AND receipt_kind=%s', (file_id,receipt['kind']))
                 for error in receipt['errors']:

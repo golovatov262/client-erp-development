@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import api, { humanizeError, NbkiExchangeConfig, NbkiExchangeStatus } from '@/lib/api';
+import api, { createNbkiApi, humanizeError, NbkiExchangeConfig, NbkiExchangeStatus } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,8 @@ const encode = async (file:File) => {
   return btoa(text);
 };
 export type NbkiView = 'operations' | 'history' | 'settings';
-export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,onSettings}:{eventIds:number[];onChange:()=>void;view:NbkiView;periodPending:boolean;onSettings:()=>void}) {
+export default function NbkiExchangePanel({orgId,eventIds,onChange,view,periodPending,onSettings}:{orgId:number;eventIds:number[];onChange:()=>void;view:NbkiView;periodPending:boolean;onSettings:()=>void}) {
+  const nbki = createNbkiApi(orgId);
   const [state,setState]=useState<NbkiExchangeStatus|null>(null);
   const [config,setConfig]=useState<NbkiExchangeConfig>({});
   const [recipient,setRecipient]=useState<File|null>(null);
@@ -23,7 +24,7 @@ export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,
   const notify=useRef(onChange);notify.current=onChange;
   const previousStatus=useRef('');
   const refresh=async(initial=false)=>{
-    const next=await api.nbki.exchangeStatus();setState(next);
+    const next=await nbki.exchangeStatus();setState(next);
     const status=JSON.stringify(next.packages.map(p=>[p.id,p.status]));
     if(previousStatus.current && previousStatus.current!==status)notify.current();
     previousStatus.current=status;
@@ -42,18 +43,18 @@ export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,
     if(recipient)payload.recipient_certificate=await encode(recipient);
     if(receipt)payload.receipt_certificate=await encode(receipt);
     if(mchd)payload.mchd_base64=await encode(mchd);
-    const result=await api.nbki.exchangeAction<{config:NbkiExchangeConfig}>('exchange_settings',payload);
+    const result=await nbki.exchangeAction<{config:NbkiExchangeConfig}>('exchange_settings',payload);
     setConfig(result.config);setRecipient(null);setReceipt(null);setMchd(null);setEditing(false);setMessage('Настройки сохранены');
   });
   const prepare=()=>run(async()=>{
-    const result=await api.nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:eventIds});
+    const result=await nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:eventIds});
     setMessage(`Пакет №${result.id} поставлен в очередь Windows-компонента`);
   });
   const createAgent=()=>run(async()=>{
-    const result=await api.nbki.exchangeAction<{token:string}>('exchange_agent_create');setToken(result.token);
+    const result=await nbki.exchangeAction<{token:string}>('exchange_agent_create');setToken(result.token);
   });
   const download=(id:number,xml=false)=>run(async()=>{
-    const r=await api.nbki.exchangeAction<{file_name:string;content_base64:string}>('exchange_download',{id,xml});
+    const r=await nbki.exchangeAction<{file_name:string;content_base64:string}>('exchange_download',{id,xml});
     const raw=Uint8Array.from(atob(r.content_base64),c=>c.charCodeAt(0));
     const url=URL.createObjectURL(new Blob([raw]));const a=document.createElement('a');a.href=url;a.download=r.file_name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
@@ -116,16 +117,16 @@ export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,
       <details><summary className="cursor-pointer font-medium">Подключение Windows-ПК</summary>
         <div className="space-y-3 pt-3">
           <p>На ПК нужны КриптоПро CSP 5.0 R3 или новее, лицензия КриптоПро TSP Client, корневые сертификаты УЦ ЦБ и компонент КриптоПро ЭЦП (CAdES COM). Ключ должен быть доступен текущему пользователю Windows. Компонент работает без открытого браузера.</p>
-          <a className="underline" href="/nbki-agent.zip?v=2.0.4" download>Скачать Windows-компонент 2.0.4</a>
+          <a className="underline" href="/nbki-agent.zip?v=2.1" download>Скачать Windows-компонент 2.1</a>
           <p>Распакуйте архив, создайте ключ подключения ниже и запустите установку из PowerShell под пользователем — владельцем ключа:</p>
-          <code className="block break-all">{`.\Install-NbkiAgent.ps1 -CrmUrl "${window.location.origin}/api"`}</code>
+          <code className="block break-all">{`.\Install-NbkiAgent.ps1 -CrmUrl "${window.location.origin}/api"${orgId === 3 ? " -Profile FinFormula" : ""}`}</code>
           <p className="text-muted-foreground">Установщик не меняет политику выполнения скриптов и настройки безопасности. Если ваша политика требует подписи скрипта, установку выполняет администратор по правилам организации.</p>
           <Button variant="outline" disabled={busy} onClick={createAgent}>Создать ключ подключения ПК</Button>
           {token&&<div className="space-y-2"><p>Ключ показан один раз. Вставьте его в запрос установщика.</p><Input readOnly value={token} aria-label="Ключ подключения Windows"/><Button variant="outline" onClick={()=>setToken('')}>Скрыть ключ</Button></div>}
           {state?.agents.map(a=><div key={a.id} className="border-t pt-2">
             <div>{a.name} · {a.active?'активен':'отозван'} · Последняя связь: {a.last_seen_at?new Date(a.last_seen_at).toLocaleString('ru-RU'):'ещё не подключён'}</div>
             {(a.diagnostic.error||a.diagnostic.receipt_error)&&<div className="text-destructive">{a.diagnostic.error||a.diagnostic.receipt_error}</div>}
-            {a.active&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>run(async()=>{await api.nbki.exchangeAction('exchange_agent_revoke',{id:a.id});})}>Отозвать доступ ПК</Button>}
+            {a.active&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>run(async()=>{await nbki.exchangeAction('exchange_agent_revoke',{id:a.id});})}>Отозвать доступ ПК</Button>}
           </div>)}
         </div>
       </details>
@@ -136,7 +137,7 @@ export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,
       {!state&&!error&&<p role="status">Проверяем состояние обмена…</p>}
       {state&&!configured&&<p>Обмен ещё не настроен. <button className="underline" onClick={onSettings}>Открыть настройки</button></p>}
       <Button disabled={periodPending||busy||editing||!available.length||!state?.config.recipient||!state?.config.signer_thumbprint||!state?.config.tsp_url||state?.config.signature_profile!=='CAdES-T'||!state?.config.package_suffix} onClick={()=>{
-        if(available.length!==eventIds.length){void run(async()=>{const r=await api.nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:available});setMessage(`Пакет №${r.id} поставлен в очередь`);});}else void prepare();
+        if(available.length!==eventIds.length){void run(async()=>{const r=await nbki.exchangeAction<{id:number}>('exchange_prepare',{event_ids:available});setMessage(`Пакет №${r.id} поставлен в очередь`);});}else void prepare();
       }}>{state?.config.transport==='nbki_https'?'Отправить в НБКИ':'Подготовить защищённый файл'} · событий: {available.length}</Button>
       {editing&&<p>Сохраните настройки перед подготовкой пакета.</p>}
       {periodPending&&<p className="text-amber-700">Сначала нажмите «Показать период», чтобы отправить события за выбранные даты.</p>}
@@ -154,7 +155,7 @@ export default function NbkiExchangePanel({eventIds,onChange,view,periodPending,
         {p.error&&<p className="text-destructive break-words">{p.error}</p>}
         {p.status==='delivery_unknown'&&<p className="text-amber-700">Не отправляйте повторно до сверки с НБКИ: файл мог быть получен.</p>}
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id,true)}>Исходный XML</Button>{p.encrypted_name&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>download(p.id)}>Скачать защищённый файл</Button>}
-        {['queued','prepared','failed'].includes(p.status)&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>run(async()=>{await api.nbki.exchangeAction('exchange_cancel',{id:p.id});})}>Отменить пакет</Button>}</div>
+        {['queued','prepared','failed'].includes(p.status)&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>run(async()=>{await nbki.exchangeAction('exchange_cancel',{id:p.id});})}>Отменить пакет</Button>}</div>
       </div>)}
       </details>}
     </CardContent>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import NbkiExchangePanel, { NbkiView } from "./NbkiExchangePanel";
-import api, { NbkiCrmEvents, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
+import api, { createNbkiApi, NbkiCrmEvents, NbkiImportResult, NbkiSummary, humanizeError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +41,8 @@ const defaultEventPeriod = () => {
   return { from: dateInputValue(from), to: dateInputValue(to) };
 };
 
-const AdminNbkiTab = () => {
+const AdminNbkiTab = ({orgId = 2, orgName = "Эксперт Финанс"}: {orgId?: number; orgName?: string}) => {
+  const nbki = createNbkiApi(orgId);
   const [view, setView] = useState<NbkiView>("operations");
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [error, setError] = useState("");
@@ -63,8 +64,8 @@ const AdminNbkiTab = () => {
     setError("");
     try {
       const [nextSummary, events] = await Promise.all([
-        api.nbki.summary(),
-        api.nbki.crmEvents(),
+        nbki.summary(),
+        nbki.crmEvents(),
       ]);
       setSummary(nextSummary);
       setCrmEvents(events);
@@ -81,7 +82,7 @@ const AdminNbkiTab = () => {
     setEventPeriodLoading(true);
     setError("");
     try {
-      const events = await api.nbki.crmEvents(eventPeriodFrom, eventPeriodTo);
+      const events = await nbki.crmEvents(eventPeriodFrom, eventPeriodTo);
       setCrmEvents(events);
       setLoadedEventPeriod({ from: eventPeriodFrom, to: eventPeriodTo });
     } catch (e) { setError(humanizeError(e)); }
@@ -92,7 +93,7 @@ const AdminNbkiTab = () => {
     setBuildingEventId(eventId);
     setError("");
     try {
-      const { file_name, content_base64 } = await api.nbki.event23Xml(eventId);
+      const { file_name, content_base64 } = await nbki.event23Xml(eventId);
       const binary = atob(content_base64);
       const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/xml;charset=utf-8" }));
@@ -112,7 +113,7 @@ const AdminNbkiTab = () => {
     setBatchResult("");
     setError("");
     try {
-      const result = await api.nbki.event23BatchXml(ids);
+      const result = await nbki.event23BatchXml(ids);
       const binary = atob(result.content_base64);
       const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/xml;charset=utf-8" }));
@@ -140,7 +141,7 @@ const AdminNbkiTab = () => {
     try {
       const xml = await Promise.all(xmlFiles.map(gzipFile));
       const receipts = await Promise.all(receiptFiles.map(async file => toBase64(await file.arrayBuffer())));
-      const result = await api.nbki.importHistorical(xml, receipts);
+      const result = await nbki.importHistorical(xml, receipts);
       setImportResult(result);
       setXmlFiles([]);
       setReceiptFiles([]);
@@ -157,7 +158,7 @@ const AdminNbkiTab = () => {
     <div className="space-y-5 pt-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">НБКИ · Эксперт Финанс</h2>
+          <h2 className="text-lg font-semibold">НБКИ · {orgName}</h2>
           <p className="text-sm text-muted-foreground">Подготовка событий, отправка и контроль принятия НБКИ</p>
         </div>
         <Button variant="outline" onClick={() => void refresh()}>Обновить</Button>
@@ -220,12 +221,12 @@ const AdminNbkiTab = () => {
       </Card>
 
       </div>
-      <NbkiExchangePanel view={view} periodPending={periodPending} onSettings={()=>setView('settings')} eventIds={(crmEvents?.rows||[]).filter(e=>e.readiness.can_generate_xml).map(e=>e.id)} onChange={()=>void refresh()} />
+      <NbkiExchangePanel orgId={orgId} view={view} periodPending={periodPending} onSettings={()=>setView('settings')} eventIds={(crmEvents?.rows||[]).filter(e=>e.readiness.can_generate_xml).map(e=>e.id)} onChange={()=>void refresh()} />
       {view==='operations'&&!!summary?.files.length&&<section className="rounded-lg border p-4 space-y-3" aria-label="Последние результаты">
         <div className="flex flex-wrap justify-between items-center gap-2"><h3 className="font-semibold text-sm">Последние результаты обработки</h3><Button variant="ghost" size="sm" onClick={()=>setView('history')}>Вся история</Button></div>
         {summary.files.slice(0,3).map(file=><div key={file.reg_number} className="text-sm border-t pt-2">
           <div className="break-all text-xs text-muted-foreground">{file.reg_number}</div>
-          <div className="mt-1">{receiptLabel[file.receipt_status]||file.receipt_status}{['accepted','partial','rejected'].includes(file.receipt_status)&&` · принято ${file.events_accepted}, отклонено ${file.events_rejected}`}</div>
+          <div className="mt-1">{file.acceptance_basis ? "Принятие подтверждено оператором, без ticket2" : receiptLabel[file.receipt_status]||file.receipt_status}{['accepted','partial','rejected'].includes(file.receipt_status)&&` · принято ${file.events_accepted}, отклонено ${file.events_rejected}`}</div>
           {file.errors.length>0&&<button className="text-destructive underline text-xs" onClick={()=>setView('history')}>Посмотреть ошибки в истории</button>}
         </div>)}
       </section>}
@@ -264,9 +265,9 @@ const AdminNbkiTab = () => {
                   <div className="text-xs text-muted-foreground">Схема {file.schema_version} · {file.subjects_count} субъектов · {file.events_count} событий</div>
                 </div>
                 <div className="text-right">
-                  <Badge variant={file.receipt_status === "accepted" ? "default" : "secondary"}>{receiptLabel[file.receipt_status] || file.receipt_status}</Badge>
+                  <Badge variant={file.receipt_status === "accepted" ? "default" : "secondary"}>{file.acceptance_basis ? "Подтверждено оператором" : receiptLabel[file.receipt_status] || file.receipt_status}</Badge>
                   {["accepted", "partial", "rejected"].includes(file.receipt_status) && <div className="mt-1 text-xs text-muted-foreground">Принято {file.events_accepted}, отклонено {file.events_rejected}</div>}
-                  {!file.receipt_signature_verified && file.receipt_status !== "unknown" && <div className="text-xs text-amber-700">Подпись квитанции требует проверки CryptoPro</div>}
+                  {!file.acceptance_basis && !file.receipt_signature_verified && file.receipt_status !== "unknown" && <div className="text-xs text-amber-700">Подпись квитанции требует проверки CryptoPro</div>}
                 </div>
               </div>
               {file.errors.length > 0 && <details className="mt-2">

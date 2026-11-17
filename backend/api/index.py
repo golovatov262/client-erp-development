@@ -1017,10 +1017,16 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 return references()
             try:
                 if action == 'nbki_refresh_event':
-                    result = refresh_event_metadata(cur, resolve_source_org_id(cur), int(body['event_id']))
+                    cur.execute('SELECT org_id FROM nbki_crm_events WHERE id=%s', (int(body['event_id']),))
+                    owner = cur.fetchone()
+                    if not owner: raise ValueError('Событие не найдено')
+                    result = refresh_event_metadata(cur, owner[0], int(body['event_id']))
                     conn.commit()
                     return result
-                result = record_operation(cur, resolve_source_org_id(cur), int(body['loan_id']), body)
+                cur.execute('SELECT org_id FROM loans WHERE id=%s', (int(body['loan_id']),))
+                owner = cur.fetchone()
+                if not owner: raise ValueError('Договор не найден')
+                result = record_operation(cur, owner[0], int(body['loan_id']), body)
                 audit_log(cur, staff, 'create', 'nbki_lifecycle', result['operation_id'], '', str(body.get('basis', '')), ip)
                 conn.commit()
                 return result
@@ -1035,7 +1041,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             if not loan_id or not isinstance(enabled, bool):
                 return {'error': 'Укажите договор и состояние переключателя БКИ', '_status': 400}
             try:
-                org_id = resolve_source_org_id(cur)
+                cur.execute('SELECT org_id FROM loans WHERE id=%s', (loan_id,))
+                owner = cur.fetchone()
+                if not owner: raise ValueError('Договор не найден')
+                org_id = owner[0]
             except ValueError as exc:
                 return {'error': str(exc), '_status': 409}
             cur.execute("""UPDATE loans SET bki_enabled=%s,updated_at=NOW()
@@ -9934,7 +9943,8 @@ def handle_nbki(method, params, body, staff, cur, conn):
     if staff.get('role') != 'admin' and not (staff.get('role') == 'manager' and action == 'manual_contract_fields'):
         return {'_status': 403, 'error': 'Раздел НБКИ доступен только администратору'}
     try:
-        org_id = resolve_source_org_id(cur)
+        requested_org = params.get("org_id", body.get("org_id"))
+        org_id = resolve_source_org_id(cur, requested_org) if requested_org is not None else resolve_source_org_id(cur)
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
     if action.startswith('exchange_'):
@@ -10083,7 +10093,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
             raw = decoder.decompress(packed, 20 * 1024 * 1024 + 1)
             if len(raw) > 20 * 1024 * 1024 or not decoder.eof or decoder.unused_data:
                 raise ValueError('MXL превышает 20 МБ или поврежден')
-            result = import_mxl(conn, raw, str(body.get('file_name', 'events.mxl')))
+            result = import_mxl(conn, raw, str(body.get('file_name', 'events.mxl')), org_id=org_id)
             result['facts_sync'] = sync_1c_facts(cur, org_id, result['source_id'], apply=True)
             conn.commit()
             return {'success': True, **result}
@@ -10140,7 +10150,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
         row = cur.fetchone()
         cur.execute("""SELECT f.reg_number, f.schema_version, f.document_time, f.subjects_count,
             f.events_count, f.receipt_status, f.events_accepted, f.events_rejected,
-            f.receipt_signature_verified,
+            f.receipt_signature_verified, f.acceptance_basis,
             (SELECT json_agg(json_build_object(
                 'receipt_kind', e.receipt_kind, 'error_code', e.error_code,
                 'error_message', e.error_message, 'uid', e.uid,
@@ -10154,7 +10164,7 @@ def handle_nbki(method, params, body, staff, cur, conn):
             *values, errors = item
             file_row = dict(zip(('reg_number', 'schema_version', 'document_time', 'subjects_count',
                            'events_count', 'receipt_status', 'events_accepted', 'events_rejected',
-                           'receipt_signature_verified'), (serialize(v) for v in values)))
+                           'receipt_signature_verified', 'acceptance_basis'), (serialize(v) for v in values)))
             file_row['errors'] = errors or []
             files.append(file_row)
         cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE role='borrower'),
@@ -10230,7 +10240,10 @@ def handle_bki_fields(method, params, body, staff, cur, conn, ip=''):
     if not loan_id:
         return {'_status': 400, 'error': 'loan_id обязателен'}
     try:
-        org_id = resolve_source_org_id(cur)
+        cur.execute('SELECT org_id FROM loans WHERE id=%s', (loan_id,))
+        owner = cur.fetchone()
+        if not owner: raise ValueError('Договор не найден')
+        org_id = owner[0]
     except ValueError as exc:
         return {'_status': 409, 'error': str(exc)}
     cur.execute("SELECT id,contract_no FROM loans WHERE id=%s AND org_id=%s", (loan_id, org_id))

@@ -322,7 +322,8 @@ $token = (New-Object System.Net.NetworkCredential('', $secret)).Password
 $crm = [Uri]$cfg.crmUrl
 if ($crm.Scheme -ne 'https') { throw 'CRM requires HTTPS' }
 $headers = @{ 'X-Nbki-Agent-Key' = $token }
-$mutex = New-Object Threading.Mutex($false, 'Local\CRM-NBKI-Agent')
+$profileKey = (Hash ([Text.Encoding]::UTF8.GetBytes($token))).Substring(0,24)
+$mutex = New-Object Threading.Mutex($false, ('Local\CRM-NBKI-Agent-' + $profileKey))
 if (-not $mutex.WaitOne(0)) { throw 'Another NBKI agent is already running in this session' }
 $cacheDirectory = Join-Path (Split-Path -Parent $ConfigPath) 'receipts'
 New-Item -ItemType Directory -Path $cacheDirectory -Force | Out-Null

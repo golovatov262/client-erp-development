@@ -204,12 +204,12 @@ def _sync_guarantee(cur, org_id: int, source_id: int, deal: dict) -> str:
     return 'updated'
 
 
-def import_mxl(conn, raw: bytes, original_name: str) -> dict:
+def import_mxl(conn, raw: bytes, original_name: str, *, org_id=None) -> dict:
     source = parse_mxl(raw)
     statuses = Counter()
     guarantee_results = Counter()
     with conn.cursor() as cur:
-        org_id = resolve_source_org_id(cur)
+        org_id = resolve_source_org_id(cur, org_id) if org_id is not None else resolve_source_org_id(cur)
         cur.execute("""INSERT INTO nbki_event_sources
             (org_id, file_sha256, original_name, raw_gzip, row_count, first_event_time, last_event_time)
             VALUES (%s,%s,%s,%s,%s,%s,%s)

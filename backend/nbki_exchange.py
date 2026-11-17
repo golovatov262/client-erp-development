@@ -324,9 +324,9 @@ def agent(cur, conn, token, method, body):
 
 def accept_receipt(cur,conn,org,aid,body):
     if __package__:
-        from .nbki_import import parse_receipt_zip
+        from .nbki_import import parse_receipt_zip, source_profile
     else:
-        from nbki_import import parse_receipt_zip
+        from nbki_import import parse_receipt_zip, source_profile
     if __package__:
         from .nbki_delivery import import_delivery_payloads
     else:
@@ -337,7 +337,7 @@ def accept_receipt(cur,conn,org,aid,body):
     trusted=config.get('receipt_signer',{}).get('thumbprint')
     if not trusted or evidence.get('signer_thumbprint')!=trusted or evidence.get('signature_verified') is not True or evidence.get('archive_sha256')!=digest(raw):
         raise ValueError('Нет подтверждения проверки подписи настроенным сертификатом НБКИ')
-    receipt=parse_receipt_zip(raw)
+    receipt=parse_receipt_zip(raw, source_id=source_profile(cur,org)["source_id"])
     cur.execute('SELECT id,xml_payload,status,receipt_stage FROM nbki_exchange_packages WHERE org_id=%s AND reg_number=%s FOR UPDATE',(org,receipt['reg_number']))
     job=cur.fetchone()
     if not job or job[2] not in ('sending','delivery_unknown','sent','completed'):raise ValueError('Квитанция не соответствует отправленному пакету CRM')

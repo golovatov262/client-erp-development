@@ -31,7 +31,7 @@ class CrmEventsPeriodTests(unittest.TestCase):
         for query, _ in period_queries:
             self.assertIn("e.event_occurred_at AT TIME ZONE 'Europe/Moscow'", query)
             self.assertIn("fe.delivery_status='accepted'", query)
-        self.assertEqual(cur.queries[1][1], (2, date(2026, 10, 31), date(2026, 10, 31)))
+        self.assertEqual(cur.queries[2][1], (2, date(2026, 10, 31), date(2026, 10, 31)))
 
     def test_default_starts_day_after_uploaded_events(self):
         result = list_crm_events(EventsCursor(date(2026, 11, 10)), 2)

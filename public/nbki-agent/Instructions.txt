@@ -1,4 +1,4 @@
-Windows-компонент CRM НБКИ 2.0.4
+Windows-компонент CRM НБКИ 2.1
 
 Требования: Windows, PowerShell 5.1, КриптоПро CSP 5.0 R3 или новее,
 КриптоПро ЭЦП (CAdES COM), дополнительная лицензия КриптоПро TSP Client,
@@ -59,3 +59,11 @@ HTTP 200 без распознанного подтверждения по-пр�
 
 Обновление 2.0.4: multipart/form-data формируется штатным curl --form,
 как в примере НБКИ. Поля file и pathnm=uploadGUTDF; проверка TLS сохранена.
+
+Профили нескольких организаций (2.1)
+Для ФИН ФОРМУЛЫ используйте отдельный ключ подключения из её вкладки CRM.
+Установка: .\Install-NbkiAgent.ps1 -CrmUrl "https://mykpk.ru/api" -Profile FinFormula
+Настройки: %LOCALAPPDATA%\CRM-NBKI-FinFormula\config.json
+Задание: CRM NBKI Exchange - FinFormula. Профиль Эксперт Финанс не изменяется.
+Для ручной проверки передайте -ConfigPath с полным путём к нужному config.json и -CheckOnly.
+Одинаковый токен подключения блокирует одновременный запуск двух копий; разные профили работают независимо.
