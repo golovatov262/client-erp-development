@@ -38,6 +38,25 @@ class HistoricalReconstructionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'даты начислений'):
             rewind_state(self.state,self.payments,self.alloc,(self.day,1))
 
+    def test_confirmed_penalty_date_allows_only_events_on_or_after_it(self):
+        self.state['schedule'][0]['penalty_amount']=D(100)
+        result=rewind_state(self.state,self.payments,self.alloc,(self.day,1),penalty_accrued_on=date(2026,10,1))
+        self.assertEqual(result['schedule'][0]['penalty_amount'],D(100))
+        with self.assertRaisesRegex(ValueError,'даты начислений'):
+            rewind_state(self.state,self.payments,self.alloc,(self.day,1),penalty_accrued_on=date(2026,10,6))
+
+    def test_unscheduled_interest_is_projected_only_when_already_paid(self):
+        self.alloc[2][1]=(4,None,'interest',D(10),'normal',None)
+        self.state['schedule'][0]['paid_amount']=D(210)
+        self.state['schedule'][0]['covered_total_v2']=D(210)
+        self.state['schedule'][0]['covered_interest_v2']=D(10)
+        self.state['schedule'][0].update(payment_date='2026-11-30',interest_amount=D(10),payment_amount=D(210))
+        before=rewind_state(self.state,self.payments,self.alloc,(self.day,1),allow_rowless_interest=True)
+        after=rewind_state(self.state,self.payments,self.alloc,(date(2026,11,5),2),allow_rowless_interest=True)
+        self.assertEqual(before['schedule'][0]['paid_amount'],D(110))
+        self.assertEqual(after['schedule'][0]['interest_amount'],D(20))
+        self.assertEqual(after['schedule'][0]['paid_amount'],D(220))
+
     def test_current_ledger_discrepancy_is_preserved(self):
         self.state['loan']['balance']=D(799)
         with self.assertRaisesRegex(ValueError,'остаток карточки'):

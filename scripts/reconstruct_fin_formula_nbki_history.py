@@ -27,7 +27,7 @@ D = lambda x: Decimal(str(x))
 CENT = Decimal('.01')
 
 
-def rewind_state(current, payments, allocations, cutoff, inclusive=True):
+def rewind_state(current, payments, allocations, cutoff, inclusive=True, *, penalty_accrued_on=None, allow_rowless_interest=False):
     """Undo precisely allocated later payments, never guess their schedule rows."""
     state = copy.deepcopy(current)
     included = [p for p in payments if (p[1], p[0]) < cutoff or (inclusive and (p[1], p[0]) == cutoff)]
@@ -42,7 +42,7 @@ def rewind_state(current, payments, allocations, cutoff, inclusive=True):
     state['loan']['balance'] = balance
     state['paid_penalty_to_date'] = sum((D(p[5]) for p in included), D(0))
     rows = {r['id']: r for r in state['schedule']}
-    if later and any(D(r['penalty_amount']) != 0 for r in rows.values()):
+    if later and any(D(r['penalty_amount']) != 0 for r in rows.values()) and not (penalty_accrued_on and penalty_accrued_on <= cutoff[0]):
         raise ValueError('Для расчёта пени на дату платежа нужны даты начислений: в CRM сохранена только общая начисленная сумма')
     for p in later:
         a = allocations.get(p[0], [])
@@ -51,7 +51,7 @@ def rewind_state(current, payments, allocations, cutoff, inclusive=True):
             raise ValueError('Распределения последующего платежа ' + str(p[1]) + ': ' + '; '.join(check['issues']))
         for _, sid, component, value, _, _ in a:
             if sid is None:
-                if component not in ('early_principal',) and D(value):
+                if component not in (('early_principal','interest') if allow_rowless_interest else ('early_principal',)) and D(value):
                     raise ValueError('Распределение последующего платежа не связано со строкой графика')
                 continue
             r = rows.get(sid)
@@ -67,6 +67,18 @@ def rewind_state(current, payments, allocations, cutoff, inclusive=True):
             if D(value):
                 r['status']='partial' if D(r['paid_amount'])>0 else 'pending'
                 r['paid_date']=None
+    if allow_rowless_interest:
+        # Unscheduled interest was actually paid and accrued in the CRM ledger.
+        # Project it onto that payment's period for the debt calculator only;
+        # leave the real CRM schedule untouched.
+        for p in included:
+            extra=sum((D(a[3]) for a in allocations.get(p[0],[]) if a[1] is None and a[2]=='interest'),D(0))
+            if not extra:continue
+            eligible=[r for r in rows.values() if str(r['payment_date'])>=str(p[1])]
+            if not eligible:raise ValueError('Нет периода для процентов вне графика')
+            r=min(eligible,key=lambda r:(str(r['payment_date']),r['id']))
+            for key in ('interest_amount','payment_amount','paid_amount','covered_interest_v2','covered_total_v2'):
+                r[key]=D(r[key])+extra
     return state
 
 
