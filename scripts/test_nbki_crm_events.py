@@ -26,6 +26,8 @@ class CrmEventsPeriodTests(unittest.TestCase):
         self.assertEqual(result['total'], 0)
         self.assertEqual(result['period'], {'from': '2026-08-01', 'to': '2026-10-31'})
         self.assertEqual(result['debt_scan_issues'], [])
+        scan_query = next(q for q,p in cur.queries if 'FROM nbki_debt_scan_issues' in q)
+        self.assertIn('l.bki_enabled IS TRUE', scan_query)
         period_queries = [(q,p) for q,p in cur.queries if "JOIN loans l ON l.id=e.loan_id" in q]
         self.assertEqual(len(period_queries), 2)
         for query, _ in period_queries:

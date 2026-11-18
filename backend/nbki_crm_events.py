@@ -118,7 +118,7 @@ def list_crm_events(cur, org_id: int, limit: int = 100,
         if row['id'] in reserved:
             row['readiness'] = dict(row['readiness'], can_generate_xml=False, xml_ready=False,
                                     blockers=[f"Событие включено в пакет обмена №{reserved[row['id']]}"])
-    cur.execute('SELECT i.loan_id,l.contract_no,i.reason FROM nbki_debt_scan_issues i JOIN loans l ON l.id=i.loan_id WHERE i.org_id=%s ORDER BY i.loan_id', (org_id,))
+    cur.execute('SELECT i.loan_id,l.contract_no,i.reason FROM nbki_debt_scan_issues i JOIN loans l ON l.id=i.loan_id WHERE i.org_id=%s AND l.org_id=i.org_id AND l.bki_enabled IS TRUE ORDER BY i.loan_id', (org_id,))
     scan_issues = [dict(loan_id=r[0],contract_no=r[1],reason=r[2]) for r in cur.fetchall()]
     return {'total': total, 'rows': rows, 'debt_scan_issues':scan_issues,
             'period': {'from': start.isoformat() if start else None, 'to': end.isoformat() if end else None},
