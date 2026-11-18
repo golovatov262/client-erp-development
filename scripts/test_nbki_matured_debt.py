@@ -65,6 +65,17 @@ class MaturedDebtTests(unittest.TestCase):
         cur.payments = []
         self.assertEqual(check()['status'], 'unavailable')
 
+    def test_final_due_day_keeps_penalty_payable_without_fake_overdue(self):
+        evidence=self.evidence()
+        evidence['payment_date']='2026-06-30'
+        evidence['after']['loan']['balance']='60066.28'
+        sha=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        debt=split_posting_snapshot_debt(evidence,sha,1,2,date(2026,6,30))
+        self.assertEqual(debt['status'],'calculated_from_posting_snapshot')
+        self.assertEqual(debt['overdue_principal'],'0.00')
+        self.assertEqual(debt['penalty_candidate']['due_classification'],'term_until_final_scheduled_payment')
+        self.assertNotIn('matured_at',debt)
+
     def test_maturity_does_not_hide_invalid_accounting(self):
         evidence = self.evidence()
         evidence['after']['paid_penalty_to_date'] = '101'

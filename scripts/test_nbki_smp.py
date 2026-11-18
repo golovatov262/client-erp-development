@@ -27,7 +27,18 @@ class SmpTest(unittest.TestCase):
     def test_months_follow_cbr_calendar_formula(self):
         self.assertEqual(remaining_months(date(2026, 10, 26), date(2030, 5, 31)), 44)
         self.assertEqual(remaining_months(date(2026, 10, 31), date(2026, 11, 30)), 1)
-        self.assertEqual(remaining_months(date(2026, 10, 31), date(2026, 10, 31)), 0)
+        self.assertEqual(remaining_months(date(2026, 10, 31), date(2026, 10, 31)), 1)
+
+    def test_final_day_uses_one_period_without_classifying_as_overdue(self):
+        rows=[(1,date(2026,10,13),Decimal('110'),Decimal('100'),Decimal('10'),
+               Decimal('0'),Decimal('0'),Decimal('0'),Decimal('0'))]
+        debt={'status':'calculated_from_current_crm','term_principal':'100',
+              'overdue_principal':'0','overdue_interest':'0','penalty_candidate':{'remaining':'0'}}
+        result=preview_smp(Cursor(rows,end_date=date(2026,10,13)),1,date(2026,10,13),debt)
+        self.assertEqual(result['status'],'candidate_from_crm_schedule')
+        self.assertEqual(result['months_uncapped'],1)
+        self.assertEqual(result['value_with_penalty_uncapped'],110)
+        self.assertEqual(remaining_months(date(2026,10,14),date(2026,10,13)),0)
 
     def test_schedule_candidate_separates_penalty_scenarios(self):
         rows = [(1, date(2026, 11, 30), Decimal('550'), Decimal('500'),

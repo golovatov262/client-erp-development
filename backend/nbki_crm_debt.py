@@ -133,7 +133,9 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
         covered_interest = min(interest, legacy_paid) + v2_interest
         covered_principal = min(principal, max(ZERO, legacy_paid - interest)) + v2_principal
         if covered_interest > interest + CENT or covered_principal > principal + CENT:
-            result['issues'].append(f'Оплата превышает сумму строки графика {row["id"]}')
+            result['issues'].append(f'Оплата превышает сумму строки графика от {due.strftime("%d.%m.%Y")}: '
+                                    f'основной долг {covered_principal} из {principal}, '
+                                    f'проценты {covered_interest} из {interest}')
             continue
         # Legacy schedule rows can be marked paid even when the historical
         # paid_amount differs from principal + interest by a few rounding cents.
@@ -151,7 +153,7 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
     if assessed_penalty < paid_penalty:
         result['issues'].append('Оплаченная пеня превышает начисленную')
     if overdue_principal > balance + CENT:
-        result['issues'].append('Просроченный основной долг превышает остаток')
+        result['issues'].append(f'Просроченный основной долг {overdue_principal} превышает остаток по платежам {balance}')
     if result['issues']:
         result['status'] = 'review'
         return result
@@ -164,7 +166,7 @@ def split_posting_snapshot_debt(evidence: dict, expected_sha256: str,
                        'paid_crm': str(paid_penalty), 'remaining': str(penalty_remaining),
                        'due_at': last_due.isoformat(),
                        'due_classification': ('term_until_final_scheduled_payment'
-                                              if last_due > event_date else 'review_after_final_due')}})
+                                              if last_due >= event_date else 'review_after_final_due')}})
     return _apply_maturity(result, loan, last_due, event_date)
 
 
@@ -604,7 +606,7 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
                 'remaining': '0.00',
                 'due_at': last_due.isoformat(),
                 'due_classification': ('term_until_final_scheduled_payment'
-                                       if last_due > event_date else 'review_after_final_due'),
+                                       if last_due >= event_date else 'review_after_final_due'),
                 'reconciliation_note': decision[1]}
         else:
             result['status'] = 'review'
@@ -616,7 +618,7 @@ def split_latest_crm_debt(cur, loan_id: int, payment_id: int,
             'remaining': str(assessed_penalty - paid_penalty),
             'due_at': last_due.isoformat(),
             'due_classification': ('term_until_final_scheduled_payment'
-                                   if last_due > event_date else 'review_after_final_due')}
+                                   if last_due >= event_date else 'review_after_final_due')}
     cur.execute("SELECT end_date,schedule_type,status FROM loans WHERE id=%s", (loan_id,))
     terms = cur.fetchone()
     if terms:

@@ -21,8 +21,14 @@ def money(value) -> Decimal:
 
 
 def remaining_months(event_date, end_date) -> int:
-    if end_date <= event_date:
+    # The obligation can still be payable on its final day. Its remaining
+    # period is then a positive fraction of a month, rounded up to one
+    # (758-П, appendix 1, item 8). Maturity starts on the following day,
+    # consistently with nbki_crm_debt._maturity; never invent same-day arrears.
+    if end_date < event_date:
         return 0
+    if end_date == event_date:
+        return 1
     return ((end_date.year - event_date.year) * 12 +
             (end_date.month - event_date.month) +
             (1 if end_date.day > event_date.day else 0))

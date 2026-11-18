@@ -363,7 +363,8 @@ def build_event23_xml(cur, org_id: int, event_id: int, *, _include_related=True,
         if frozen and crm_debt.get('status') == 'calculated_from_posting_snapshot'
         else preview_smp(cur, loan_id, event_date, crm_debt))
     if smp.get('status') not in ('candidate_from_posting_snapshot_schedule', 'candidate_from_crm_schedule'):
-        raise ValueError('Не удалось рассчитать среднемесячный платёж по данным графика CRM: ' + '; '.join(smp.get('issues', [])))
+        issues = list(dict.fromkeys((crm_debt or {}).get('issues', []) + smp.get('issues', [])))
+        raise ValueError('Не удалось рассчитать среднемесячный платёж по данным графика CRM: ' + '; '.join(issues))
     if debt_preview.get('status') != 'candidate_from_crm_components':
         raise ValueError('Не удалось получить согласованный срез долга CRM: ' + '; '.join(debt_preview['issues']))
     if not facts['event_occurred_at']:
