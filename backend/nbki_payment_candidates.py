@@ -271,6 +271,7 @@ def list_payment_candidates(cur, org_id: int) -> dict:
         JOIN loans l ON l.id=a.loan_id
         JOIN nbki_1c_loan_facts f ON f.loan_id=l.id AND f.org_id=l.org_id
         WHERE f.org_id=%s AND l.bki_enabled IS TRUE AND l.status IN ('active','overdue','holiday')
+          AND a.voided_at IS NULL
           AND a.accrual_date>f.event_time::date
           AND a.accrual_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date
           AND EXISTS (SELECT 1 FROM nbki_event_deals e
