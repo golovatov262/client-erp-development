@@ -112,6 +112,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
   const [loan, setLoan] = useState<LoanDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [recordBkiChange, setRecordBkiChange] = useState(false);
   const okatoAddressRef = useRef<HTMLInputElement>(null);
   const [focusOkato, setFocusOkato] = useState(false);
   useEffect(() => {
@@ -173,6 +174,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
   };
 
   const openAdd = () => {
+    setRecordBkiChange(false);
     resetForm();
     const initialType = "Залог недвижимого имущества";
     setNbki(defaultNbki(initialType));
@@ -180,6 +182,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
   };
 
   const openEdit = (item: LoanCollateral) => {
+    setRecordBkiChange(false);
     setGuarantorAccount((item as unknown as {nbki_guarantor_accounting?:GuarantorAccount}).nbki_guarantor_accounting || {});
     setEditId(item.id);
     setCollateralType(item.collateral_type);
@@ -245,6 +248,7 @@ const LoanCollateralTab = ({ loanId }: Props) => {
         ...Object.fromEntries(Object.entries(nbki).filter(([, value]) => value !== "")),
       };
       const payload = {
+        record_bki_change: recordBkiChange,
         nbki_guarantor_accounting: collateralType === "Поручительство" && guarantorAccount.basis ? guarantorAccount : null,
         collateral_type: collateralType,
         pledger_name: pledgerName || undefined,
@@ -351,6 +355,10 @@ const LoanCollateralTab = ({ loanId }: Props) => {
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{NBKI_FIELDS.filter(([key]) => collateralType === "Поручительство" ? (key.startsWith("nbki_guarantee") || key === "nbki_guarantor_member_id") : !(key.startsWith("nbki_guarantee") || key === "nbki_guarantor_member_id")).map(([key, label, kind]) => <div key={key} className="space-y-1"><Label className="text-xs">{label}</Label>{key === "nbki_guarantor_member_id" ? <Select value={nbki[key] || ""} onValueChange={value => setNbki(prev => ({ ...prev, [key]: value }))}><SelectTrigger><SelectValue placeholder="Выберите поручителя" /></SelectTrigger><SelectContent>{members.filter(m=>m.member_type !== "legal").map(m=><SelectItem value={String(m.id)} key={m.id}>{m.name} · {m.member_no}</SelectItem>)}</SelectContent></Select> : kind === "boolean" ? <Select value={nbki[key] || ""} onValueChange={value => setNbki(prev => ({ ...prev, [key]: value }))}><SelectTrigger><SelectValue placeholder="Не подтверждено" /></SelectTrigger><SelectContent><SelectItem value="true">Да</SelectItem><SelectItem value="false">Нет</SelectItem></SelectContent></Select> : key === "nbki_collateral_code" ? <Select value={nbki[key] || ""} onValueChange={value => setNbki(prev => ({ ...prev, [key]: value }))}><SelectTrigger><SelectValue placeholder="Выберите вид предмета" /></SelectTrigger><SelectContent>{COLLATERAL_CODES.map(([code, text]) => <SelectItem key={code} value={code}>{code} — {text}</SelectItem>)}</SelectContent></Select> : (key === "nbki_price_code" || key === "nbki_actual_price_code") ? <Select value={nbki[key] || ""} onValueChange={value => setNbki(prev => ({ ...prev, [key]: value }))}><SelectTrigger><SelectValue placeholder="Выберите вид стоимости" /></SelectTrigger><SelectContent>{VALUE_CODES.map(([code, text]) => <SelectItem key={code} value={code}>{code} — {text}</SelectItem>)}</SelectContent></Select> : <Input type={kind || "text"} inputMode={key === "nbki_location" ? "numeric" : undefined} maxLength={key === "nbki_location" ? 11 : undefined} readOnly={key === "nbki_collateral_currency" || key === "nbki_contract_count"} value={key === "nbki_collateral_currency" ? "RUB" : key === "nbki_contract_count" ? "1" : nbki[key] || ""} onChange={e => setNbki(prev => ({ ...prev, [key]: e.target.value }))} />}</div>)}</div>
             </div>
             {collateralType === "Поручительство" && <GuarantorAccounting value={guarantorAccount} onChange={setGuarantorAccount} />}
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={recordBkiChange} onChange={e => setRecordBkiChange(e.target.checked)} />
+              <span>Фактически изменилось обеспечение — создать событие БКИ. При уточнении адреса, ОКАТО или заполнении реквизитов оставьте выключенным.</span>
+            </label>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" size="sm" onClick={resetForm}>Отмена</Button>
               <Button size="sm" onClick={handleSave} disabled={saving || !collateralType} className="gap-1.5">

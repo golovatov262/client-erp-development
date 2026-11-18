@@ -8273,7 +8273,9 @@ def handle_loan_collateral(method, params, body, cur, conn, staff=None, ip=''):
         return {'error': 'loan_id обязателен'}
 
     before_nbki = None
-    if method in ('POST','PUT'):
+    # Saving reporting metadata is not a legal change of collateral.
+    # Only an explicitly confirmed change captures before/after evidence.
+    if method in ('POST','PUT') and body.get('record_bki_change') is True:
         from nbki_lifecycle import capture, MSK
         cur.execute('SELECT org_id,bki_enabled FROM loans WHERE id=%s FOR UPDATE', (int(loan_id),))
         nbki_loan = cur.fetchone()
