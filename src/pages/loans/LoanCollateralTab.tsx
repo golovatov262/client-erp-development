@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,15 @@ const LoanCollateralTab = ({ loanId }: Props) => {
   const [loan, setLoan] = useState<LoanDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const okatoAddressRef = useRef<HTMLInputElement>(null);
+  const [focusOkato, setFocusOkato] = useState(false);
+  useEffect(() => {
+    if (showAdd && focusOkato) {
+      okatoAddressRef.current?.scrollIntoView({ block: "center" });
+      okatoAddressRef.current?.focus({ preventScroll: true });
+      setFocusOkato(false);
+    }
+  }, [showAdd, focusOkato]);
   const [editId, setEditId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -327,9 +336,9 @@ const LoanCollateralTab = ({ loanId }: Props) => {
                 <div className="text-sm font-medium">Адрес для определения ОКАТО</div>
                 <div className="text-xs text-muted-foreground">Для недвижимости укажите адрес объекта; для движимого имущества используется адрес регистрации пайщика. ФИАС возвращает код ОКАТО, который требует формат БКИ.</div>
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input value={locationAddress} onChange={e => { setLocationAddress(e.target.value); setFiasResults([]); }} placeholder="Регион, населённый пункт, улица, дом" />
+                  <Input ref={okatoAddressRef} aria-label="Адрес для поиска ОКАТО в ФИАС" value={locationAddress} onChange={e => { setLocationAddress(e.target.value); setFiasResults([]); }} placeholder="Регион, населённый пункт, улица, дом" />
                   <Button type="button" variant="outline" onClick={() => void resolveOkato()} disabled={resolvingAddress} className="shrink-0">
-                    {resolvingAddress ? <Icon name="Loader2" size={14} className="mr-1 animate-spin" /> : null}Определить ОКАТО
+                    {resolvingAddress ? <Icon name="Loader2" size={14} className="mr-1 animate-spin" /> : null}Получить ОКАТО
                   </Button>
                 </div>
                 {fiasResults.length > 0 && (fiasResults.length > 1 || !fiasResults[0].exact_match) && <Select value={fiasResults.find(item => item.okato === nbki.nbki_location)?.address || ""} onValueChange={address => {
@@ -378,6 +387,9 @@ const LoanCollateralTab = ({ loanId }: Props) => {
                   {item.identifier && <div className="text-xs text-muted-foreground">Идентификатор: {item.identifier}</div>}
                   {item.nbki_location_address && <div className="text-xs text-muted-foreground">Адрес для ОКАТО: {item.nbki_location_address}</div>}
                   {item.nbki_location && <div className="text-xs text-muted-foreground">ОКАТО: {item.nbki_location}</div>}
+                  {(item.collateral_type === "Залог недвижимого имущества" || item.collateral_type === "Залог движимого имущества") && <Button type="button" variant="outline" size="sm" onClick={() => { openEdit(item); setFocusOkato(true); }}>
+                    {item.nbki_location ? "Уточнить ОКАТО через ФИАС" : "Получить ОКАТО"}
+                  </Button>}
                   {item.nbki_source_facts && (() => {
                     const source = item.nbki_source_facts;
                     const facts = source.payload?.collateral || {};
