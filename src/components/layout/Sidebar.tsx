@@ -14,6 +14,7 @@ const allMenuItems = [
   { icon: "MessageCircle", label: "Чаты", path: "/office/chats", roles: ["admin", "manager"] },
   { icon: "Building2", label: "Банк", path: "/office/bank", roles: ["admin", "manager"] },
   { icon: "Handshake", label: "Агенты", path: "/office/agents", roles: ["admin", "manager"] },
+  { icon: "Send", label: "БКИ", path: "/office/bki", roles: ["admin"] },
   { icon: "Settings", label: "Администрирование", path: "/office/admin", roles: ["admin"] },
 ];
 

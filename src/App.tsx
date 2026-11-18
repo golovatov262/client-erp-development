@@ -12,6 +12,7 @@ import Savings from "@/pages/Savings";
 import Shares from "@/pages/Shares";
 import Reports from "@/pages/Reports";
 import Admin from "@/pages/Admin";
+import Bki from "@/pages/Bki";
 import Chats from "@/pages/Chats";
 import BankStatements from "@/pages/BankStatements";
 import Login from "@/pages/Login";
@@ -54,6 +55,7 @@ const AppRoutes = () => {
         <Route path="/office/chats" element={<Chats />} />
         <Route path="/office/bank" element={<BankStatements />} />
         <Route path="/office/agents" element={<Agents />} />
+        <Route path="/office/bki" element={<ProtectedRoute adminOnly><Bki /></ProtectedRoute>} />
         <Route path="/office/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<NotFound />} />

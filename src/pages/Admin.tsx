@@ -14,8 +14,6 @@ import AdminOrganizations from "./admin/AdminOrganizations";
 import AdminNotifications from "./admin/AdminNotifications";
 import AdminApiKeys from "./admin/AdminApiKeys";
 import AdminIntegrations from "./admin/AdminIntegrations";
-import AdminNbkiTab from "./admin/AdminNbkiTab";
-import AdminOkbTab from "./admin/AdminOkbTab";
 
 type UserRow = StaffUser & { [key: string]: unknown };
 
@@ -144,9 +142,6 @@ const Admin = () => {
           <TabsTrigger value="notifications">Уведомления</TabsTrigger>
           <TabsTrigger value="api_keys">API-ключи</TabsTrigger>
           <TabsTrigger value="integrations">Интеграции</TabsTrigger>
-          <TabsTrigger value="nbki">НБКИ · Эксперт Финанс</TabsTrigger>
-          <TabsTrigger value="nbki_fin_formula">НБКИ · ФИН ФОРМУЛА</TabsTrigger>
-          <TabsTrigger value="okb">ОКБ</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -189,9 +184,6 @@ const Admin = () => {
           <AdminApiKeys />
         </TabsContent>
         <TabsContent value="integrations"><AdminIntegrations /></TabsContent>
-        <TabsContent value="nbki"><AdminNbkiTab /></TabsContent>
-        <TabsContent value="nbki_fin_formula"><AdminNbkiTab orgId={3} orgName="ФИН ФОРМУЛА" /></TabsContent>
-        <TabsContent value="okb"><AdminOkbTab /></TabsContent>
       </Tabs>
 
       <Dialog open={showPwChange} onOpenChange={setShowPwChange}>

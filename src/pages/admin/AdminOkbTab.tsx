@@ -7,8 +7,8 @@ import {Card,CardContent,CardHeader,CardTitle} from '@/components/ui/card';
 const labels:Record<string,string>={queued:'Ожидает Windows-компонент ОКБ',processing:'Подписание и шифрование',sending:'Отправляется',sent:'Загружен в ОКБ — ожидаются извещения',delivery_unknown:'Доставка не подтверждена. Требуется сверка с ОКБ',completed:'Обработка завершена',failed:'Ошибка подготовки',cancelled:'Отменён'};
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow'}).format(new Date());
 async function encode(file:File){const bytes=new Uint8Array(await file.arrayBuffer());let text='';for(const b of bytes)text+=String.fromCharCode(b);return btoa(text);}
-export default function AdminOkbTab(){
- const [view,setView]=useState('operations');const [state,setState]=useState<OkbStatus|null>(null);const [config,setConfig]=useState<OkbConfig>({});
+export default function AdminOkbTab({activeView,onViewChange,hideNavigation=false}:{activeView?:string;onViewChange?:(view:string)=>void;hideNavigation?:boolean}){
+ const [localView,setLocalView]=useState('operations');const view=activeView??localView;const setView=onViewChange??setLocalView;const [state,setState]=useState<OkbStatus|null>(null);const [config,setConfig]=useState<OkbConfig>({});
  const [events,setEvents]=useState<OkbEvents|null>(null);const [from,setFrom]=useState(today);const [to,setTo]=useState(today);
  const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');const [token,setToken]=useState('');
  const [dirty,setDirty]=useState(false);const [recipient,setRecipient]=useState<File|null>(null);const [signer,setSigner]=useState<File|null>(null);
@@ -24,7 +24,7 @@ export default function AdminOkbTab(){
  const packages=state?.packages.filter(p=>view==='history'||!['completed','cancelled'].includes(p.status))||[];
  return <div className="space-y-5 pt-4">
   <div className="flex justify-between gap-3"><div><h2 className="text-lg font-semibold">ОКБ · Обмен кредитной информацией</h2><p className="text-sm text-muted-foreground">Отдельная очередь ОКБ. Принятие в НБКИ не заменяет принятие в ОКБ.</p></div><Button variant="outline" onClick={()=>void run(async()=>{await refresh();if(events)await load();})}>Обновить</Button></div>
-  <nav aria-label="Разделы ОКБ" className="flex flex-wrap gap-1 border-b pb-3">{[['operations','Текущая работа'],['history','История'],['settings','Настройки']].map(([key,label])=><Button key={key} variant={view===key?'default':'ghost'} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</Button>)}</nav>
+  {!hideNavigation&&<nav aria-label="Разделы ОКБ" className="flex flex-wrap gap-1 border-b pb-3">{[['operations','Текущая работа'],['history','История'],['settings','Настройки']].map(([key,label])=><Button key={key} variant={view===key?'default':'ghost'} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</Button>)}</nav>}
   {error&&<div role="alert" className="text-sm text-destructive whitespace-pre-wrap">{error}</div>}{message&&<p role="status" className="text-sm">{message}</p>}
   {view==='operations'&&<>
    <Card><CardHeader><CardTitle className="text-base">1. Проверить события за период</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">

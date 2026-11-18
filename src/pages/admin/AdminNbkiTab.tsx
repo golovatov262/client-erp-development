@@ -41,9 +41,11 @@ const defaultEventPeriod = () => {
   return { from: dateInputValue(from), to: dateInputValue(to) };
 };
 
-const AdminNbkiTab = ({orgId = 2, orgName = "Эксперт Финанс"}: {orgId?: number; orgName?: string}) => {
+const AdminNbkiTab = ({orgId = 2, orgName = "Эксперт Финанс", activeView, onViewChange, hideNavigation = false}: {orgId?: number; orgName?: string; activeView?: NbkiView; onViewChange?: (view: NbkiView) => void; hideNavigation?: boolean}) => {
   const nbki = createNbkiApi(orgId);
-  const [view, setView] = useState<NbkiView>("operations");
+  const [localView, setLocalView] = useState<NbkiView>("operations");
+  const view = activeView ?? localView;
+  const setView = onViewChange ?? setLocalView;
   const [summary, setSummary] = useState<NbkiSummary | null>(null);
   const [error, setError] = useState("");
   const [batchResult, setBatchResult] = useState("");
@@ -166,9 +168,9 @@ const AdminNbkiTab = ({orgId = 2, orgName = "Эксперт Финанс"}: {org
 
       {error && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
 
-      <nav aria-label="Разделы НБКИ" className="flex flex-wrap gap-1 border-b pb-3">
+      {!hideNavigation && <nav aria-label="Разделы НБКИ" className="flex flex-wrap gap-1 border-b pb-3">
         {([['operations','Текущая работа'],['history','История'],['settings','Настройки']] as const).map(([key,label])=><Button key={key} variant={view===key?'default':'ghost'} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</Button>)}
-      </nav>
+      </nav>}
       <div hidden={view!=='operations'} className="space-y-4">
       <p className="text-sm text-muted-foreground">Проверьте события → отправьте готовые → дождитесь результата. Принятые события уходят из очереди; отклонённые требуют исправления перед повторной отправкой.</p>
       <Card>
